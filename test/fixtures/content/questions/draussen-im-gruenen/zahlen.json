@@ -1,0 +1,22 @@
+{
+  "category": "draussen-im-gruenen",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "dg-gskdc41t",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Draußen im Grünen?",
+      "answers": ["15", "12", "18", "21"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "dg-jiyx16kz",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Draußen im Grünen?",
+      "answers": ["1.500", "1.250", "1.750", "2.000"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "category": "sport-freizeit",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "sf-8hvhfo3o",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Sport & Freizeit?",
+      "answers": ["26", "23", "29", "32"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "sf-dxo32cos",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Sport & Freizeit?",
+      "answers": ["2.600", "2.350", "2.850", "3.100"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "category": "medien-unterhaltung",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "mu-ynu32a2j",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Medien & Unterhaltung?",
+      "answers": ["23", "20", "26", "29"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "mu-y1yq6k27",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Medien & Unterhaltung?",
+      "answers": ["2.300", "2.050", "2.550", "2.800"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

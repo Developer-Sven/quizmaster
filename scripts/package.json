@@ -5,7 +5,13 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "content:validate": "node content/validate.ts"
+    "content:validate": "node content/validate.ts",
+    "content:dedupe": "node content/dedupe.ts",
+    "content:digest": "node content/digest.ts",
+    "content:stats": "node content/stats.ts",
+    "content:seed": "node content/seed.ts",
+    "content:ids": "node content/ids.ts",
+    "content:fixtures": "node content/make-fixtures.ts"
   },
   "dependencies": {
     "@quizmaster/db": "workspace:*",

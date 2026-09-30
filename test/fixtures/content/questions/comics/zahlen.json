@@ -1,0 +1,22 @@
+{
+  "category": "comics",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "co-5wd432z2",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Comics?",
+      "answers": ["12", "9", "15", "18"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "co-gwpr93hj",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Comics?",
+      "answers": ["1.200", "950", "1.450", "1.700"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

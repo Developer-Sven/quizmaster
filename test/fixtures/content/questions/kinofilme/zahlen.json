@@ -1,0 +1,22 @@
+{
+  "category": "kinofilme",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "kf-iao9cyn9",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Kinofilme?",
+      "answers": ["19", "16", "22", "25"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "kf-04awpejx",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Kinofilme?",
+      "answers": ["1.900", "1.650", "2.150", "2.400"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

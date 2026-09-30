@@ -1,0 +1,85 @@
+{
+  "category": "im-labor",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "il-u8ihmotm",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Im Labor?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-p4s26hga",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Im Labor?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/im-labor/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "il-y60faj9m",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Im Labor?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "il-h10j12bt",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Im Labor?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    },
+    {
+      "id": "il-s7toec24",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 5 zu Im Labor?",
+      "answers": ["Richtig 5", "Falsch 5a", "Falsch 5b", "Falsch 5c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-k0br5a70",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 6 zu Im Labor?",
+      "answers": ["Richtig 6", "Falsch 6a", "Falsch 6b", "Falsch 6c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-pr744hav",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 7 zu Im Labor?",
+      "answers": ["Richtig 7", "Falsch 7a", "Falsch 7b", "Falsch 7c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-1lc0vbhz",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 8 zu Im Labor?",
+      "answers": ["Richtig 8", "Falsch 8a", "Falsch 8b", "Falsch 8c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-gfqu7lgw",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 9 zu Im Labor?",
+      "answers": ["Richtig 9", "Falsch 9a", "Falsch 9b", "Falsch 9c"],
+      "status": "unverified"
+    },
+    {
+      "id": "il-5opaqh8v",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 10 zu Im Labor?",
+      "answers": ["Richtig 10", "Falsch 10a", "Falsch 10b", "Falsch 10c"],
+      "status": "unverified"
+    }
+  ]
+}

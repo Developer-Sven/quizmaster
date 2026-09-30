@@ -1,0 +1,22 @@
+{
+  "category": "rund-um-die-welt",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "rw-ed15f7fa",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Rund um die Welt?",
+      "answers": ["25", "22", "28", "31"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "rw-wmng4qgv",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Rund um die Welt?",
+      "answers": ["2.500", "2.250", "2.750", "3.000"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

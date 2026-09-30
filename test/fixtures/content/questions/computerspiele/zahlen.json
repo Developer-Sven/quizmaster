@@ -1,0 +1,22 @@
+{
+  "category": "computerspiele",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "cs-g8bwf1ub",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Computerspiele?",
+      "answers": ["13", "10", "16", "19"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "cs-h6x4fqxn",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Computerspiele?",
+      "answers": ["1.300", "1.050", "1.550", "1.800"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

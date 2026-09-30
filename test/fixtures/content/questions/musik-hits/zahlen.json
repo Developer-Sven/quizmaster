@@ -1,0 +1,22 @@
+{
+  "category": "musik-hits",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "mh-ylrwd9v0",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Musik & Hits?",
+      "answers": ["24", "21", "27", "30"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "mh-9lyy7wm2",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Musik & Hits?",
+      "answers": ["2.400", "2.150", "2.650", "2.900"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

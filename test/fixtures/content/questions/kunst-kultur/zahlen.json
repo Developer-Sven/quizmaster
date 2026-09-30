@@ -1,0 +1,22 @@
+{
+  "category": "kunst-kultur",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "kk-kb1a3fa3",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Kunst & Kultur?",
+      "answers": ["21", "18", "24", "27"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "kk-fwxqvzfo",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Kunst & Kultur?",
+      "answers": ["2.100", "1.850", "2.350", "2.600"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

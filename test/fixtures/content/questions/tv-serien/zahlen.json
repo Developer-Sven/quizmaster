@@ -1,0 +1,22 @@
+{
+  "category": "tv-serien",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "tv-47dw42cg",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu TV-Serien?",
+      "answers": ["27", "24", "30", "33"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "tv-fw2u89kl",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu TV-Serien?",
+      "answers": ["2.700", "2.450", "2.950", "3.200"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

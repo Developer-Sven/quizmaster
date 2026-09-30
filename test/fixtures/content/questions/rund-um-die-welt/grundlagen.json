@@ -1,0 +1,43 @@
+{
+  "category": "rund-um-die-welt",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "rw-i6s2nrrv",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Rund um die Welt?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "rw-0gn9m2n8",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Rund um die Welt?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/rund-um-die-welt/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "rw-nh3lhfha",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Rund um die Welt?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "rw-snfjo49g",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Rund um die Welt?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    }
+  ]
+}

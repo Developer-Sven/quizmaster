@@ -1,0 +1,22 @@
+{
+  "category": "die-2000er",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "ze-rpj69erc",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Die 2000er?",
+      "answers": ["14", "11", "17", "20"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "ze-ndu7v6mz",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Die 2000er?",
+      "answers": ["1.400", "1.150", "1.650", "1.900"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

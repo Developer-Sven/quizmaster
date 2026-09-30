@@ -1,0 +1,22 @@
+{
+  "category": "koerper-geist",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "kg-9a4my087",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Körper & Geist?",
+      "answers": ["20", "17", "23", "26"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "kg-kp5pxnhh",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Körper & Geist?",
+      "answers": ["2.000", "1.750", "2.250", "2.500"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

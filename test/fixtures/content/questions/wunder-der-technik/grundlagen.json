@@ -1,0 +1,71 @@
+{
+  "category": "wunder-der-technik",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "wt-rcjvt07x",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Wunder der Technik?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "wt-gvb3xzaa",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Wunder der Technik?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/wunder-der-technik/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "wt-aalpmntj",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Wunder der Technik?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "wt-o0bdbhb5",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Wunder der Technik?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    },
+    {
+      "id": "wt-d1r8qncv",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 5 zu Wunder der Technik?",
+      "answers": ["Richtig 5", "Falsch 5a", "Falsch 5b", "Falsch 5c"],
+      "status": "unverified"
+    },
+    {
+      "id": "wt-bflsj1wk",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 6 zu Wunder der Technik?",
+      "answers": ["Richtig 6", "Falsch 6a", "Falsch 6b", "Falsch 6c"],
+      "status": "unverified"
+    },
+    {
+      "id": "wt-oecqsp7k",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 7 zu Wunder der Technik?",
+      "answers": ["Richtig 7", "Falsch 7a", "Falsch 7b", "Falsch 7c"],
+      "status": "unverified"
+    },
+    {
+      "id": "wt-shagktyq",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 8 zu Wunder der Technik?",
+      "answers": ["Richtig 8", "Falsch 8a", "Falsch 8b", "Falsch 8c"],
+      "status": "unverified"
+    }
+  ]
+}

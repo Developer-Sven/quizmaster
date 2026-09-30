@@ -1,0 +1,22 @@
+{
+  "category": "essen-trinken",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "et-0mqgqrer",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Essen & Trinken?",
+      "answers": ["16", "13", "19", "22"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "et-q2b8yngj",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Essen & Trinken?",
+      "answers": ["1.600", "1.350", "1.850", "2.100"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

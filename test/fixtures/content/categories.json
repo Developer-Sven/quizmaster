@@ -1,0 +1,601 @@
+{
+  "version": 1,
+  "updated": "2026-09-30",
+  "note": "SYNTHETISCHE TEST-FIXTURES (scripts/content/make-fixtures.ts) – nur für Tests, CI und E2E; niemals in Produktion seeden.",
+  "targets": {
+    "start": 10,
+    "ausbau": 20,
+    "minPlayable": 3
+  },
+  "difficultyMix": {
+    "1": 0.2,
+    "2": 0.3,
+    "3": 0.25,
+    "4": 0.15,
+    "5": 0.1
+  },
+  "methods": {
+    "ki": "Fixture: von Hand formuliert",
+    "wikidata": "Fixture: aus einer festen Datenliste erzeugt",
+    "prozedural": "Fixture: per Code erzeugt",
+    "mix": "Fixture: gemischt"
+  },
+  "categories": [
+    {
+      "slug": "buecher-woerter",
+      "name": "Bücher & Wörter",
+      "icon": "book-open",
+      "color": "#EBB447",
+      "order": 1,
+      "active": true,
+      "description": "Fixture-Kategorie „Bücher & Wörter“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "comics",
+      "name": "Comics",
+      "icon": "message-circle",
+      "color": "#F7DF45",
+      "order": 2,
+      "active": true,
+      "description": "Fixture-Kategorie „Comics“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "computerspiele",
+      "name": "Computerspiele",
+      "icon": "gamepad-2",
+      "color": "#B2DF49",
+      "order": 3,
+      "active": true,
+      "description": "Fixture-Kategorie „Computerspiele“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 8,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "die-2000er",
+      "name": "Die 2000er",
+      "icon": "disc-3",
+      "color": "#BDC4D1",
+      "order": 4,
+      "active": true,
+      "description": "Fixture-Kategorie „Die 2000er“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "draussen-im-gruenen",
+      "name": "Draußen im Grünen",
+      "icon": "leaf",
+      "color": "#47C252",
+      "order": 5,
+      "active": true,
+      "description": "Fixture-Kategorie „Draußen im Grünen“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "essen-trinken",
+      "name": "Essen & Trinken",
+      "icon": "utensils",
+      "color": "#F27C5F",
+      "order": 6,
+      "active": true,
+      "description": "Fixture-Kategorie „Essen & Trinken“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 8,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "glaube-religion",
+      "name": "Glaube & Religion",
+      "icon": "scroll-text",
+      "color": "#ECDCAC",
+      "order": 7,
+      "active": true,
+      "description": "Fixture-Kategorie „Glaube & Religion“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "im-labor",
+      "name": "Im Labor",
+      "icon": "flask-conical",
+      "color": "#26D9B5",
+      "order": 8,
+      "active": true,
+      "description": "Fixture-Kategorie „Im Labor“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "kinofilme",
+      "name": "Kinofilme",
+      "icon": "clapperboard",
+      "color": "#EE5858",
+      "order": 9,
+      "active": true,
+      "description": "Fixture-Kategorie „Kinofilme“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 8,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "koerper-geist",
+      "name": "Körper & Geist",
+      "icon": "brain",
+      "color": "#F994A2",
+      "order": 10,
+      "active": true,
+      "description": "Fixture-Kategorie „Körper & Geist“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "kunst-kultur",
+      "name": "Kunst & Kultur",
+      "icon": "palette",
+      "color": "#EA537B",
+      "order": 11,
+      "active": true,
+      "description": "Fixture-Kategorie „Kunst & Kultur“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "macht-geld",
+      "name": "Macht & Geld",
+      "icon": "landmark",
+      "color": "#33CC80",
+      "order": 12,
+      "active": true,
+      "description": "Fixture-Kategorie „Macht & Geld“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 8,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "medien-unterhaltung",
+      "name": "Medien & Unterhaltung",
+      "icon": "star",
+      "color": "#F075B7",
+      "order": 13,
+      "active": true,
+      "description": "Fixture-Kategorie „Medien & Unterhaltung“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "musik-hits",
+      "name": "Musik & Hits",
+      "icon": "music",
+      "color": "#5988F8",
+      "order": 14,
+      "active": true,
+      "description": "Fixture-Kategorie „Musik & Hits“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "rund-um-die-welt",
+      "name": "Rund um die Welt",
+      "icon": "globe",
+      "color": "#3F9FF3",
+      "order": 15,
+      "active": true,
+      "description": "Fixture-Kategorie „Rund um die Welt“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 4,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        },
+        {
+          "id": "flaggen",
+          "name": "Flaggen (Bildfragen)",
+          "target": 4,
+          "method": "wikidata"
+        }
+      ]
+    },
+    {
+      "slug": "sport-freizeit",
+      "name": "Sport & Freizeit",
+      "icon": "trophy",
+      "color": "#7BCB4D",
+      "order": 16,
+      "active": true,
+      "description": "Fixture-Kategorie „Sport & Freizeit“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "tv-serien",
+      "name": "TV-Serien",
+      "icon": "tv",
+      "color": "#35C8DE",
+      "order": 17,
+      "active": true,
+      "description": "Fixture-Kategorie „TV-Serien“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 10,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "wunder-der-technik",
+      "name": "Wunder der Technik",
+      "icon": "cog",
+      "color": "#97B0C4",
+      "order": 18,
+      "active": true,
+      "description": "Fixture-Kategorie „Wunder der Technik“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 8,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    },
+    {
+      "slug": "zeugen-der-zeit",
+      "name": "Zeugen der Zeit",
+      "icon": "hourglass",
+      "color": "#BA9978",
+      "order": 19,
+      "active": true,
+      "description": "Fixture-Kategorie „Zeugen der Zeit“ mit synthetischen Testfragen",
+      "scope": "Synthetische Testfragen ohne echte Inhalte (nur für automatische Tests).",
+      "notScope": "Echte Fragen aus dem privaten Katalog (content/).",
+      "targets": {
+        "start": 10,
+        "ausbau": 20
+      },
+      "rules": [],
+      "topics": [
+        {
+          "id": "grundlagen",
+          "name": "Grundlagen",
+          "target": 9,
+          "method": "ki"
+        },
+        {
+          "id": "zahlen",
+          "name": "Zahlen & Jahre",
+          "target": 2,
+          "method": "prozedural"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "category": "wunder-der-technik",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "wt-hkgmmc0z",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Wunder der Technik?",
+      "answers": ["28", "25", "31", "34"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "wt-gupb219t",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Wunder der Technik?",
+      "answers": ["2.800", "2.550", "3.050", "3.300"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

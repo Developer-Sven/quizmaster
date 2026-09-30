@@ -1,0 +1,78 @@
+{
+  "category": "die-2000er",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "ze-vw5cz1c6",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Die 2000er?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "ze-2scvq06k",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Die 2000er?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/die-2000er/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "ze-umxsw6cd",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Die 2000er?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "ze-88uczlzx",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Die 2000er?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    },
+    {
+      "id": "ze-con96kmh",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 5 zu Die 2000er?",
+      "answers": ["Richtig 5", "Falsch 5a", "Falsch 5b", "Falsch 5c"],
+      "status": "unverified"
+    },
+    {
+      "id": "ze-p9jc09h1",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 6 zu Die 2000er?",
+      "answers": ["Richtig 6", "Falsch 6a", "Falsch 6b", "Falsch 6c"],
+      "status": "unverified"
+    },
+    {
+      "id": "ze-67ii9pal",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 7 zu Die 2000er?",
+      "answers": ["Richtig 7", "Falsch 7a", "Falsch 7b", "Falsch 7c"],
+      "status": "unverified"
+    },
+    {
+      "id": "ze-qwjb630v",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 8 zu Die 2000er?",
+      "answers": ["Richtig 8", "Falsch 8a", "Falsch 8b", "Falsch 8c"],
+      "status": "unverified"
+    },
+    {
+      "id": "ze-3ktn2vhi",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 9 zu Die 2000er?",
+      "answers": ["Richtig 9", "Falsch 9a", "Falsch 9b", "Falsch 9c"],
+      "status": "unverified"
+    }
+  ]
+}

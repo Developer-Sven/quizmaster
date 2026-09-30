@@ -1,0 +1,22 @@
+{
+  "category": "macht-geld",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "mg-th1bbheb",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Macht & Geld?",
+      "answers": ["22", "19", "25", "28"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "mg-no5rxnpl",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Macht & Geld?",
+      "answers": ["2.200", "1.950", "2.450", "2.700"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

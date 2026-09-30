@@ -1,0 +1,22 @@
+{
+  "category": "glaube-religion",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "gr-b05flmsx",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Glaube & Religion?",
+      "answers": ["17", "14", "20", "23"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "gr-tshj07v4",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Glaube & Religion?",
+      "answers": ["1.700", "1.450", "1.950", "2.200"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

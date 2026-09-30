@@ -1,0 +1,78 @@
+{
+  "category": "glaube-religion",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "gr-98rbg69i",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Glaube & Religion?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "gr-mobmwdc7",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Glaube & Religion?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/glaube-religion/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "gr-vbkz7uk6",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Glaube & Religion?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "gr-kgn74h5n",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Glaube & Religion?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    },
+    {
+      "id": "gr-ftdm3o1z",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 5 zu Glaube & Religion?",
+      "answers": ["Richtig 5", "Falsch 5a", "Falsch 5b", "Falsch 5c"],
+      "status": "unverified"
+    },
+    {
+      "id": "gr-94tc8iyz",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 6 zu Glaube & Religion?",
+      "answers": ["Richtig 6", "Falsch 6a", "Falsch 6b", "Falsch 6c"],
+      "status": "unverified"
+    },
+    {
+      "id": "gr-xcz93ebr",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 7 zu Glaube & Religion?",
+      "answers": ["Richtig 7", "Falsch 7a", "Falsch 7b", "Falsch 7c"],
+      "status": "unverified"
+    },
+    {
+      "id": "gr-labn4in9",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 8 zu Glaube & Religion?",
+      "answers": ["Richtig 8", "Falsch 8a", "Falsch 8b", "Falsch 8c"],
+      "status": "unverified"
+    },
+    {
+      "id": "gr-gd10opg4",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 9 zu Glaube & Religion?",
+      "answers": ["Richtig 9", "Falsch 9a", "Falsch 9b", "Falsch 9c"],
+      "status": "unverified"
+    }
+  ]
+}

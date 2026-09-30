@@ -1,0 +1,22 @@
+{
+  "category": "im-labor",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "il-n2fzezj5",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Im Labor?",
+      "answers": ["18", "15", "21", "24"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "il-3gp7xkgh",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Im Labor?",
+      "answers": ["1.800", "1.550", "2.050", "2.300"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

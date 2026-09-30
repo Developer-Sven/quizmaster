@@ -1,0 +1,50 @@
+{
+  "category": "rund-um-die-welt",
+  "topic": "flaggen",
+  "questions": [
+    {
+      "id": "rw-svtsgox8",
+      "difficulty": 1,
+      "prompt": "Fixture-Flaggenfrage 1 zu Rund um die Welt?",
+      "media": {
+        "kind": "flag",
+        "code": "de"
+      },
+      "answers": ["Richtig (de)", "Falsch (gb-eng)", "Falsch (jp)", "Falsch (eu)"],
+      "status": "unverified"
+    },
+    {
+      "id": "rw-lzd2911j",
+      "difficulty": 2,
+      "prompt": "Fixture-Flaggenfrage 2 zu Rund um die Welt?",
+      "media": {
+        "kind": "flag",
+        "code": "gb-eng"
+      },
+      "answers": ["Richtig (gb-eng)", "Falsch (jp)", "Falsch (eu)", "Falsch (fr)"],
+      "status": "unverified"
+    },
+    {
+      "id": "rw-t6mdhi4d",
+      "difficulty": 3,
+      "prompt": "Fixture-Flaggenfrage 3 zu Rund um die Welt?",
+      "media": {
+        "kind": "flag",
+        "code": "jp"
+      },
+      "answers": ["Richtig (jp)", "Falsch (eu)", "Falsch (fr)", "Falsch (br)"],
+      "status": "unverified"
+    },
+    {
+      "id": "rw-nv4bxlmc",
+      "difficulty": 4,
+      "prompt": "Fixture-Flaggenfrage 4 zu Rund um die Welt?",
+      "media": {
+        "kind": "flag",
+        "code": "eu"
+      },
+      "answers": ["Richtig (eu)", "Falsch (fr)", "Falsch (br)", "Falsch (ca)"],
+      "status": "unverified"
+    }
+  ]
+}

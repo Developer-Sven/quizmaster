@@ -1,0 +1,22 @@
+{
+  "category": "zeugen-der-zeit",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "zz-2dt5paev",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Zeugen der Zeit?",
+      "answers": ["29", "26", "32", "35"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "zz-m4l35kvv",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Zeugen der Zeit?",
+      "answers": ["2.900", "2.650", "3.150", "3.400"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}

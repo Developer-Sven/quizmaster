@@ -1,0 +1,85 @@
+{
+  "category": "musik-hits",
+  "topic": "grundlagen",
+  "questions": [
+    {
+      "id": "mh-b2nqbhuh",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 1 zu Musik & Hits?",
+      "answers": ["Richtig 1", "Falsch 1a", "Falsch 1b", "Falsch 1c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-h4zvgjc4",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 2 zu Musik & Hits?",
+      "answers": ["Richtig 2", "Falsch 2a", "Falsch 2b", "Falsch 2c"],
+      "status": "approved",
+      "source": "https://example.org/fixtures/musik-hits/2",
+      "review": {
+        "checkedAt": "2026-09-30",
+        "checkedBy": "fakten-pruefer",
+        "notes": null
+      }
+    },
+    {
+      "id": "mh-1dlxiuul",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 3 zu Musik & Hits?",
+      "answers": ["Richtig 3", "Falsch 3a", "Falsch 3b", "Falsch 3c"],
+      "status": "unverified",
+      "explanation": "Fixture-Erklärung zu Frage 3."
+    },
+    {
+      "id": "mh-fe7qokw7",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 4 zu Musik & Hits?",
+      "answers": ["Richtig 4", "Falsch 4a", "Falsch 4b", "Falsch 4c"],
+      "status": "unverified",
+      "volatile": true,
+      "asOf": "2026-09-01"
+    },
+    {
+      "id": "mh-szz4hgpm",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 5 zu Musik & Hits?",
+      "answers": ["Richtig 5", "Falsch 5a", "Falsch 5b", "Falsch 5c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-f5hhd6j7",
+      "difficulty": 1,
+      "prompt": "Fixture-Frage 6 zu Musik & Hits?",
+      "answers": ["Richtig 6", "Falsch 6a", "Falsch 6b", "Falsch 6c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-3o23gsej",
+      "difficulty": 2,
+      "prompt": "Fixture-Frage 7 zu Musik & Hits?",
+      "answers": ["Richtig 7", "Falsch 7a", "Falsch 7b", "Falsch 7c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-on1xhido",
+      "difficulty": 3,
+      "prompt": "Fixture-Frage 8 zu Musik & Hits?",
+      "answers": ["Richtig 8", "Falsch 8a", "Falsch 8b", "Falsch 8c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-wcnkolmm",
+      "difficulty": 4,
+      "prompt": "Fixture-Frage 9 zu Musik & Hits?",
+      "answers": ["Richtig 9", "Falsch 9a", "Falsch 9b", "Falsch 9c"],
+      "status": "unverified"
+    },
+    {
+      "id": "mh-pskbu3fc",
+      "difficulty": 5,
+      "prompt": "Fixture-Frage 10 zu Musik & Hits?",
+      "answers": ["Richtig 10", "Falsch 10a", "Falsch 10b", "Falsch 10c"],
+      "status": "unverified"
+    }
+  ]
+}

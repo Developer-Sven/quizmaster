@@ -1,0 +1,22 @@
+{
+  "category": "buecher-woerter",
+  "topic": "zahlen",
+  "questions": [
+    {
+      "id": "bw-wztk9ij2",
+      "difficulty": 2,
+      "prompt": "Fixture-Zahlenfrage 1 zu Bücher & Wörter?",
+      "answers": ["11", "8", "14", "17"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    },
+    {
+      "id": "bw-jrvxev1f",
+      "difficulty": 4,
+      "prompt": "Fixture-Zahlenfrage 2 zu Bücher & Wörter?",
+      "answers": ["1.100", "850", "1.350", "1.600"],
+      "displayOrder": "asc",
+      "status": "unverified"
+    }
+  ]
+}
