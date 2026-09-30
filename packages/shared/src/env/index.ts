@@ -1,5 +1,6 @@
 // Server-only: Env-Schemas, Ableitungen und Datei-Helfer (ADR-022). Nie im Client importieren.
 export { envFilePath, isTooPermissive, maskMongoUri, readEnvFile } from "./file.ts";
+export { type MongoUriTransport, mongoUriTransport } from "./mongo-uri.ts";
 export {
   type ResolvedEnv,
   realtimeProcessEnv,

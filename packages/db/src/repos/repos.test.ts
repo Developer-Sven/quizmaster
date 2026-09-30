@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { LobbyDoc } from "@quizmaster/shared/documents";
 import { RECENT_QUESTION_IDS_MAX } from "@quizmaster/shared/documents";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { USER_READ_MAX_TIME_MS } from "../client.ts";
 import { sampleQuestion } from "../test-support.ts";
 import { createTestDatabase, type TestDatabase } from "../testing/index.ts";
 import { activeLobbyExpiresAt, createRepositories, playableStatuses, type Repositories, ratingDelta } from "./index.ts";
@@ -82,6 +83,30 @@ describe("guests", () => {
   });
 });
 
+describe("Fristen nutzernaher Lesezugriffe", () => {
+  it("Bans, Gast-Profile und spielbare Kategorien lesen mit maxTimeMS", async () => {
+    const bans = vi.spyOn(t.collections.bans, "findOne");
+    const guestsOne = vi.spyOn(t.collections.guests, "findOne");
+    const guestsMany = vi.spyOn(t.collections.guests, "find");
+    const categories = vi.spyOn(t.collections.categories, "find");
+    try {
+      await repos.bans.findActiveFor({ guestId: randomUUID(), ipKey: "ip-hash" }, now);
+      await repos.bans.findActive("guest", randomUUID(), now);
+      await repos.guests.findProfile(randomUUID());
+      await repos.guests.loadRecentQuestionIds([randomUUID()]);
+      await repos.categories.listPlayable();
+      expect(bans).toHaveBeenCalledTimes(2);
+      // findOne nutzt intern find – jeder Aufruf (auch der interne) muss die Frist tragen.
+      for (const spy of [bans, guestsOne, guestsMany, categories]) {
+        expect(spy.mock.calls.length).toBeGreaterThan(0);
+        for (const call of spy.mock.calls) expect(call[1]).toMatchObject({ maxTimeMS: USER_READ_MAX_TIME_MS });
+      }
+    } finally {
+      for (const spy of [bans, guestsOne, guestsMany, categories]) spy.mockRestore();
+    }
+  });
+});
+
 describe("lobbies", () => {
   it("Codes sind nur unter aktiven Lobbys eindeutig", async () => {
     const first = lobby({ code: "QWE234" });
@@ -102,6 +127,50 @@ describe("lobbies", () => {
     expect((await repos.lobbies.findById(doc._id))?.phase).toBe("intro");
     expect(await repos.lobbies.countActiveHostedBy(doc.createdByGuestId)).toBe(1);
     expect((await repos.lobbies.listActive()).map((l) => l._id)).toContain(doc._id);
+  });
+
+  it("ein verspäteter aktiver Snapshot belebt eine geschlossene Lobby nie wieder (gleicher rev)", async () => {
+    const doc = lobby({ code: "RTZ345", rev: 7 });
+    expect(await repos.lobbies.save(doc)).toBe("saved");
+    // Schließen per Timer ändert den öffentlichen Zustand nicht → Schließ-Snapshot mit gleichem rev.
+    expect(await repos.lobbies.save({ ...doc, active: false })).toBe("saved");
+    expect(await repos.lobbies.save(doc)).toBe("stale");
+    expect((await repos.lobbies.findById(doc._id))?.active).toBe(false);
+    expect(await repos.lobbies.isCodeTaken("RTZ345")).toBe(false);
+    expect((await repos.lobbies.listActive()).map((l) => l._id)).not.toContain(doc._id);
+  });
+
+  it("close() schließt nur aktive Lobbys, erhöht rev und schützt vor späten Snapshots", async () => {
+    const doc = lobby({ code: "RTZ346", rev: 3 });
+    expect(await repos.lobbies.save(doc)).toBe("saved");
+    const closedAt = new Date(now.getTime() + 60_000);
+    expect(await repos.lobbies.close(doc._id, closedAt)).toBe(true);
+    expect(await repos.lobbies.close(doc._id, new Date(closedAt.getTime() + 60_000))).toBe(false);
+    expect(await repos.lobbies.save(doc)).toBe("stale");
+    expect(await repos.lobbies.save({ ...doc, active: false })).toBe("stale");
+    const stored = await repos.lobbies.findById(doc._id);
+    expect(stored).toMatchObject({ active: false, rev: 4, updatedAt: closedAt });
+    expect(await repos.lobbies.isCodeTaken("RTZ346")).toBe(false);
+  });
+
+  it("save() ist transaktionsfest: ein veralteter Snapshot bricht die umgebende Transaktion nicht ab", async () => {
+    const doc = lobby({ code: "TRX345", rev: 5 });
+    expect(await repos.lobbies.save(doc)).toBe("saved");
+    const session = t.client.startSession();
+    try {
+      const results = await session.withTransaction(
+        async () => {
+          const stale = await repos.lobbies.save({ ...doc, rev: 4, phase: "lobby" }, session);
+          const fresh = await repos.lobbies.save({ ...doc, rev: 6, phase: "intro" }, session);
+          return [stale, fresh];
+        },
+        { timeoutMS: 15_000 },
+      );
+      expect(results).toEqual(["stale", "saved"]);
+    } finally {
+      await session.endSession();
+    }
+    expect(await repos.lobbies.findById(doc._id)).toMatchObject({ rev: 6, phase: "intro" });
   });
 });
 

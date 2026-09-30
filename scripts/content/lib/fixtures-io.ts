@@ -1,14 +1,92 @@
 /**
  * Schreiben und Prüfen der Fixture-Dateien. Formatiert wird mit Biome (wie der Rest des Repos), die
  * Prüfung (`--check`) vergleicht den JSON-Inhalt – die Formatierung prüft `biome check`.
+ *
+ * `writeFixtures` löscht überzählige JSON-Dateien im Ziel. Damit ein falsches `--out` nie einen echten
+ * Katalog vernichtet, prüft `fixtureTargetProblem` das Ziel vorher (siehe dort).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { buildFixtures } from "./fixtures.ts";
+import { buildFixtures, isFixtureCatalog } from "./fixtures.ts";
 import { listQuestionFiles } from "./load.ts";
-import { CATEGORIES_FILE, REPO_ROOT } from "./paths.ts";
+import {
+  CATEGORIES_FILE,
+  DEFAULT_CONTENT_DIR,
+  displayPath,
+  FIXTURES_CONTENT_DIR,
+  isInside,
+  REPO_ROOT,
+} from "./paths.ts";
+
+/** Ziel für Fixtures ist nicht erlaubt – es wurde nichts gelöscht oder geschrieben. */
+export class FixtureTargetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FixtureTargetError";
+  }
+}
+
+export interface FixtureTargetOptions {
+  /** Privater Katalog, in den nie Fixtures geschrieben werden (Standard: content/). */
+  privateContentDir?: string;
+  /** Fixture-Ordner des Repos (Standard: test/fixtures/content). */
+  fixturesDir?: string;
+}
+
+/** Absoluter Pfad mit aufgelösten Symlinks – auch für (noch) nicht vorhandene Ordner (nächster Vorfahr). */
+function canonicalPath(path: string): string {
+  const absolute = resolve(path);
+  const missing: string[] = [];
+  let current = absolute;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return absolute;
+    missing.unshift(basename(current));
+    current = parent;
+  }
+  return join(realpathSync(current), ...missing);
+}
+
+/**
+ * Grund, warum `dir` kein zulässiges Fixture-Ziel ist – `null` = zulässig. Erlaubt sind nur der
+ * Fixture-Ordner des Repos, ein fehlender oder leerer Ordner und ein Ordner, dessen categories.json als
+ * Fixture-Katalog markiert ist (`FIXTURE_NOTE`). Der private Katalog, Ordner darin und Ordner darüber
+ * sind immer tabu (auch über Symlinks).
+ */
+export function fixtureTargetProblem(dir: string, options: FixtureTargetOptions = {}): string | null {
+  const target = canonicalPath(dir);
+  const privateDir = canonicalPath(options.privateContentDir ?? DEFAULT_CONTENT_DIR);
+  if (isInside(target, privateDir) || isInside(privateDir, target)) {
+    return `${displayPath(dir)} ist oder enthält den privaten Katalog (${displayPath(privateDir)}) – dorthin nie Fixtures`;
+  }
+  if (target === canonicalPath(options.fixturesDir ?? FIXTURES_CONTENT_DIR)) return null;
+  if (!existsSync(target)) return null;
+  if (!statSync(target).isDirectory()) return `${displayPath(dir)} ist kein Ordner`;
+  if (readdirSync(target).length === 0) return null;
+  const categoriesPath = join(target, CATEGORIES_FILE);
+  if (!existsSync(categoriesPath)) {
+    return `${displayPath(dir)} ist nicht leer und kein Fixture-Katalog (${CATEGORIES_FILE} fehlt)`;
+  }
+  let note: unknown;
+  try {
+    note = (JSON.parse(readFileSync(categoriesPath, "utf8")) as { note?: unknown } | null)?.note;
+  } catch {
+    return `${displayPath(dir)}: ${CATEGORIES_FILE} ist nicht lesbar – kein Fixture-Katalog`;
+  }
+  if (typeof note === "string" && isFixtureCatalog({ note })) return null;
+  return `${displayPath(dir)} enthält einen echten Katalog (${CATEGORIES_FILE} ohne Fixture-Markierung)`;
+}
 
 /** Alle Fixture-Dateien: Pfad relativ zum Content-Ordner → JSON-Wert. */
 export function fixtureFileMap(): Map<string, unknown> {
@@ -49,8 +127,16 @@ export function checkFixtures(dir: string): string[] {
   return problems;
 }
 
-/** Schreibt alle Fixtures, entfernt überzählige Themen-Dateien und formatiert mit Biome. */
-export function writeFixtures(dir: string): { written: number; removed: number; formatted: boolean } {
+/**
+ * Schreibt alle Fixtures, entfernt überzählige Themen-Dateien und formatiert mit Biome. Wirft
+ * `FixtureTargetError` (ohne etwas anzufassen), wenn `dir` kein zulässiges Ziel ist.
+ */
+export function writeFixtures(
+  dir: string,
+  options: FixtureTargetOptions = {},
+): { written: number; removed: number; formatted: boolean } {
+  const problem = fixtureTargetProblem(dir, options);
+  if (problem !== null) throw new FixtureTargetError(`Abbruch, nichts geändert: ${problem}`);
   const expected = fixtureFileMap();
   let removed = 0;
   for (const path of existingJsonFiles(dir)) {

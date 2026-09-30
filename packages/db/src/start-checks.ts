@@ -1,16 +1,17 @@
 /**
- * Start-Checks (docs/02 §Start-Checks, fail fast): Ping (5 s), Replica Set bzw. Sharded Cluster
- * (Change Streams + Transaktionen), Server-Version (≥ 8.0 empfohlen → sonst Warnung).
- * `ensureIndexes()` ist ein eigener Schritt (nur Realtime und Seed).
+ * Start-Checks (docs/02 §Start-Checks, fail fast): Transport (TLS mit Zertifikatsprüfung zu entfernten
+ * Hosts, docs/04/06/12 „TLS erzwingen“ – geprüft VOR dem ersten Kommando, damit Zugangsdaten nie im Klartext
+ * übers Netz gehen), Ping (5 s), Replica Set bzw. Sharded Cluster (Change Streams + Transaktionen),
+ * Server-Version (≥ 8.0 empfohlen → sonst Warnung). `ensureIndexes()` ist ein eigener Schritt.
  */
 import type { MongoClient } from "mongodb";
-import { describeClientHosts } from "./client.ts";
+import { type ClientTransport, clientTransport, describeClientHosts } from "./client.ts";
 import { type DbLogger, describeError, silentLogger } from "./logger.ts";
 
 export const START_CHECK_PING_TIMEOUT_MS = 5_000;
 export const RECOMMENDED_SERVER_MAJOR = 8;
 
-export const START_CHECK_ERROR_CODES = ["PING_FAILED", "NO_REPLICA_SET", "SERVER_INFO_FAILED"] as const;
+export const START_CHECK_ERROR_CODES = ["TLS_REQUIRED", "PING_FAILED", "NO_REPLICA_SET", "SERVER_INFO_FAILED"] as const;
 export type StartCheckErrorCode = (typeof START_CHECK_ERROR_CODES)[number];
 
 /** Abbruchgrund beim Start – Nachricht enthält nie Zugangsdaten. */
@@ -31,12 +32,19 @@ export interface StartCheckResult {
   setName: string | null;
   /** false = Version < 8.0 (nur Warnung). */
   versionRecommended: boolean;
+  /** `insecure` nur mit `allowInsecureTransport` (Entwicklung). */
+  transport: ClientTransport;
 }
 
 export interface StartCheckOptions {
   logger?: DbLogger;
   /** Ping-Frist (Standard 5 s). */
   pingTimeoutMs?: number;
+  /**
+   * NUR Entwicklung: Verbindung ohne geprüftes TLS zu entfernten Hosts erlauben (Warnung statt Abbruch).
+   * Standard `false` (fail-closed); Produktion nie – dort verlangt zusätzlich `checkSourceRules` TLS.
+   */
+  allowInsecureTransport?: boolean;
 }
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -75,6 +83,16 @@ export async function runStartChecks(client: MongoClient, options: StartCheckOpt
   const logger = options.logger ?? silentLogger;
   const pingTimeoutMs = options.pingTimeoutMs ?? START_CHECK_PING_TIMEOUT_MS;
   const target = describeClientHosts(client);
+
+  const transport = clientTransport(client);
+  if (transport === "insecure") {
+    const message =
+      `Verbindung zu ${target} ohne (geprüftes) TLS – Zugangsdaten und Daten wären im Netz lesbar ` +
+      "(tls=true bzw. mongodb+srv://, ohne tlsInsecure/tlsAllowInvalid*)";
+    if (options.allowInsecureTransport !== true) throw new StartCheckError("TLS_REQUIRED", message);
+    logger.warn(`WARNUNG (nur Entwicklung erlaubt): ${message}`);
+  }
+
   const admin = client.db("admin");
 
   const ping = await settleWithin(admin.command({ ping: 1 }), pingTimeoutMs);
@@ -114,5 +132,5 @@ export async function runStartChecks(client: MongoClient, options: StartCheckOpt
   }
   const topology = sharded ? "sharded" : "replicaSet";
   logger.info(`MongoDB ok: ${target}, Version ${version}, ${sharded ? "Sharded Cluster" : `Replica Set „${setName}“`}`);
-  return { serverVersion: version, topology, setName, versionRecommended };
+  return { serverVersion: version, topology, setName, versionRecommended, transport };
 }

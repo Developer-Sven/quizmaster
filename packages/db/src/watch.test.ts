@@ -221,6 +221,40 @@ describe("watchWithResume – Change Streams", () => {
     expect(seen).toEqual(["danach"]);
   });
 
+  it("wiederholt einen fehlgeschlagenen Vollreload (onReset) nach Backoff, bis er gelingt", async () => {
+    const items = collection("watch_reset_retry");
+    const resets: WatchResetReason[] = [];
+    const attempts: number[] = [];
+    const seen: string[] = [];
+    let failures = 2;
+    const handle = track(
+      watchWithResume(
+        items,
+        [],
+        {
+          onChange: (change) => void seen.push(idOf(change)),
+          onReset: (reason) => {
+            resets.push(reason);
+            if (failures > 0) {
+              failures -= 1;
+              throw new Error("Vollreload fehlgeschlagen");
+            }
+          },
+          onError: (_error, retry) => void attempts.push(retry.attempt),
+        },
+        { ...fast, resumeToken: { _data: "zz" } },
+      ),
+    );
+    await handle.ready;
+    await waitFor(() => resets.length === 3);
+    expect(resets).toEqual(["resume_failed", "resume_failed", "resume_failed"]);
+    // Backoff wächst über die Fehlversuche hinweg (wird erst nach gelungenem Reload zurückgesetzt).
+    expect(attempts).toEqual([1, 2]);
+    await items.insertOne({ _id: "danach" });
+    await waitFor(() => seen.includes("danach"));
+    expect(resets).toHaveLength(3);
+  });
+
   it("gelöschte Collection (invalidate) → onReset und weiter beobachten", async () => {
     const items = collection("watch_drop");
     await items.insertOne({ _id: "vorher" });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { maskMongoUri } from "./file.ts";
+import { mongoUriTransport } from "./mongo-uri.ts";
 import { realtimeProcessEnv, resolveEnv, watchdogProcessEnv, webProcessEnv } from "./resolve.ts";
 import { checkSourceRules, type SourceEnv, sourceEnvSchema, sourceWarnings } from "./schema.ts";
 
@@ -24,6 +25,7 @@ const prodSource = (overrides: Record<string, string> = {}) =>
     TLS_CERT_FILE: "/etc/ssl/origin.pem",
     TLS_KEY_FILE: "/etc/ssl/origin.key",
     TRUSTED_IP_HEADER: "cf-connecting-ip",
+    MONGODB_URI: "mongodb://user:pass@db.example.net:27017/?replicaSet=rs0&tls=true",
     MONGODB_DB: "quizmaster",
     BACKUP_PASSPHRASE: secret("e"),
     DEV_BOTS_ENABLED: "false",
@@ -118,6 +120,37 @@ describe("checkSourceRules", () => {
     );
   });
 
+  it("verlangt in Produktion TLS mit Zertifikatsprüfung zur Datenbank (fail-closed, außer rein lokal)", () => {
+    const tlsProblem = (uri: string) =>
+      checkSourceRules(prodSource({ MONGODB_URI: uri }), "prod").some((problem) => problem.startsWith("MONGODB_TLS:"));
+    expect(tlsProblem("mongodb://user:pass@db.example.net:27017/?replicaSet=rs0")).toBe(true);
+    expect(tlsProblem("mongodb://user:pass@db.example.net:27017/?tls=true&tlsAllowInvalidCertificates=true")).toBe(
+      true,
+    );
+    expect(tlsProblem("mongodb://user:pass@db.example.net:27017/?ssl=true&tlsInsecure=true")).toBe(true);
+    expect(tlsProblem("mongodb+srv://user:pass@cluster.example.net/?tls=false")).toBe(true);
+    expect(tlsProblem("mongodb://user:pass@db.example.net:27017/?replicaSet=rs0&tls=true")).toBe(false);
+    expect(tlsProblem("mongodb+srv://user:pass@cluster.example.net/?retryWrites=true&w=majority")).toBe(false);
+    expect(tlsProblem("mongodb://user:pass@127.0.0.1:27017/?replicaSet=rs0")).toBe(false);
+  });
+
+  it("warnt in dev bei unverschlüsselter Verbindung zu entfernten Hosts", () => {
+    const warnings = (uri: string) => sourceWarnings(source({ MONGODB_URI: uri }), "dev");
+    expect(warnings("mongodb://user:pass@db.example.net:27017/?replicaSet=rs0")).toContainEqual(
+      expect.stringMatching(/^MONGODB_TLS_OFF:/),
+    );
+    expect(warnings("mongodb://user:pass@db.example.net:27017/?replicaSet=rs0&tls=true")).toEqual([]);
+    expect(warnings("mongodb://localhost:27017,[::1]:27018/?replicaSet=rs0")).toEqual([]);
+  });
+
+  it("beschränkt dev auf *_dev- und *_test-Datenbanken", () => {
+    expect(checkSourceRules(source({ MONGODB_DB: "quizmaster" }), "dev")).toContainEqual(
+      expect.stringMatching(/^DB_NAME:/),
+    );
+    expect(checkSourceRules(source({ MONGODB_DB: "quizmaster_test" }), "dev")).toEqual([]);
+    expect(checkSourceRules(source(), "dev")).toEqual([]);
+  });
+
   it("warnt in Produktion bei ausgeschaltetem Turnstile und fehlendem Alarm-Webhook", () => {
     expect(sourceWarnings(prodSource(), "prod").map((warning) => warning.split(":")[0])).toEqual([
       "TURNSTILE_DISABLED",
@@ -146,5 +179,42 @@ describe("maskMongoUri", () => {
     expect(masked).not.toContain("admin");
     expect(masked).not.toContain("replicaSet");
     expect(masked).toBe("mongodb://***@mo***.example.net:27017,mo***.example.net:27017");
+  });
+});
+
+describe("mongoUriTransport", () => {
+  it("erkennt TLS (mongodb+srv:// standardmäßig, sonst tls/ssl=true), Prüfungs-Abschaltungen und lokale Hosts", () => {
+    expect(mongoUriTransport("mongodb://u:p@db.example.net:27017/?replicaSet=rs0")).toEqual({
+      tls: false,
+      verified: false,
+      loopbackOnly: false,
+    });
+    expect(mongoUriTransport("mongodb://u:p@db.example.net:27017/?TLS=TRUE")).toMatchObject({
+      tls: true,
+      verified: true,
+    });
+    expect(mongoUriTransport("mongodb://db.example.net/?ssl=true")).toMatchObject({ tls: true, verified: true });
+    expect(mongoUriTransport("mongodb://db.example.net/?tls=true&ssl=false")).toMatchObject({ tls: false });
+    expect(mongoUriTransport("mongodb://db.example.net/?tls=true&tlsAllowInvalidHostnames=true")).toMatchObject({
+      tls: true,
+      verified: false,
+    });
+    expect(mongoUriTransport("mongodb+srv://u:p@cluster.example.net/")).toMatchObject({ tls: true, verified: true });
+    expect(mongoUriTransport("mongodb+srv://u:p@cluster.example.net/?ssl=false").tls).toBe(false);
+    expect(mongoUriTransport("mongodb://127.0.0.2:27017,localhost/?replicaSet=rs0").loopbackOnly).toBe(true);
+    expect(mongoUriTransport("mongodb://%2Ftmp%2Fmongodb-27017.sock/?replicaSet=rs0").loopbackOnly).toBe(true);
+    expect(mongoUriTransport("mongodb://localhost,db.example.net/?replicaSet=rs0").loopbackOnly).toBe(false);
+    expect(mongoUriTransport("mongodb://u:p%3F%40@[::1]:27017/?replicaSet=rs0").loopbackOnly).toBe(true);
+    expect(mongoUriTransport("kein-mongo")).toEqual({ tls: false, verified: false, loopbackOnly: false });
+  });
+});
+
+describe("Produktion verlangt https-Origins", () => {
+  it("lehnt http in APP_ORIGIN und REALTIME_URL ab", () => {
+    const problems = checkSourceRules(
+      prodSource({ APP_ORIGIN: "http://quiz.example.com", REALTIME_URL: "http://rt.example.com" }),
+      "prod",
+    ).map((problem) => problem.split(":")[0]);
+    expect(problems).toEqual(expect.arrayContaining(["ORIGIN_NOT_HTTPS", "REALTIME_URL_NOT_HTTPS"]));
   });
 });

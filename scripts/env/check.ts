@@ -1,10 +1,12 @@
 // pnpm env:check <dev|prod> [--connect]
 // Prüft .env.<target> gegen das Schema und die Regeln der Zielumgebung. Gibt nur Schlüsselnamen,
-// Fehlercodes und maskierte Hosts aus – niemals Werte (ADR-022).
+// Fehlercodes und maskierte Hosts aus – niemals Werte (ADR-022). --connect: Transport (TLS), Verbindung,
+// Replica Set, Version und Rechte (fehlende UND überzählige – Least Privilege, docs/04).
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { clientTransport } from "@quizmaster/db";
 import {
   checkSourceRules,
   ENV_TARGETS,
@@ -18,6 +20,7 @@ import {
   sourceWarnings,
 } from "@quizmaster/shared/env";
 import { MongoClient } from "mongodb";
+import { assessPrivileges, type Privilege } from "./privileges.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -77,6 +80,15 @@ async function checkConnection(): Promise<boolean> {
     connectTimeoutMS: 8_000,
   });
   const host = maskMongoUri(source.MONGODB_URI);
+  // Vor dem Verbinden: ohne geprüftes TLS gingen Zugangsdaten im Klartext übers Netz (docs/04, 06, 12).
+  if (clientTransport(client) === "insecure") {
+    if (target === "prod") {
+      console.error(`env:check – FEHLER MONGODB_TLS: ${host} ohne (geprüftes) TLS – Verbindung nicht aufgebaut`);
+      await client.close().catch(() => undefined);
+      return false;
+    }
+    console.warn(`env:check – WARNUNG MONGODB_TLS_OFF: ${host} ohne (geprüftes) TLS – nur in Entwicklung geduldet`);
+  }
   try {
     await client.connect();
     const admin = client.db("admin");
@@ -94,25 +106,15 @@ async function checkConnection(): Promise<boolean> {
     }
     if (!(major >= 8)) console.warn(`env:check – WARNUNG SERVER_VERSION: ${version} < 8.0`);
     const status = await admin.command({ connectionStatus: 1, showPrivileges: true });
-    const privileges: Array<{
-      resource?: { db?: string; collection?: string; anyResource?: boolean };
-      actions?: string[];
-    }> = status.authInfo?.authenticatedUserPrivileges ?? [];
-    const needed = ["find", "insert", "update", "remove", "createCollection", "createIndex", "changeStream"];
+    const privileges: Privilege[] = status.authInfo?.authenticatedUserPrivileges ?? [];
     const databases = [
       source.MONGODB_DB,
       ...(target === "dev" && source.TEST_MONGODB_DB ? [source.TEST_MONGODB_DB] : []),
     ];
+    const report = assessPrivileges(privileges, databases);
+    const tooBroad = report.excessive.length > 0;
     for (const db of databases) {
-      const granted = new Set<string>();
-      for (const privilege of privileges) {
-        const resource = privilege.resource ?? {};
-        const matches =
-          resource.anyResource === true ||
-          ((resource.db === db || resource.db === "") && (resource.collection ?? "") === "");
-        if (matches) for (const action of privilege.actions ?? []) granted.add(action);
-      }
-      const missing = needed.filter((action) => !granted.has(action));
+      const missing = report.missing.get(db) ?? [];
       if (privileges.length === 0) {
         console.warn(`env:check – WARNUNG PRIVILEGES_UNKNOWN: Rechte für ${db} nicht auslesbar`);
       } else if (missing.length > 0) {
@@ -121,8 +123,20 @@ async function checkConnection(): Promise<boolean> {
         );
         ok = false;
       } else {
-        const extra = granted.has("collMod") ? " inkl. collMod" : "";
-        console.log(`env:check – Rechte auf ${db}: readWrite ok${extra}`);
+        const extra = report.collMod.has(db) ? " inkl. collMod" : "";
+        const verdict = tooBroad ? "readWrite vorhanden, aber zu weit (siehe PRIVILEGES_EXCESSIVE)" : "readWrite ok";
+        console.log(`env:check – Rechte auf ${db}: ${verdict}${extra}`);
+      }
+    }
+    if (tooBroad) {
+      const line =
+        `PRIVILEGES_EXCESSIVE: Benutzer hat mehr als readWrite – ${report.excessive.join(", ")} ` +
+        "(Least Privilege: eigener Benutzer nur mit readWrite auf der eigenen Datenbank, docs/04)";
+      if (target === "prod") {
+        console.error(`env:check – FEHLER ${line}`);
+        ok = false;
+      } else {
+        console.warn(`env:check – WARNUNG ${line}`);
       }
     }
     return ok;

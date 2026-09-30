@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { BAN_KINDS, type BanDoc, type BanKind } from "@quizmaster/shared/documents";
 import type { Collection, Filter } from "mongodb";
 import { z } from "zod";
+import { USER_READ_MAX_TIME_MS } from "../client.ts";
 
 const banValueSchema = z.string().min(1).max(128);
 const banKindSchema = z.enum(BAN_KINDS);
@@ -53,7 +54,10 @@ export function createBansRepo(bans: Collection<BanDoc>): BansRepo {
     },
 
     async findActive(kind, value, now) {
-      return bans.findOne({ kind: banKindSchema.parse(kind), value: banValueSchema.parse(value), ...activeAt(now) });
+      return bans.findOne(
+        { kind: banKindSchema.parse(kind), value: banValueSchema.parse(value), ...activeAt(now) },
+        { maxTimeMS: USER_READ_MAX_TIME_MS },
+      );
     },
 
     async findActiveFor(subject, now) {
@@ -61,7 +65,7 @@ export function createBansRepo(bans: Collection<BanDoc>): BansRepo {
       if (subject.guestId !== undefined) keys.push({ kind: "guest", value: banValueSchema.parse(subject.guestId) });
       if (subject.ipKey !== undefined) keys.push({ kind: "ip", value: banValueSchema.parse(subject.ipKey) });
       if (keys.length === 0) return null;
-      return bans.findOne({ $and: [{ $or: keys }, activeAt(now)] });
+      return bans.findOne({ $and: [{ $or: keys }, activeAt(now)] }, { maxTimeMS: USER_READ_MAX_TIME_MS });
     },
 
     async remove(kind, value) {

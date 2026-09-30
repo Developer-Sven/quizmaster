@@ -69,13 +69,19 @@ async function main(): Promise<void> {
     maxPoolSize: MONGO_POOL_SIZES.script,
     cache: false,
   });
+  const logger = {
+    info: (message: string) => log(message),
+    warn: (message: string) => console.warn(`content:seed – ${message}`),
+    error: (message: string) => console.error(`content:seed – ${message}`),
+  };
   try {
     log(
       `Ziel ${describeClientHosts(client)} / ${dbName}${prefix ? ` (Präfix ${prefix})` : ""} · env ${env}` +
         (dryRun ? " · DRY-RUN" : ""),
     );
     log(`Content ${displayPath(contentDir)}`);
-    const checks = await runStartChecks(client);
+    // TLS-Pflicht (docs/04): in Produktion Abbruch ohne geprüftes TLS, in Entwicklung nur eine Warnung.
+    const checks = await runStartChecks(client, { logger, allowInsecureTransport: env === "dev" });
     log(`MongoDB ${checks.serverVersion}, ${checks.topology === "sharded" ? "Sharded Cluster" : "Replica Set"}`);
     const run = await runSeed(
       client.db(dbName),
@@ -86,11 +92,7 @@ async function main(): Promise<void> {
         allowMassRetire: values["allow-mass-retire"],
         pool: source.QUESTION_POOL ?? "all",
         ...(prefix === undefined ? {} : { prefix }),
-        logger: {
-          info: (message) => log(message),
-          warn: (message) => console.warn(`content:seed – ${message}`),
-          error: (message) => console.error(`content:seed – ${message}`),
-        },
+        logger,
       },
       prepared,
     );

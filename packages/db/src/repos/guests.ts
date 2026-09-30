@@ -7,6 +7,7 @@ import { guestIdSchema } from "@quizmaster/shared";
 import { type GuestDoc, RECENT_QUESTION_IDS_MAX, RETENTION } from "@quizmaster/shared/documents";
 import type { ClientSession, Collection, UpdateFilter } from "mongodb";
 import { z } from "zod";
+import { USER_READ_MAX_TIME_MS } from "../client.ts";
 import { questionIdListSchema } from "./ids.ts";
 
 /** Gast ohne die (große) Liste gesehener Fragen. */
@@ -82,7 +83,7 @@ export function createGuestsRepo(guests: Collection<GuestDoc>): GuestsRepo {
     async findProfile(guestId) {
       return guests.findOne<GuestProfile>(
         { _id: guestIdSchema.parse(guestId) },
-        { projection: { recentQuestionIds: 0 } },
+        { projection: { recentQuestionIds: 0 }, maxTimeMS: USER_READ_MAX_TIME_MS },
       );
     },
 
@@ -99,7 +100,7 @@ export function createGuestsRepo(guests: Collection<GuestDoc>): GuestsRepo {
       if (ids.length === 0) return result;
       const cursor = guests.find<Pick<GuestDoc, "_id" | "recentQuestionIds">>(
         { _id: { $in: ids } },
-        { projection: { recentQuestionIds: 1 } },
+        { projection: { recentQuestionIds: 1 }, maxTimeMS: USER_READ_MAX_TIME_MS },
       );
       for await (const doc of cursor) result.set(doc._id, doc.recentQuestionIds);
       return result;

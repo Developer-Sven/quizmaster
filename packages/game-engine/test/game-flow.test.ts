@@ -1,6 +1,13 @@
 import { getTimings, type Phase } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
-import { currentQuestion, currentTurn, type LobbyState, toPrivateState, toPublicState } from "../src/index.ts";
+import {
+  currentQuestion,
+  currentTurn,
+  type LobbyState,
+  SHELL_REQUEST_TIMEOUT_MS,
+  toPrivateState,
+  toPublicState,
+} from "../src/index.ts";
 import { lobbyWith, type Simulation } from "./support/simulation.ts";
 
 const T = getTimings("normal");
@@ -580,5 +587,103 @@ describe("Randfälle", () => {
     sim.ok({ type: "REMATCH", guestId: sim.host });
     expect(sim.state.players.map((player) => player.guestId)).toEqual([sim.host, tom]);
     expect(errorCode(sim.dispatch({ type: "RECONNECT", guestId: lea }))).toBe("KICKED");
+  });
+});
+
+describe("Anfragen an die Shell: Frist (Watchdog)", () => {
+  function requestTimers(sim: Simulation) {
+    return sim.state.timers.filter((timer) => timer.kind === "request");
+  }
+
+  it("OPTIONS_READY bleibt aus → nach SHELL_REQUEST_TIMEOUT_MS game_over (load_failed), späte Antwort veraltet", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    expect(sim.state.game?.pending?.kind).toBe("options");
+    expect(SHELL_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000);
+    const [timer] = requestTimers(sim);
+    expect(timer?.at).toBe(sim.now + SHELL_REQUEST_TIMEOUT_MS);
+    sim.advance(SHELL_REQUEST_TIMEOUT_MS - 1);
+    expect(sim.state.phase).toBe("intro");
+    sim.advance(1);
+    expect(sim.state.phase).toBe("game_over");
+    expect(sim.state.game?.endReason).toBe("load_failed");
+    expect(sim.state.game?.pending).toBeNull();
+    expect(sim.effectsOf("gameFinished")).toHaveLength(1);
+    const before = sim.state;
+    expect(sim.respond()).toEqual({ ok: true, state: before, effects: [] });
+  });
+
+  it("abgelehnte QUESTIONS_READY hält die Anfrage nur bis zur Frist offen – danach game_over", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    sim.respond();
+    const option = currentTurn(sim.state.game)?.options[0]?.id ?? "";
+    sim.ok({ type: "PICK", guestId: pickerGuest(sim), categoryId: option });
+    const request = sim.requests[0];
+    if (request?.kind !== "questions") throw new Error("Anfrage fehlt");
+    const doc = sim.catalog.docs.get(sim.catalog.pool.get(option)?.[0]?.id ?? "");
+    if (!doc) throw new Error("Fixture");
+    const broken = { ...doc, answers: ["a", "a", "b", "c"] as typeof doc.answers };
+    expect(errorCode(sim.dispatch({ type: "QUESTIONS_READY", token: request.effect.token, questions: [broken] }))).toBe(
+      "VALIDATION_FAILED",
+    );
+    expect(sim.state.game?.pending?.kind).toBe("questions");
+    sim.advance(60_000);
+    expect(sim.state.phase).toBe("game_over");
+    expect(sim.state.game?.endReason).toBe("load_failed");
+    expect(sim.timers.size).toBe(sim.state.timers.length);
+  });
+
+  it("rechtzeitige Antwort räumt die Frist ab (cancelTimer); das Spiel läuft über die Frist hinaus weiter", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    const [timer] = requestTimers(sim);
+    if (!timer) throw new Error("Frist fehlt");
+    const from = sim.effects.length;
+    sim.respond();
+    expect(requestTimers(sim)).toEqual([]);
+    expect(sim.effectsOf("cancelTimer", from)).toContainEqual({ type: "cancelTimer", token: timer.token });
+    expect(sim.dispatch({ type: "TIMEOUT", token: timer.token })).toMatchObject({ ok: true, effects: [] });
+    // Kategoriewahl per Zeitablauf → neue Anfrage (Fragen) mit eigener Frist.
+    sim.advance(T.categoryPickMs);
+    expect(sim.state.game?.pending?.kind).toBe("questions");
+    expect(requestTimers(sim)).toHaveLength(1);
+    sim.respond();
+    expect(requestTimers(sim)).toEqual([]);
+    sim.advance(SHELL_REQUEST_TIMEOUT_MS);
+    expect(sim.state.game?.endReason).not.toBe("load_failed");
+  });
+
+  it("jede neue Anfrage bekommt die volle Frist (Aufgeben der wählenden Person während der Anfrage)", () => {
+    const sim = lobbyWith(4, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    const first = sim.requests[0];
+    if (first?.kind !== "options") throw new Error("Anfrage fehlt");
+    sim.advance(10_000);
+    sim.ok({ type: "LEAVE", guestId: sim.guestOf(first.effect.turn.pickerId) });
+    const pending = sim.state.game?.pending;
+    expect(pending?.kind).toBe("options");
+    expect(pending?.token).not.toBe(first.effect.token);
+    expect(requestTimers(sim)).toHaveLength(1);
+    sim.advance(SHELL_REQUEST_TIMEOUT_MS - 10_000);
+    expect(sim.state.phase).toBe("intro");
+    sim.advance(10_000);
+    expect(sim.state.phase).toBe("game_over");
+    expect(sim.state.game?.endReason).toBe("load_failed");
+  });
+
+  it("LOAD_FAILED und Spielende räumen die Frist ab", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    const request = sim.requests[0];
+    if (request?.kind !== "options") throw new Error("Anfrage fehlt");
+    sim.ok({ type: "LOAD_FAILED", token: request.effect.token, reason: "Test" });
+    expect(sim.state.phase).toBe("game_over");
+    expect(requestTimers(sim)).toEqual([]);
   });
 });

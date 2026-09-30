@@ -32,6 +32,11 @@ export const TIMER_KINDS = [
   "empty_close",
   /** Lobby schließen: 30 min ohne Aktivität (Phase lobby) bzw. 2 h nach Spielende (game_over). */
   "idle_close",
+  /**
+   * Frist der offenen Anfrage an die Shell (`offerCategories`/`loadQuestions`, `SHELL_REQUEST_TIMEOUT_MS`):
+   * bleibt eine gültige Antwort aus, endet das Spiel mit `load_failed` statt ewig zu warten.
+   */
+  "request",
 ] as const;
 export type TimerKind = (typeof TIMER_KINDS)[number];
 

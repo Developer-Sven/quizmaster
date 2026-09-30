@@ -6,6 +6,7 @@ import { categoryIdSchema } from "@quizmaster/shared";
 import type { CategoryDoc } from "@quizmaster/shared/documents";
 import type { Collection } from "mongodb";
 import { z } from "zod";
+import { USER_READ_MAX_TIME_MS } from "../client.ts";
 
 export const categoryCountsSchema = z.strictObject({
   playableCount: z.int().min(0),
@@ -44,7 +45,7 @@ export function createCategoriesRepo(categories: Collection<CategoryDoc>): Categ
     },
 
     async listPlayable() {
-      return categories.find({ playable: true }).sort({ order: 1 }).toArray();
+      return categories.find({ playable: true }, { maxTimeMS: USER_READ_MAX_TIME_MS }).sort({ order: 1 }).toArray();
     },
 
     async findById(slug) {

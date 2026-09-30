@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mongoUriTransport } from "./mongo-uri.ts";
 
 /** Umgebungen mit eigener Env-Datei im Repo-Root (.env.dev / .env.prod, ADR-022). */
 export const ENV_TARGETS = ["dev", "prod"] as const;
@@ -83,6 +84,12 @@ export const sourceEnvSchema = z.object({
 
 export type SourceEnv = z.infer<typeof sourceEnvSchema>;
 
+/** Datenbank-Verbindung ohne geprüftes TLS zu einem entfernten Host (docs/04, docs/06: „TLS erzwingen“). */
+function isInsecureDatabaseTransport(env: SourceEnv): boolean {
+  const transport = mongoUriTransport(env.MONGODB_URI);
+  return !transport.verified && !transport.loopbackOnly;
+}
+
 /** Regeln, die nur zusammen mit der Zielumgebung prüfbar sind (fail-closed für Produktion). */
 export function checkSourceRules(env: SourceEnv, target: EnvTarget): string[] {
   const problems: string[] = [];
@@ -101,8 +108,23 @@ export function checkSourceRules(env: SourceEnv, target: EnvTarget): string[] {
   if (env.TEST_MONGODB_DB !== undefined && !env.TEST_MONGODB_DB.endsWith("_test")) {
     problems.push("TEST_DB_NAME: TEST_MONGODB_DB muss auf _test enden");
   }
+  if (target === "dev" && !env.MONGODB_DB.endsWith("_dev") && !env.MONGODB_DB.endsWith("_test")) {
+    problems.push("DB_NAME: Entwicklung nutzt nur *_dev- oder *_test-Datenbanken (MONGODB_DB)");
+  }
   if (target === "prod") {
+    if (isInsecureDatabaseTransport(env)) {
+      problems.push(
+        "MONGODB_TLS: Produktion verlangt TLS mit Zertifikatsprüfung zur Datenbank " +
+          "(mongodb+srv:// oder tls=true in MONGODB_URI, ohne tlsInsecure/tlsAllowInvalid*)",
+      );
+    }
     if (!env.QUIZMASTER_DOMAIN) problems.push("DOMAIN_MISSING: QUIZMASTER_DOMAIN fehlt");
+    if (env.APP_ORIGIN?.some((origin) => !origin.startsWith("https://"))) {
+      problems.push("ORIGIN_NOT_HTTPS: APP_ORIGIN muss in Produktion https:// verwenden");
+    }
+    if (env.REALTIME_URL !== undefined && !env.REALTIME_URL.startsWith("https://")) {
+      problems.push("REALTIME_URL_NOT_HTTPS: REALTIME_URL muss in Produktion https:// verwenden (oder leer bleiben)");
+    }
     if (!env.QUIZMASTER_PORT) problems.push("PORT_MISSING: QUIZMASTER_PORT fehlt");
     if (!env.TLS_CERT_FILE || !env.TLS_KEY_FILE) problems.push("TLS_MISSING: TLS_CERT_FILE und TLS_KEY_FILE fehlen");
     if (!env.TRUSTED_IP_HEADER) problems.push("IP_HEADER_MISSING: TRUSTED_IP_HEADER muss in Produktion gesetzt sein");
@@ -121,6 +143,12 @@ export function checkSourceRules(env: SourceEnv, target: EnvTarget): string[] {
 /** Warnungen: kein Abbruch, aber sichtbar (z. B. offene DoD-Punkte). */
 export function sourceWarnings(env: SourceEnv, target: EnvTarget): string[] {
   const warnings: string[] = [];
+  if (target === "dev" && isInsecureDatabaseTransport(env)) {
+    warnings.push(
+      "MONGODB_TLS_OFF: Datenbank-Verbindung ohne (geprüftes) TLS – Zugangsdaten und Daten gehen " +
+        "unverschlüsselt übers Netz (tls=true bzw. mongodb+srv://, docs/04)",
+    );
+  }
   if (target === "prod" && !env.TURNSTILE_ENABLED) warnings.push("TURNSTILE_DISABLED: Bot-Schutz ist aus");
   if (target === "prod" && !env.ALERT_WEBHOOK_URL)
     warnings.push("ALERTS_DISABLED: ALERT_WEBHOOK_URL fehlt, Alarme gehen nur ins Log");

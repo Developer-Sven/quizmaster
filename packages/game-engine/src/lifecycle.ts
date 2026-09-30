@@ -6,11 +6,12 @@
  * - frühe Auflösung, sobald alle verbundenen aktiven Personen geantwortet haben (Bots zählen, Getrennte nicht),
  * - Host-Übergabe (Host weg: sofort; Host 30 s getrennt: an die am längsten anwesende verbundene Person),
  * - Fristen als Timer: Reconnect (Lobby 30 s / Spiel 90 s), Host-Übergabe, „niemand verbunden“ (60 s),
- *   „30 min ohne Aktivität“ (Lobby) bzw. „2 h nach Spielende“ (game_over).
+ *   „30 min ohne Aktivität“ (Lobby) bzw. „2 h nach Spielende“ (game_over), Antwort der Shell auf eine
+ *   Anfrage (`SHELL_REQUEST_TIMEOUT_MS`, nur solange die Anfrage offen ist).
  */
 import { GAME_RULES, LOBBY_LIFETIME } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
-import { finishGame, onPhaseTimeout } from "./flow.ts";
+import { finishGame, onPhaseTimeout, onRequestTimeout } from "./flow.ts";
 import { removeFromLobby } from "./lobby.ts";
 import { reschedulePhaseEnd } from "./phases.ts";
 import { activePlayers, connectedHumans, currentQuestion, currentTurn, findPlayer, humanMembers } from "./state.ts";
@@ -55,6 +56,8 @@ export function onTimerFired(state: LobbyState, timer: PendingTimer, tx: Tx): Lo
       return connectedHumans(state).length === 0 ? closeLobby(state, "empty", tx) : state;
     case "idle_close":
       return closeLobby(state, state.phase === "game_over" ? "after_game" : "idle", tx);
+    case "request":
+      return onRequestTimeout(state, tx);
   }
 }
 
@@ -146,6 +149,12 @@ function syncEmptyTimer(state: LobbyState, tx: Tx): LobbyState {
   return existing ? state : addTimer(state, "empty_close", tx.now + tx.timings.emptyLobbyCloseMs);
 }
 
+/** Die Frist einer Shell-Anfrage gilt nur, solange die Anfrage offen ist (beantwortet → Timer weg). */
+function syncRequestTimer(state: LobbyState): LobbyState {
+  if (state.game?.pending) return state;
+  return removeTimers(state, (timer) => timer.kind === "request");
+}
+
 function syncIdleTimer(state: LobbyState): LobbyState {
   const endedAt = state.game?.endedAt ?? null;
   let desiredAt: number | null = null;
@@ -167,5 +176,6 @@ export function normalize(state: LobbyState, tx: Tx): LobbyState {
   next = syncReconnectTimers(next, tx);
   next = syncHostTimer(next, tx);
   next = syncEmptyTimer(next, tx);
+  next = syncRequestTimer(next);
   return syncIdleTimer(next);
 }

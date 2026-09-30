@@ -11,7 +11,9 @@
  *
  * Reihenfolge für Aufrufer: erst `watchWithResume()`, dann `await handle.ready`, DANACH den
  * Anfangsbestand laden – so geht zwischen Laden und Beobachten keine Änderung verloren. `onReset` wird
- * aus demselben Grund erst aufgerufen, wenn der neue Stream bereits offen ist.
+ * aus demselben Grund erst aufgerufen, wenn der neue Stream bereits offen ist. Wirft `onReset`, bleibt
+ * der Vollreload ausstehend: Stream schließen, nach Backoff neu öffnen, erneut `onReset` – bis er gelingt
+ * (sonst bliebe der Zustand nach verpassten Änderungen dauerhaft veraltet, z. B. Kill-Switches, Bans).
  */
 
 import { isDeepStrictEqual } from "node:util";
@@ -49,7 +51,10 @@ export type WatchedChange<TSchema extends Document> = Extract<
 export interface WatchHandlers<TSchema extends Document> {
   /** Eine Änderung (nacheinander, nie parallel). Muss idempotent sein. */
   onChange(change: WatchedChange<TSchema>): void | Promise<void>;
-  /** Vollreload nötig; wird aufgerufen, sobald der neue Stream (ohne Token, ab „jetzt“) offen ist. */
+  /**
+   * Vollreload nötig; wird aufgerufen, sobald der neue Stream (ohne Token, ab „jetzt“) offen ist. Wirft
+   * er, wird er nach Backoff (mit neu geöffnetem Stream) wiederholt, bis er gelingt.
+   */
   onReset?(reason: WatchResetReason): void | Promise<void>;
   /** Fehler mit anschließendem Neustart nach `delayMs` (nur Information, z. B. fürs Log). */
   onError?(error: unknown, retry: { attempt: number; delayMs: number }): void;
@@ -173,6 +178,17 @@ class OpenError extends Error {
   }
 }
 
+/** `onReset` ist fehlgeschlagen – der Vollreload steht weiter aus und wird nach Backoff wiederholt. */
+class ResetError extends Error {
+  readonly causeError: unknown;
+
+  constructor(cause: unknown, reason: WatchResetReason) {
+    super(`onReset (${reason}) fehlgeschlagen: ${describeError(cause)}`);
+    this.name = "ResetError";
+    this.causeError = cause;
+  }
+}
+
 /** Stream wurde serverseitig beendet (invalidate) – Neustart ohne Token + Vollreload. */
 class StreamEndedError extends Error {
   constructor() {
@@ -206,7 +222,7 @@ export function watchWithResume<TSchema extends Document>(
   let pendingReset: WatchResetReason | undefined;
   /** Die zuletzt fehlgeschlagene Änderung und die Anzahl ihrer Fehlversuche. */
   let failing: { changeId: ResumeToken; attempts: number } | undefined;
-  /** Fehlversuche seit dem letzten erfolgreich geöffneten Stream (steuert den Backoff). */
+  /** Fehlversuche seit dem letzten erfolgreich geöffneten Stream samt gelungenem Vollreload (steuert den Backoff). */
   let attempt = 0;
   let resolveReady: () => void = () => undefined;
   const ready = new Promise<void>((resolve) => {
@@ -241,15 +257,17 @@ export function watchWithResume<TSchema extends Document>(
     logger.warn(`watch ${name}: Vollreload nötig (${reason}) – Neustart ohne Resume-Token`);
   };
 
+  /** Führt einen ausstehenden Vollreload aus; scheitert er, bleibt er ausstehend (`ResetError`). */
   const runPendingReset = async () => {
     const reason = pendingReset;
     if (reason === undefined) return;
-    pendingReset = undefined;
     try {
       await handlers.onReset?.(reason);
     } catch (error) {
-      logger.error(`watch ${name}: onReset (${reason}) fehlgeschlagen: ${describeError(error)}`);
+      logger.error(`watch ${name}: onReset (${reason}) fehlgeschlagen – neuer Versuch nach Backoff`);
+      throw new ResetError(error, reason);
     }
+    pendingReset = undefined;
   };
 
   const openStream = (): ChangeStream<TSchema> => {
@@ -276,10 +294,11 @@ export function watchWithResume<TSchema extends Document>(
       if (closed) return;
       if (!announced) {
         announced = true;
-        attempt = 0;
         resolveReady();
         notify("onOpen", () => handlers.onOpen?.({ resumed }));
         await runPendingReset();
+        // Erst nach gelungenem Reload zurücksetzen – sonst wüchse der Backoff bei Reload-Fehlern nie.
+        attempt = 0;
       }
       if (change === null) {
         if (stream.closed) throw new StreamEndedError();
@@ -304,6 +323,8 @@ export function watchWithResume<TSchema extends Document>(
 
   /** Entscheidet nach einem Fehler: sofort neu (Reset) oder Backoff. Liefert die Wartezeit. */
   const handleFailure = (error: unknown, attempt: number): number | "restart" => {
+    // Reload fehlgeschlagen: `pendingReset` bleibt gesetzt, der nächste Stream versucht es erneut.
+    if (error instanceof ResetError) return backoffDelay(attempt, backoff);
     if (error instanceof StreamEndedError || error instanceof MongoCursorExhaustedError) {
       scheduleReset("invalidated");
       return "restart";
@@ -347,7 +368,10 @@ export function watchWithResume<TSchema extends Document>(
         if (decision !== "restart") {
           attempt += 1;
           delayMs = decision;
-          const cause = error instanceof HandlerError || error instanceof OpenError ? error.causeError : error;
+          const cause =
+            error instanceof HandlerError || error instanceof OpenError || error instanceof ResetError
+              ? error.causeError
+              : error;
           logger.warn(`watch ${name}: Fehler, Neustart in ${delayMs} ms (${describeError(cause)})`);
           notify("onError", () => handlers.onError?.(cause, { attempt, delayMs }));
         }

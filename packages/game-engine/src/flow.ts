@@ -27,6 +27,7 @@ import {
   updatePlayer,
   usedQuestionIds,
 } from "./state.ts";
+import { addTimer, removeTimers } from "./timers.ts";
 import type { GameEndReason, GameState, LobbyState, PickedBy } from "./types.ts";
 
 /** Startet ein Spiel (START, REMATCH): Reihenfolge auslosen, Punkte/Tafel neu, Intro. */
@@ -62,6 +63,26 @@ function nextPickerIndex(state: LobbyState, game: GameState, afterIndex: number)
   return null;
 }
 
+/**
+ * Höchstens so lange wartet die Engine auf die Antwort der Shell (OPTIONS_READY, QUESTIONS_READY oder
+ * LOAD_FAILED) zu einer Anfrage. Danach endet das Spiel mit `load_failed` (Timer `request`) – ein
+ * DB-Hänger oder eine abgelehnte Antwort ohne Korrektur blockiert die Lobby also nie dauerhaft. Unabhängig
+ * vom Timing-Modus; die Shell sollte ihre DB-Aufrufe für diese Anfragen deutlich kürzer befristen.
+ */
+export const SHELL_REQUEST_TIMEOUT_MS = 20_000;
+
+/** Plant die Frist der gerade gestellten Anfrage (ersetzt die Frist einer älteren Anfrage). */
+function scheduleRequestTimeout(state: LobbyState, tx: Tx): LobbyState {
+  const cleared = removeTimers(state, (timer) => timer.kind === "request");
+  return addTimer(cleared, "request", tx.now + SHELL_REQUEST_TIMEOUT_MS);
+}
+
+/** Frist abgelaufen: Ist noch eine Anfrage offen, endet das Spiel wie bei LOAD_FAILED. */
+export function onRequestTimeout(state: LobbyState, tx: Tx): LobbyState {
+  if (!state.game?.pending) return state;
+  return finishGame(state, "load_failed", tx);
+}
+
 /** Fordert bei der Shell 3 Kategorien für den nächsten Zug an (Effect `offerCategories`). */
 function requestOptions(state: LobbyState, round: number, orderIndex: number, tx: Tx): LobbyState {
   const game = requireGame(state);
@@ -78,10 +99,11 @@ function requestOptions(state: LobbyState, round: number, orderIndex: number, tx
     usedQuestionIds: usedQuestionIds(game),
   };
   tx.effects.push({ type: "offerCategories", token, turn });
-  return updateGame(next, (current) => ({
+  const requested = updateGame(next, (current) => ({
     ...current,
     pending: { kind: "options", token, pickerId, round, orderIndex },
   }));
+  return scheduleRequestTimeout(requested, tx);
 }
 
 /**
@@ -112,7 +134,8 @@ export function applyPick(state: LobbyState, categoryId: string, pickedBy: Picke
     count: state.settings.questionsPerCategory,
     excludeQuestionIds: usedQuestionIds(game),
   });
-  return updateGame(next, (current) => ({ ...current, pending: { kind: "questions", token, categoryId } }));
+  const requested = updateGame(next, (current) => ({ ...current, pending: { kind: "questions", token, categoryId } }));
+  return scheduleRequestTimeout(requested, tx);
 }
 
 /** Zufall aus den drei Optionen (Zeit abgelaufen oder wählende Person hat aufgegeben). */

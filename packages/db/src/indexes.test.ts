@@ -2,6 +2,7 @@ import { APP_CONFIG_ID } from "@quizmaster/shared/documents";
 import { MongoServerError } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { collectionName } from "./collections.ts";
+import { isUnauthorizedError } from "./errors.ts";
 import { ensureIndexes, ensureQuestionsValidator, INDEX_DEFINITIONS } from "./indexes.ts";
 import type { DbLogger } from "./logger.ts";
 import { planStages, sampleQuestion } from "./test-support.ts";
@@ -17,6 +18,21 @@ beforeAll(async () => {
 afterAll(async () => {
   await t?.cleanup();
 });
+
+/**
+ * Setzt per collMod einen abweichenden Validator. Ein Test-Benutzer nach Least Privilege (nur readWrite,
+ * docs/04) darf das nicht – dann den Test überspringen statt rot zu werden.
+ */
+async function setDeviatingValidatorOrSkip(skip: (note?: string) => never): Promise<string> {
+  const name = collectionName("questions", t.prefix);
+  try {
+    await t.db.command({ collMod: name, validator: { $jsonSchema: { bsonType: "object" } } });
+  } catch (error) {
+    if (isUnauthorizedError(error)) skip("Test-Benutzer ohne collMod-Recht (Least Privilege)");
+    throw error;
+  }
+  return name;
+}
 
 function recordingLogger(): DbLogger & { warnings: string[] } {
   const warnings: string[] = [];
@@ -80,17 +96,15 @@ describe("ensureIndexes()", () => {
     ).rejects.toMatchObject({ code: 121 });
   });
 
-  it("aktualisiert einen abweichenden Validator per collMod", async () => {
-    const name = collectionName("questions", t.prefix);
-    await t.db.command({ collMod: name, validator: { $jsonSchema: { bsonType: "object" } } });
+  it("aktualisiert einen abweichenden Validator per collMod", async ({ skip }) => {
+    const name = await setDeviatingValidatorOrSkip(skip);
     expect(await ensureQuestionsValidator(t.db, { prefix: t.prefix })).toBe("updated");
     const [info] = await t.db.listCollections({ name }).toArray();
     expect((info as { options?: { validator?: unknown } }).options?.validator).toEqual(QUESTIONS_VALIDATOR);
   });
 
-  it("warnt klar und bricht nicht ab, wenn das Recht für collMod fehlt (Mock)", async () => {
-    const name = collectionName("questions", t.prefix);
-    await t.db.command({ collMod: name, validator: { $jsonSchema: { bsonType: "object" } } });
+  it("warnt klar und bricht nicht ab, wenn das Recht für collMod fehlt (Mock)", async ({ skip }) => {
+    await setDeviatingValidatorOrSkip(skip);
     const original = t.db.command.bind(t.db);
     const spy = vi.spyOn(t.db, "command").mockImplementation(async (command, options) => {
       if ("collMod" in command) {

@@ -267,18 +267,26 @@ export const GERMAN_WHITELIST: readonly string[] = [
 ];
 
 /**
- * NS-Zahlencodes, ohne Leetspeak geprüft: `standalone` als eigenständige Zahl, nicht Teil einer längeren
- * Zahl („Tom88“, „Mia 88“ – aber nicht „Max1988“); `contains` im zusammengezogenen Namen; `wholeWords`
- * als eigenes Wort („C18“ – aber nicht „Marc18“).
+ * NS-Codes, ohne Leetspeak geprüft (Ziffern bleiben erhalten). Eine angehängte Zahl allein sperrt nicht
+ * („Lisa88“, „Tom 88“, „Max1988“ – z. B. ein Geburtsjahr), gesperrt werden nur eindeutige Codes:
+ * - `wholeName`: der ganze Name besteht nur aus dem Code, Trennzeichen zählen nicht („88“, „8 8“, „H.H.“);
+ * - `contains`: irgendwo im zusammengezogenen Namen („1488“, „Tom1488“, „HH 88“, „Sieg 88“);
+ * - `wholeWords`: als eigenes Wort („C18“, „C 18“ – aber nicht „Marc18“);
+ * - `comboWords` × `comboNumbers`: NS-Kürzel bzw. -Begriff direkt vor oder hinter der Zahl, zusammen-
+ *   oder getrennt geschrieben („Adolf 88“, „AH18“, „88 SS“ – aber nicht „Noah 88“, „Jess88“).
  */
 export const NS_NUMBER_CODES: {
-  readonly standalone: readonly string[];
+  readonly wholeName: readonly string[];
   readonly contains: readonly string[];
   readonly wholeWords: readonly string[];
+  readonly comboWords: readonly string[];
+  readonly comboNumbers: readonly string[];
 } = {
-  standalone: ["88", "1488"],
+  wholeName: ["88", "hh"],
   contains: ["1488", "hh88", "88hh", "sieg88", "heil88", "combat18"],
   wholeWords: ["c18"],
+  comboWords: ["adolf", "ah", "hh", "ss", "sieg", "heil"],
+  comboNumbers: ["88", "18"],
 };
 
 /**

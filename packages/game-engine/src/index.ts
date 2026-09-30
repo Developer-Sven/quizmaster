@@ -15,7 +15,10 @@
  *   LOAD_FAILED) · `gameFinished` (games + Statistik in einer Transaktion) · `persist` (`toLobbySnapshot`,
  *   entprellt) · `closeLobby` (Timer löschen, aus der Registry entfernen).
  * - Folge-Commands (TIMEOUT, OPTIONS_READY, QUESTIONS_READY, LOAD_FAILED) in dieselbe Warteschlange einreihen;
- *   veraltete Tokens ignoriert die Engine. Jede Anfrage muss beantwortet werden (sonst wartet das Spiel).
+ *   veraltete Tokens ignoriert die Engine. Jede Anfrage binnen `SHELL_REQUEST_TIMEOUT_MS` beantworten (DB-
+ *   Aufrufe dafür kürzer befristen). Lehnt die Engine eine Antwort ab (`ok: false`), bleibt die Anfrage bis
+ *   zur Frist offen: korrigiert erneut antworten oder LOAD_FAILED senden. Läuft die Frist ab (Timer
+ *   `request`), beendet die Engine das Spiel selbst mit `load_failed`; spätere Antworten sind veraltet.
  * - Neuer Socket: vor JOIN/RECONNECT dem Raum hinzufügen (die Engine sendet dann Zustand + privaten Zustand).
  *   DISCONNECT erst, wenn der letzte Socket der Person getrennt ist.
  * - Bots: nach jedem Command mit geändertem `state.phaseToken` `planBotMoves(state, rng)` neu planen
@@ -80,6 +83,7 @@ export {
   type QuestionGameStats,
   type TurnRef,
 } from "./effects.ts";
+export { SHELL_REQUEST_TIMEOUT_MS } from "./flow.ts";
 export { toPrivateState, toPublicState } from "./projection.ts";
 export { computeOutcome, computeResults, type RankingInput } from "./ranking.ts";
 export { buildGameDoc, buildGameStats } from "./records.ts";

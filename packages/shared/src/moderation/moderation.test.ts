@@ -8,6 +8,7 @@ import {
   isCodeAcceptable,
   isNameAcceptable,
   moderationForms,
+  NS_NUMBER_CODES,
 } from "./index.ts";
 
 /** Übliche Vornamen in Deutschland (alle Generationen, verschiedene Herkunft) – dürfen nie treffen. */
@@ -107,6 +108,18 @@ const COMBINATIONS = [
   "ArthurE",
   "Max1988",
   "Marc18",
+  // Angehängte Zahlen (z. B. Geburtsjahr „88“) allein sperren nicht – nur eindeutige NS-Codes (siehe BLOCKED).
+  "Lisa88",
+  "Tom 88",
+  "Tom88",
+  "Mia 88",
+  "A 88",
+  "88 Max",
+  "Noah 88",
+  "Jess88",
+  "Siegfried 88",
+  "Heiko88",
+  "Tom HH",
   "Olaf Otzen",
   "Arthur Ehlers",
   "Anna Zimmer",
@@ -124,7 +137,36 @@ const BLOCKED = {
   sexual: ["Pimmel", "Muschi", "Möse", "Titten", "Sperma", "Vergewaltiger", "Pädophil", "Kinderficker", "Nutte"],
   discrimination: ["Neger", "Kanake", "Zigeuner", "Schlitzauge", "Polacke", "Schwuchtel", "Untermensch", "Judensau"],
   nazi: ["Hitler", "Adolf Hitler", "Sieg Heil", "Heil Hitler", "Nazi", "Neonazi", "NSDAP", "Hakenkreuz", "Zyklon B"],
-  numberCodes: ["1488", "HH88", "Tom 88", "Tom88", "A 88", "C18", "Combat 18"],
+  numberCodes: [
+    // „88“ bzw. „HH“ als ganzer Name (auch mit Trennzeichen)
+    "88",
+    "8 8",
+    "88.88",
+    "HH",
+    "H.H.",
+    "h-h",
+    // eindeutige Codes überall im Namen
+    "1488",
+    "14 88",
+    "Tom1488",
+    "HH88",
+    "88HH",
+    "TomHH88",
+    "C18",
+    "C 18",
+    "Combat 18",
+    // Zahl + NS-Kürzel bzw. -Begriff
+    "AH 88",
+    "AH18",
+    "Adolf 88",
+    "Adolf88",
+    "SS88",
+    "88 SS",
+    "Sieg 88",
+    "Heil88",
+    "Hitler 88",
+    "Nazi88",
+  ],
   leetspeak: ["Hurens0hn", "W1chser", "F0tze", "4rschl0ch", "N3ger", "H1tler", "Sp4st1", "5chlampe", "@rschloch"],
   umlauts: ["Mißgeburt", "Krüppel", "Kruppel", "Hürensohn", "Scheiße", "Scheisse", "Kümmeltürke"],
   separators: ["H.u.r.e.n.s.o.h.n", "F i c k e r", "Hu-Re", "Sa U", "Fo tze", "N_a_z_i", "S-p-a-s-t"],
@@ -140,6 +182,13 @@ describe("Blockliste (ADR-021)", () => {
     expect(GERMAN_BLOCKLIST.length).toBeGreaterThan(200);
     expect(new Set(GERMAN_BLOCKLIST).size).toBe(GERMAN_BLOCKLIST.length);
     for (const term of GERMAN_BLOCKLIST) expect(term, term).toMatch(/^\|?[a-z]+\|?$/);
+  });
+
+  it("NS-Codes sind reine Kleinbuchstaben/Ziffern (sie werden in Suchmuster eingesetzt)", () => {
+    const { wholeName, contains, wholeWords, comboWords, comboNumbers } = NS_NUMBER_CODES;
+    for (const code of [...wholeName, ...contains, ...wholeWords, ...comboWords, ...comboNumbers]) {
+      expect(code, code).toMatch(/^[a-z0-9]+$/);
+    }
   });
 });
 
@@ -167,7 +216,9 @@ describe("isNameAcceptable – Treffer", () => {
   it("meldet die Quelle des Treffers", () => {
     expect(findNameViolation("Hurensohn")).toBe("german");
     expect(findNameViolation("Fuck")).toBe("english");
-    expect(findNameViolation("Tom 88")).toBe("number_code");
+    expect(findNameViolation("88")).toBe("number_code");
+    expect(findNameViolation("Adolf 88")).toBe("number_code");
+    expect(findNameViolation("Tom 88")).toBeNull();
     expect(findNameViolation("Mia")).toBeNull();
   });
 });

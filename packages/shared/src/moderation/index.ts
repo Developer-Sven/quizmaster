@@ -45,16 +45,29 @@ function extraMatcher(extraTerms: readonly string[]): TermMatcher | undefined {
   return extraCache.matcher;
 }
 
-const STANDALONE_NUMBER_PATTERNS = NS_NUMBER_CODES.standalone.map(
-  (code) => new RegExp(`(?:^|\\D)${code}(?:\\D|$)`, "u"),
+/** Ganzer Name = Code, auch wiederholt („88“, „88.88“, „H.H.“). Codes sind reine [a-z0-9]-Konstanten. */
+const WHOLE_NAME_PATTERNS = NS_NUMBER_CODES.wholeName.map((code) => new RegExp(`^(?:${code})+$`, "u"));
+
+/** NS-Kürzel bzw. -Begriff + Zahl in beiden Reihenfolgen („adolf88“, „88adolf“, „ah18“ …). */
+const COMBO_CODES: ReadonlySet<string> = new Set(
+  NS_NUMBER_CODES.comboWords.flatMap((word) =>
+    NS_NUMBER_CODES.comboNumbers.flatMap((number) => [`${word}${number}`, `${number}${word}`]),
+  ),
 );
 
-/** NS-Zahlencodes (ohne Leetspeak, damit die Ziffern erhalten bleiben). */
+/**
+ * NS-Codes (Regeln siehe `NS_NUMBER_CODES`; ohne Leetspeak, damit die Ziffern erhalten bleiben). Eine
+ * angehängte Zahl allein („Lisa88“, „Tom 88“, „Max1988“) sperrt nicht.
+ */
 function hasNsNumberCode(name: string): boolean {
   const compact = stripDiacritics(name.normalize("NFKC").toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, "");
-  if (STANDALONE_NUMBER_PATTERNS.some((regex) => regex.test(compact))) return true;
+  if (WHOLE_NAME_PATTERNS.some((regex) => regex.test(compact))) return true;
   if (NS_NUMBER_CODES.contains.some((code) => compact.includes(code))) return true;
-  return digitPreservingTokens(name).some((token) => NS_NUMBER_CODES.wholeWords.includes(token));
+  // Wörter (an Buchstabe↔Ziffer-Grenzen getrennt, Bruchstücke verbunden) und je zwei Nachbarn zusammen:
+  // „Adolf 88“ → „adolf“, „88“, „adolf88“; „AH 88“ → „ah88“; „Noah 88“ → „noah88“ (kein Code).
+  const tokens = digitPreservingTokens(name);
+  const words = [...tokens, ...tokens.slice(1).map((token, index) => `${tokens[index]}${token}`)];
+  return words.some((word) => NS_NUMBER_CODES.wholeWords.includes(word) || COMBO_CODES.has(word));
 }
 
 /**

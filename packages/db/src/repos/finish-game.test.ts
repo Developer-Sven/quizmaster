@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto";
 import type { GameDoc, LobbyDoc } from "@quizmaster/shared/documents";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ClientSession } from "mongodb";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sampleQuestion } from "../test-support.ts";
 import { createTestDatabase, type TestDatabase } from "../testing/index.ts";
-import { createRepositories, endedLobbyExpiresAt, gameExpiresAt, type Repositories } from "./index.ts";
+import {
+  createRepositories,
+  endedLobbyExpiresAt,
+  FINISH_GAME_TIMEOUT_MS,
+  finishGame,
+  gameExpiresAt,
+  type Repositories,
+} from "./index.ts";
 
 let t: TestDatabase;
 let repos: Repositories;
@@ -135,7 +143,7 @@ const input = (gameId: string, rev: number) => ({
 describe("finishGame (Transaktion)", () => {
   it("schreibt games, lobbies, guests und Fragen-Statistik gemeinsam", async () => {
     const result = await repos.finishGame(input("game_1", 10), endedAt);
-    expect(result).toEqual({ guestsUpdated: 2, questionsUpdated: 2 });
+    expect(result).toEqual({ guestsUpdated: 2, questionsUpdated: 2, lobby: "saved" });
     expect(await t.collections.games.countDocuments({ _id: "game_1" })).toBe(1);
     expect((await t.collections.lobbies.findOne({ _id: "lobby_fin" }))?.rev).toBe(10);
     const guest = await t.collections.guests.findOne({ _id: mia });
@@ -162,5 +170,40 @@ describe("finishGame (Transaktion)", () => {
     };
     await expect(repos.finishGame(broken, endedAt)).rejects.toThrow();
     expect(await t.collections.games.countDocuments({ _id: "game_2" })).toBe(0);
+  });
+
+  it("überschreibt nie einen neueren Lobby-Stand – Spiel und Statistik werden trotzdem geschrieben", async () => {
+    const result = await repos.finishGame(input("game_3", 9), endedAt);
+    expect(result).toEqual({ guestsUpdated: 2, questionsUpdated: 2, lobby: "stale" });
+    expect(await t.collections.games.countDocuments({ _id: "game_3" })).toBe(1);
+    expect((await t.collections.lobbies.findOne({ _id: "lobby_fin" }))?.rev).toBe(10);
+  });
+
+  it("belebt eine inzwischen geschlossene Lobby nicht wieder (gleicher rev)", async () => {
+    expect(await repos.lobbies.close("lobby_fin", endedAt)).toBe(true);
+    const closed = await t.collections.lobbies.findOne({ _id: "lobby_fin" });
+    const result = await repos.finishGame(input("game_4", closed?.rev ?? 0), endedAt);
+    expect(result.lobby).toBe("stale");
+    expect(await t.collections.games.countDocuments({ _id: "game_4" })).toBe(1);
+    expect((await t.collections.lobbies.findOne({ _id: "lobby_fin" }))?.active).toBe(false);
+  });
+
+  it("legt einen fehlenden Lobby-Snapshot in der Transaktion an", async () => {
+    const fresh = { ...input("game_5", 1), lobby: { ...lobby(1), _id: "lobby_fin_neu", code: "FNX235" } };
+    expect((await repos.finishGame(fresh, endedAt)).lobby).toBe("saved");
+    expect((await t.collections.lobbies.findOne({ _id: "lobby_fin_neu" }))?.rev).toBe(1);
+  });
+
+  it("begrenzt die Transaktion zeitlich (Frist) und hinterlässt bei Zeitüberschreitung nichts", async () => {
+    expect(FINISH_GAME_TIMEOUT_MS).toBe(20_000);
+    const spy = vi.spyOn(ClientSession.prototype, "withTransaction");
+    try {
+      await repos.finishGame(input("game_6", 40), endedAt);
+      expect(spy.mock.calls.at(-1)?.[1]).toMatchObject({ timeoutMS: FINISH_GAME_TIMEOUT_MS });
+    } finally {
+      spy.mockRestore();
+    }
+    await expect(finishGame(t.client, t.collections, input("game_7", 41), endedAt, { timeoutMS: 1 })).rejects.toThrow();
+    expect(await t.collections.games.countDocuments({ _id: "game_7" })).toBe(0);
   });
 });
