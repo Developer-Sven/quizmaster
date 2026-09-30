@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./crypto-rng": "./src/crypto-rng.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@quizmaster/shared": "workspace:*"
+    "@quizmaster/shared": "workspace:*",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "fast-check": "4.10.2"
