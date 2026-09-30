@@ -54,3 +54,6 @@ jobs:
 
       - name: Tests (Unit, Property, Integration mit MongoMemoryReplSet)
         run: pnpm test
+
+      - name: Content (Fixtures; der echte Katalog liegt nicht im Repo)
+        run: pnpm content:validate

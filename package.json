@@ -12,7 +12,7 @@
     "env:check": "node scripts/env/check.ts",
     "dev": "node scripts/env/run.ts dev -- turbo run dev --concurrency=4",
     "build": "turbo run build --concurrency=2",
-    "check": "biome check . && turbo run typecheck --concurrency=2 && pnpm test",
+    "check": "biome check . && turbo run typecheck --concurrency=2 && pnpm test && pnpm content:validate",
     "test": "vitest run",
     "test:e2e": "pnpm --filter @quizmaster/e2e test",
     "lint": "biome check .",
@@ -23,7 +23,8 @@
     "content:digest": "pnpm --filter @quizmaster/scripts content:digest",
     "content:stats": "pnpm --filter @quizmaster/scripts content:stats",
     "content:seed": "pnpm --filter @quizmaster/scripts content:seed",
-    "content:ids": "pnpm --filter @quizmaster/scripts content:ids"
+    "content:ids": "pnpm --filter @quizmaster/scripts content:ids",
+    "content:fixtures": "pnpm --filter @quizmaster/scripts content:fixtures"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
