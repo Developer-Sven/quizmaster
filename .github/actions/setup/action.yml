@@ -1,0 +1,36 @@
+name: Workspace einrichten
+description: >-
+  Node 24 aus .nvmrc, pnpm über Corepack (Version und Hash aus packageManager), Cache des pnpm-Stores
+  und `pnpm install --frozen-lockfile`. Actions sind per Commit-SHA gepinnt (Dependabot pflegt sie).
+
+inputs:
+  install:
+    description: "pnpm install --frozen-lockfile ausführen (true/false)"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version-file: .nvmrc
+
+    - name: pnpm über Corepack
+      shell: bash
+      run: |
+        corepack enable pnpm
+        pnpm --version
+        echo "PNPM_STORE=$(pnpm store path)" >> "$GITHUB_ENV"
+
+    - name: pnpm-Store cachen
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.PNPM_STORE }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: pnpm-store-${{ runner.os }}-
+
+    - name: Abhängigkeiten (gefrorenes Lockfile)
+      if: inputs.install == 'true'
+      shell: bash
+      run: pnpm install --frozen-lockfile

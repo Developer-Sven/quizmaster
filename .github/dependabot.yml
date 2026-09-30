@@ -1,0 +1,49 @@
+# Dependabot für quizmaster (docs/06 §Abhängigkeiten & Supply Chain): wöchentlich, gruppiert, mit Wartezeit
+# (cooldown) – neue Versionen werden erst nach einigen Tagen vorgeschlagen, passend zu pnpm
+# `minimumReleaseAge` (24 h). Updates kommen als PR und laufen durch die CI; deployt wird nur manuell
+# auf dem Server (ADR-025).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+      semver-minor-days: 7
+      semver-patch-days: 3
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      npm-minor-patch:
+        update-types:
+          - minor
+          - patch
+      npm-major:
+        update-types:
+          - major
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"

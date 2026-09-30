@@ -1,3 +1,10 @@
+# CI für quizmaster (docs/11 §CI, Schritte 1–7). Prüft und baut nur – deployt wird ausschließlich auf dem
+# Server mit `pnpm deploy:prod` (ADR-025: kein Server-Schlüssel in GitHub). Keine echten Secrets: Tests laufen
+# gegen MongoMemoryReplSet 8.0.32 mit Dummy-Secrets, E2E über das Stack-Skript ebenso.
+#
+# Sicherheit: nur `contents: read`, Actions per Commit-SHA gepinnt (Dependabot aktualisiert sie mit
+# Wartezeit), `persist-credentials: false`, keine `pull_request_target`-Trigger, keine Ausdrücke aus
+# Ereignisdaten in `run:`-Blöcken.
 name: CI
 
 on:
@@ -9,17 +16,21 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   MONGOMS_VERSION: "8.0.32"
   MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
+  PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
   NEXT_TELEMETRY_DISABLED: "1"
   TURBO_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
 
 jobs:
+  # docs/11 Schritte 1–3: Checkout, pnpm + Node 24, Install, Biome, Typecheck, Tests, Content
   check:
+    name: Lint · Typecheck · Tests · Content
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -27,24 +38,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: ./.github/actions/setup
+
+      - name: MongoDB-Binary für MongoMemoryReplSet cachen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version-file: .nvmrc
-
-      - name: pnpm über Corepack
-        run: |
-          corepack enable pnpm
-          pnpm --version
-          echo "PNPM_STORE=$(pnpm store path --silent)" >> "$GITHUB_ENV"
-
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ env.PNPM_STORE }}
-            .cache/mongodb-binaries
-          key: deps-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-mongo-${{ env.MONGOMS_VERSION }}
-
-      - run: pnpm install --frozen-lockfile
+          path: ${{ env.MONGOMS_DOWNLOAD_DIR }}
+          key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
 
       - name: Lint (Biome)
         run: pnpm lint
@@ -55,5 +55,114 @@ jobs:
       - name: Tests (Unit, Property, Integration mit MongoMemoryReplSet)
         run: pnpm test
 
-      - name: Content (Fixtures; der echte Katalog liegt nicht im Repo)
+      - name: Content-Validierung (Fixtures – der Katalog liegt nicht im Repo, ADR-021)
         run: pnpm content:validate
+
+  # docs/11 Schritt 4: Produktions-Build (Next standalone inkl. Service Worker, Realtime-Bundle)
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Build (web + realtime)
+        run: pnpm build
+
+      - name: Build-Ausgabe wie vom Deploy erwartet
+        run: |
+          test -f apps/web/.next/standalone/apps/web/server.js
+          test -d apps/web/.next/static
+          test -f apps/realtime/dist/index.mjs
+
+      # ── EINFÜGEPUNKT W4 ─────────────────────────────────────────────────────────────────────
+      # Bundle-Budgets (docs/07, docs/11 Schritt 4) als weitere Schritte direkt hier (nach dem Build),
+      # Lighthouse auf dem Prod-Build (docs/11 Schritt 7) als eigener Job mit `needs: build` darunter.
+      # ────────────────────────────────────────────────────────────────────────────────────────
+
+  # docs/11 Schritt 5: E2E mit Playwright (Stack-Skript nutzt in CI automatisch MongoMemoryReplSet)
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: MongoDB-Binary für MongoMemoryReplSet cachen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MONGOMS_DOWNLOAD_DIR }}
+          key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+
+      - name: Playwright-Version bestimmen
+        id: playwright
+        working-directory: e2e
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Playwright-Browser cachen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Playwright-Browser + Systemabhängigkeiten
+        working-directory: e2e
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: E2E-Tests
+        run: pnpm test:e2e
+
+      - name: Berichte und Traces bei Fehlern hochladen
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # docs/11 Schritt 6: hohe/kritische Befunde in Produktionsabhängigkeiten brechen ab (docs/06)
+  audit:
+    name: Audit (pnpm audit --prod)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: pnpm audit --prod --audit-level high
+        run: pnpm audit --prod --audit-level high
+
+  # Dateisystem-Scan (Lockfile-Abhängigkeiten + Secrets) – ersetzt den Image-Scan aus docs/12 (ADR-024/025)
+  trivy:
+    name: Trivy (fs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy fs (HIGH/CRITICAL, nur behebbare)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table

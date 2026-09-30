@@ -1,0 +1,31 @@
+# quizmaster – Caddy-Site (ADR-024). ERZEUGT von infra/caddy/install-site.sh aus quizmaster.caddy.template –
+# nicht von Hand bearbeiten, sondern das Template ändern und `pnpm caddy:install` ausführen.
+# Werte aus .env.prod (über @quizmaster/shared/env): Domain, Ports, Cloudflare-Origin-Zertifikat.
+# {{IPS_NOTE}}
+
+{{DOMAIN}} {
+	# Cloudflare-Origin-Zertifikat (SSL-Modus „Full (strict)“) – keine automatische Zertifikatsverwaltung.
+	tls {{TLS_CERT_FILE}} {{TLS_KEY_FILE}}
+
+	# Nur Cloudflare (Proxy) und Loopback – alle anderen Verbindungen werden ohne Antwort geschlossen.
+	# Grund: Web und Realtime vertrauen dem Header cf-connecting-ip (TRUSTED_IP_HEADER, docs/06).
+	@blocked not remote_ip {{CLOUDFLARE_IPS}} 127.0.0.1/8 ::1
+
+	# Realtime: Socket.IO (Long-Polling + WebSocket) und sein Health-Check.
+	@realtime path /socket.io/* /healthz
+
+	# Metriken sind nie öffentlich (nur lokal: http://127.0.0.1:{{REALTIME_PORT}}/metrics mit Token).
+	@metrics path /metrics /metrics/*
+
+	# Reihenfolge ist Absicht (route = genau so abarbeiten). Keine Access-Logs (Datensparsamkeit, docs/06).
+	# Kein encode: Next.js komprimiert selbst, Cloudflare liefert Brotli aus, /socket.io nie komprimieren.
+	route {
+		abort @blocked
+		respond @metrics 404
+		reverse_proxy @realtime 127.0.0.1:{{REALTIME_PORT}} {
+			# Offene WebSockets überstehen einen Caddy-Reload bis zu 5 Minuten.
+			stream_close_delay 5m
+		}
+		reverse_proxy 127.0.0.1:{{WEB_PORT}}
+	}
+}

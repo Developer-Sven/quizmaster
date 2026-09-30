@@ -24,7 +24,18 @@
     "content:stats": "pnpm --filter @quizmaster/scripts content:stats",
     "content:seed": "pnpm --filter @quizmaster/scripts content:seed",
     "content:ids": "pnpm --filter @quizmaster/scripts content:ids",
-    "content:fixtures": "pnpm --filter @quizmaster/scripts content:fixtures"
+    "content:fixtures": "pnpm --filter @quizmaster/scripts content:fixtures",
+    "stack:test": "node scripts/dev/stack-test.ts",
+    "deploy:prod": "node scripts/deploy/deploy.ts deploy",
+    "deploy:rollback": "node scripts/deploy/deploy.ts rollback",
+    "deploy:restart": "node scripts/deploy/deploy.ts restart",
+    "deploy:status": "node scripts/deploy/deploy.ts status",
+    "caddy:dry-run": "bash infra/caddy/install-site.sh --dry-run",
+    "caddy:install": "bash infra/caddy/install-site.sh",
+    "ops:backup": "bash infra/ops/backup.sh",
+    "ops:restore-test": "bash infra/ops/restore-test.sh",
+    "ops:alert-test": "bash infra/ops/alert.sh \"Testalarm von quizmaster\"",
+    "ops:install-cron": "bash infra/ops/install-cron.sh"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
