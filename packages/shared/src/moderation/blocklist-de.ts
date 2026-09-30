@@ -1,0 +1,311 @@
+/**
+ * Eigene Blockliste für Spielernamen (ADR-021: liegt im Code, live ergänzbar über
+ * `appConfig.blockedTerms`). Ergänzt das englische `obscenity`-Dataset um deutsche Schimpfwörter und
+ * Beleidigungen, sexuelle Begriffe, rassistische/diskriminierende Begriffe, NS-Bezüge und verbreitete
+ * Beleidigungen aus anderen Sprachen, die auf deutschen Schulhöfen üblich sind.
+ *
+ * Syntax (siehe terms.ts): `|wort|` ganzes Wort · `|wort` Wortanfang · `wort|` Wortende · `wort` überall.
+ * Schreibweise: Kleinbuchstaben, Umlaute ausgeschrieben (ae/oe/ue/ss). Leetspeak, Trennzeichen und
+ * Wiederholungen deckt die Normalisierung ab; Varianten ohne Umlaut stehen zusätzlich in der Liste.
+ */
+
+/** Beleidigungen und Schimpfwörter. */
+const INSULTS = [
+  "arsch",
+  "dummarsch",
+  "hurensohn",
+  "|hure",
+  "hure|",
+  "hurenbock",
+  "wichser",
+  "wixer",
+  "wichsa",
+  "|wichs",
+  "fotze",
+  "votze",
+  "fotzn",
+  "schlampe",
+  "nutte",
+  "missgeburt",
+  "mistgeburt",
+  "spast",
+  "spacko",
+  "spacken",
+  "|mongo|",
+  "|mongos|",
+  "mongoloid",
+  "behindert",
+  "behindi",
+  "krueppel",
+  "kruppel",
+  "idiot",
+  "trottel",
+  "|depp|",
+  "|deppen|",
+  "dummkopf",
+  "dumpfbacke",
+  "hohlbirne",
+  "hohlkopf",
+  "vollpfosten",
+  "schwachkopf",
+  "schwachmat",
+  "mistkerl",
+  "|honk|",
+  "|opfer|",
+  "|opfa|",
+  "penner",
+  "hackfresse",
+  "|fresse|",
+  "fick",
+  "|fck",
+  "verpiss",
+  "pisser",
+  "|kack",
+  "kacke",
+  "scheisse",
+  "|scheis",
+  "drecksau",
+  "dummesau",
+  "|sau|",
+  "|schwein|",
+  "dreckschwein",
+  "schweinehund",
+  "hundesohn",
+  "|assi|",
+  "|assis|",
+  "asozial",
+  "flittchen",
+  "|abschaum|",
+  "deinemutter",
+  "leckmich",
+  "verreck",
+  "|kys|",
+  "killyourself",
+] as const;
+
+/** Sexuelle Begriffe. */
+const SEXUAL = [
+  "pimmel",
+  "|schwanz",
+  "schwanzlutscher",
+  "muschi",
+  "|moese|",
+  "moese|",
+  "titten",
+  "|bumsen",
+  "|bumser",
+  "sperma",
+  "analsex",
+  "analverkehr",
+  "vergewaltig",
+  "kinderschaender",
+  "kinderschander",
+  "paedophil",
+  "padophil",
+  "pedophil",
+  "|paedo",
+  "inzest",
+  "sodomie",
+  "nekrophil",
+  "zoophil",
+  "notgeil",
+  "|milf",
+  "sexsklav",
+] as const;
+
+/** Rassistische und diskriminierende Begriffe. */
+const DISCRIMINATION = [
+  "neger",
+  "kanake",
+  "kanacke",
+  "zigeuner",
+  "bimbo",
+  "schlitzauge",
+  "kuemmeltuerke",
+  "kummelturke",
+  "polacke",
+  "|itaker|",
+  "|muselman",
+  "kopftuchmaedchen",
+  "kopftuchmadchen",
+  "tuerkensau",
+  "turkensau",
+  "judensau",
+  "saujude",
+  "judenschwein",
+  "drecksjude",
+  "judenpack",
+  "judenraus",
+  "auslaenderraus",
+  "auslanderraus",
+  "tuerkenraus",
+  "turkenraus",
+  "untermensch",
+  "herrenrasse",
+  "rassenschande",
+  "schwuchtel",
+  "|tunte",
+  "|homo|",
+  "|homos|",
+  "|transe|",
+  "|transen|",
+  "kampflesbe",
+  "|kkk|",
+] as const;
+
+/** NS-Bezüge (Zahlencodes wie 88/1488 prüft `NS_NUMBER_CODES`). */
+const NAZI = [
+  "hitler",
+  "siegheil",
+  "|nazi",
+  "nazi|",
+  "neonazi",
+  "nsdap",
+  "gestapo",
+  "waffenss",
+  "auschwitz",
+  "holocaust",
+  "kristallnacht",
+  "endloesung",
+  "endlosung",
+  "vergasen",
+  "vergast",
+  "vergasung",
+  "judenstern",
+  "hakenkreuz",
+  "swastika",
+  "|fuehrer|",
+  "|fuhrer|",
+  "reichsfuehrer",
+  "reichsfuhrer",
+  "himmler",
+  "goebbels",
+  "heydrich",
+  "mengele",
+  "whitepower",
+  "whitepride",
+  "bloodandhonour",
+  "bloodandhonor",
+  "|wpww|",
+  "rassenkrieg",
+  "rahowa",
+  "zyklonb",
+] as const;
+
+/** Verbreitete Beleidigungen aus anderen Sprachen (Türkisch, Arabisch, Slawisch, Romanisch). */
+const OTHER_LANGUAGES = [
+  "|amk|",
+  "aminakoy",
+  "orospu",
+  "siktir",
+  "sikerim",
+  "yarrak",
+  "kahpe",
+  "|ibne|",
+  "pezevenk",
+  "sharmuta",
+  "charmuta",
+  "sharmouta",
+  "blyat",
+  "bljad",
+  "blyad",
+  "|suka|",
+  "|pidor",
+  "pidaras",
+  "kurwa",
+  "pierdol",
+  "jebac",
+  "jebem",
+  "pizda",
+  "kurac",
+  "vaffanculo",
+  "stronzo",
+  "puttana",
+  "cazzo",
+  "|puta|",
+  "hijodeputa",
+  "cabron",
+  "pendejo",
+  "maricon",
+  "salope",
+  "connard",
+  "encule",
+  "putain",
+] as const;
+
+/** Die vollständige eigene Blockliste. */
+export const GERMAN_BLOCKLIST: readonly string[] = [
+  ...INSULTS,
+  ...SEXUAL,
+  ...DISCRIMINATION,
+  ...NAZI,
+  ...OTHER_LANGUAGES,
+];
+
+/**
+ * Scunthorpe-Schutz: Treffer, die vollständig in diesen Wörtern liegen, zählen nicht
+ * („Marschall“, „Warschau“, „Thure“, „Nazim“, „Spaßtiger“ …).
+ */
+export const GERMAN_WHITELIST: readonly string[] = [
+  "marsch",
+  "barsch",
+  "harsch",
+  "warschau",
+  "karsch",
+  "thure",
+  "schure",
+  "fickert",
+  "fickenscher",
+  "nazim",
+  "nazir",
+  "nazif",
+  "naziha",
+  "nazira",
+  "nazife",
+  "spasst",
+  "milford",
+];
+
+/**
+ * NS-Zahlencodes, ohne Leetspeak geprüft: `standalone` als eigenständige Zahl, nicht Teil einer längeren
+ * Zahl („Tom88“, „Mia 88“ – aber nicht „Max1988“); `contains` im zusammengezogenen Namen; `wholeWords`
+ * als eigenes Wort („C18“ – aber nicht „Marc18“).
+ */
+export const NS_NUMBER_CODES: {
+  readonly standalone: readonly string[];
+  readonly contains: readonly string[];
+  readonly wholeWords: readonly string[];
+} = {
+  standalone: ["88", "1488"],
+  contains: ["1488", "hh88", "88hh", "sieg88", "heil88", "combat18"],
+  wholeWords: ["c18"],
+};
+
+/**
+ * Deutsche Namen und Wörter, die das englische `obscenity`-Dataset fälschlich trifft („Annalena“ →
+ * „anal“, „Cumali“ → „cum“, „Kanal“, „Assmann“ …). Schreibweise wie die Whitelist-Transformer von
+ * obscenity sie sehen (klein, Doppelbuchstaben außer b/e/o/l/s/g zusammengezogen) plus Originalform.
+ */
+export const ENGLISH_DATASET_WHITELIST_DE: readonly string[] = [
+  "annalena",
+  "analena",
+  "annalisa",
+  "analisa",
+  "annalina",
+  "analina",
+  "cuma",
+  "cumali",
+  "cumhur",
+  "bich",
+  "georgy",
+  "assmann",
+  "assman",
+  "assel",
+  "sporn",
+  "kanal",
+  "dickmann",
+  "dickman",
+  "wankel",
+  "fagott",
+  "fagot",
+];

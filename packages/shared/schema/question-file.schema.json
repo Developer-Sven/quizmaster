@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://quizmaster.example/schema/question-file.schema.json",
+  "title": "quizmaster – Fragen-Datei (ein Thema)",
+  "type": "object",
+  "properties": {
+    "category": {
+      "enum": [
+        "buecher-woerter",
+        "comics",
+        "computerspiele",
+        "die-2000er",
+        "draussen-im-gruenen",
+        "essen-trinken",
+        "glaube-religion",
+        "im-labor",
+        "kinofilme",
+        "koerper-geist",
+        "kunst-kultur",
+        "macht-geld",
+        "medien-unterhaltung",
+        "musik-hits",
+        "rund-um-die-welt",
+        "sport-freizeit",
+        "tv-serien",
+        "wunder-der-technik",
+        "zeugen-der-zeit"
+      ]
+    },
+    "topic": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "questions": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(bw|co|cs|ze|dg|et|gr|il|kf|kg|kk|mg|mu|mh|rw|sf|tv|wt|zz)-[a-z0-9]{8}$"
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 140,
+            "pattern": "\\?$"
+          },
+          "answers": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "description": "answers[0] ist die richtige Antwort",
+            "uniqueItems": true
+          },
+          "status": {
+            "enum": ["unverified", "approved", "needs_fix", "retired"]
+          },
+          "media": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "flag"
+              },
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z]{2}(-[a-z]{2,3})?$|^(eu|un|arab|asean|cefta|eac|pc)$"
+              }
+            },
+            "required": ["kind", "code"],
+            "additionalProperties": false
+          },
+          "displayOrder": {
+            "enum": ["asc", "shuffle"]
+          },
+          "explanation": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^https://"
+          },
+          "volatile": {
+            "type": "boolean"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date"
+          },
+          "review": {
+            "type": "object",
+            "properties": {
+              "checkedAt": {
+                "type": "string",
+                "format": "date"
+              },
+              "checkedBy": {
+                "type": "string"
+              },
+              "notes": {
+                "type": ["string", "null"]
+              }
+            },
+            "required": ["checkedAt", "checkedBy"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "difficulty", "prompt", "answers", "status"],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": ["status"],
+              "properties": {
+                "status": {
+                  "const": "approved"
+                }
+              }
+            },
+            "then": {
+              "required": ["source", "review"]
+            }
+          },
+          {
+            "if": {
+              "required": ["status"],
+              "properties": {
+                "status": {
+                  "const": "needs_fix"
+                }
+              }
+            },
+            "then": {
+              "required": ["review"]
+            }
+          },
+          {
+            "if": {
+              "required": ["volatile"],
+              "properties": {
+                "volatile": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "required": ["asOf"]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "required": ["category", "topic", "questions"],
+  "additionalProperties": false
+}

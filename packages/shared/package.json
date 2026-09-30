@@ -6,10 +6,14 @@
   "exports": {
     ".": "./src/index.ts",
     "./env": "./src/env/index.ts",
-    "./moderation": "./src/moderation/index.ts"
+    "./moderation": "./src/moderation/index.ts",
+    "./content": "./src/content/index.ts",
+    "./documents": "./src/documents/index.ts",
+    "./ip": "./src/ip/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "gen:schema": "node scripts/gen-schema.ts && biome format --write schema/question-file.schema.json"
   },
   "dependencies": {
     "obscenity": "0.4.6",
