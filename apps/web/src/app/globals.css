@@ -1,1 +1,363 @@
 @import "tailwindcss";
+
+/*
+ * Designsystem „Quiz-Studio bei Nacht“ – Tokens exakt nach docs/09 §2 und §3 (verbindlich).
+ * Komponenten nutzen ausschließlich diese Tokens: keine beliebigen Werte in Klassen und keine
+ * Hex-Farben außerhalb dieser Datei. Tailwinds Standard-Paletten, -Schatten, -Unschärfen, -Schriften
+ * und -Animationen sind bewusst entfernt (docs/09 §1) – es existieren nur die Namen unten.
+ * Spiegel für JavaScript (Theme-Color, motion): src/lib/ui/tokens.ts, geprüft durch tokens.test.ts.
+ */
+@theme static {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --text-shadow-*: initial;
+  --tracking-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --blur-*: initial;
+  --ease-*: initial;
+  --animate-*: initial;
+
+  /* Flächen */
+  --color-bg: #0b1426; /* Studio-Navy, Seitenhintergrund */
+  --color-surface-1: #121f38; /* Karten, HUD */
+  --color-surface-2: #1a2a4a; /* Antworten, Eingaben, erhöhte Elemente */
+  --color-surface-3: #22365c; /* gedrückt/hover auf surface-2 */
+  --color-line: #2b4170; /* feine Trennlinien, Kartenrahmen (dekorativ) */
+  --color-line-strong: #5d76a8; /* Rahmen interaktiver Elemente (≥ 3:1) */
+
+  /* Text */
+  --color-text: #f4f7fc; /* 17,1:1 auf bg */
+  --color-text-2: #a9b6ce; /* Sekundärtext, 8,0:1 auf surface-1 */
+  --color-text-3: #7082a3; /* Metadaten/deaktiviert, 4,7:1 auf bg – nur auf bg für Text */
+
+  /* Hauptfarbe */
+  --color-primary: #ff8a1f; /* Signalorange */
+  --color-primary-hover: #ff9e47;
+  --color-primary-press: #e87812;
+  --color-on-primary: #1b1004; /* Text auf Orange, 7,9:1 */
+
+  /* Bedeutungsfarben (Regel 3) */
+  --color-success: #2fd07a;
+  --color-danger: #ff5a5f;
+
+  /* Zustands-Tönungen: feste Werte, nie gemischt */
+  --color-primary-tint: #3d2a17; /* Antwort eingeloggt, Text 12,7:1 */
+  --color-success-tint: #16402c; /* Antwort richtig, Text 10,8:1 */
+  --color-danger-tint: #40221f; /* Antwort falsch, Text 13,3:1 */
+
+  /* Scrim hinter Overlays: bg mit 84 % Deckkraft, ohne Unschärfe (docs/09 §2 Ebenen) */
+  --color-scrim: rgb(11 20 38 / 0.84);
+
+  /* Spielerfarben – nur als Avatar-Fläche, Vergabe in dieser Reihenfolge (docs/09 §2, docs/05) */
+  --color-player-blue: #3f9ff3;
+  --color-player-sky: #9cd3ff;
+  --color-player-cyan: #35c8de;
+  --color-player-yellow: #f7df45;
+  --color-player-ochre: #ebb447;
+  --color-player-sand: #d8c3a5;
+  --color-player-steel: #97b0c4;
+  --color-player-silver: #e3e8ef;
+
+  /* Schrift: Rubik über next/font (Variable --font-rubik am <html>) */
+  --font-sans: var(--font-rubik), system-ui, sans-serif;
+
+  /* Typografie (docs/09 §3): Größe / Zeilenhöhe / Gewicht – rem bei 16 px Basis */
+  --text-display: 2.75rem; /* 44 */
+  --text-display--line-height: 3rem; /* 48 */
+  --text-display--font-weight: 800;
+  --text-wordmark: 2.25rem; /* 36 */
+  --text-wordmark--line-height: 2.5rem; /* 40 */
+  --text-wordmark--font-weight: 800;
+  --text-h1: 1.75rem; /* 28 */
+  --text-h1--line-height: 2.125rem; /* 34 */
+  --text-h1--font-weight: 700;
+  --text-code: 1.75rem; /* 28 */
+  --text-code--line-height: 2rem; /* 32 */
+  --text-code--font-weight: 700;
+  --text-h2: 1.375rem; /* 22 */
+  --text-h2--line-height: 1.75rem; /* 28 */
+  --text-h2--font-weight: 700;
+  --text-title: 1.25rem; /* 20 */
+  --text-title--line-height: 1.625rem; /* 26 */
+  --text-title--font-weight: 700;
+  --text-question: 1.375rem; /* 22 */
+  --text-question--line-height: 1.875rem; /* 30 */
+  --text-question--font-weight: 600;
+  --text-question-long: 1.1875rem; /* 19 – Fragen über 100 Zeichen */
+  --text-question-long--line-height: 1.6875rem; /* 27 */
+  --text-question-long--font-weight: 600;
+  --text-answer: 1.0625rem; /* 17 */
+  --text-answer--line-height: 1.5rem; /* 24 */
+  --text-answer--font-weight: 500;
+  --text-button: 1.0625rem; /* 17 */
+  --text-button--line-height: 1.5rem; /* 24 */
+  --text-button--font-weight: 700;
+  --text-body: 1rem; /* 16 */
+  --text-body--line-height: 1.5rem; /* 24 */
+  --text-body--font-weight: 400;
+  --text-label: 0.875rem; /* 14 */
+  --text-label--line-height: 1.25rem; /* 20 */
+  --text-label--font-weight: 600;
+  --text-caption: 0.75rem; /* 12 */
+  --text-caption--line-height: 1rem; /* 16 */
+  --text-caption--font-weight: 500;
+
+  /* Sperrsatz nur für den Lobby-Code */
+  --tracking-code: 0.08em;
+
+  /* Radien */
+  --radius-sm: 6px; /* Ergebnis-Kästchen, kleine Badges */
+  --radius-md: 12px; /* Chips, Icon-Kacheln */
+  --radius-lg: 16px; /* Buttons, Eingaben, Antworten */
+  --radius-xl: 24px; /* Karten, Sheets, Overlay-Panels */
+
+  /* Bewegung */
+  --duration-fast: 120ms; /* Druck-Feedback */
+  --duration-base: 200ms; /* Zustandswechsel */
+  --duration-slow: 320ms; /* Ein-/Ausblenden */
+  --duration-overlay: 480ms; /* Overlay-Wechsel */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --default-transition-duration: var(--duration-base);
+  --default-transition-timing-function: var(--ease-standard);
+
+  /* Ebenen: 0 = bg · 1 = surface-1 + 1 px line · 2 = zusätzlich dieser einzige Schatten */
+  --shadow-level-2: 0 16px 40px rgb(3 8 20 / 0.5);
+
+  /* Z-Index */
+  --z-index-hud: 10;
+  --z-index-sheet: 40;
+  --z-index-overlay: 50;
+  --z-index-toast: 60;
+  --z-index-connection: 70;
+
+  /* Layout (docs/09 §4): Seitenrand ab 390 px Breite 20 px, Inhaltsspalte 480 px, Dialog 360 px */
+  --breakpoint-xs: 24.375rem;
+  --container-column: 30rem;
+  --container-dialog: 22.5rem;
+
+  /* Animationen (docs/09 §8); endlos nur Lade-/Warte-Indikatoren (Regel 12) */
+  --animate-spin: spin 1.2s linear infinite; /* loader-circle */
+  --animate-pulse: pulse 1.2s var(--ease-standard) infinite; /* Skeleton: 1,2-s-Deckkraft-Puls */
+  --animate-pop: pop var(--duration-fast) var(--ease-standard); /* „geantwortet“-Ring */
+  --animate-crown-pop: crown-pop var(--duration-slow) var(--ease-emphasized); /* Krone am Spielende */
+  --animate-shake: shake 160ms var(--ease-standard); /* Ruck bei eigener falscher Antwort */
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+  @keyframes pop {
+    50% {
+      transform: scale(1.08);
+    }
+  }
+  @keyframes crown-pop {
+    0% {
+      transform: scale(0);
+    }
+    60% {
+      transform: scale(1.15);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  /* x 0 → 4 → −4 → 0, zweimal */
+  @keyframes shake {
+    0%,
+    50%,
+    100% {
+      transform: translateX(0);
+    }
+    12.5%,
+    62.5% {
+      transform: translateX(4px);
+    }
+    37.5%,
+    87.5% {
+      transform: translateX(-4px);
+    }
+  }
+}
+
+/* Farben aus Daten: Kategoriefarbe kommt als CSS-Variable --cat (docs/09 Regel 9) */
+@theme inline {
+  --color-cat: var(--cat);
+  --transition-duration-fast: var(--duration-fast);
+  --transition-duration-base: var(--duration-base);
+  --transition-duration-slow: var(--duration-slow);
+  --transition-duration-overlay: var(--duration-overlay);
+}
+
+/*
+ * Interaktionszustände. data-force erlaubt /dev/ui, hover/pressed/focus statisch zu zeigen;
+ * aria-disabled schaltet hover und pressed ab.
+ */
+@custom-variant is-hover {
+  @media (hover: hover) {
+    &:hover:not([aria-disabled="true"]) {
+      @slot;
+    }
+  }
+  &[data-force="hover"] {
+    @slot;
+  }
+}
+@custom-variant is-pressed {
+  &:active:not([aria-disabled="true"]) {
+    @slot;
+  }
+  &[data-force="pressed"] {
+    @slot;
+  }
+}
+@custom-variant is-focus {
+  &:focus-visible {
+    @slot;
+  }
+  &[data-force="focus"] {
+    @slot;
+  }
+}
+/* Eingabefelder zeigen den Fokus immer, auch nach Tippen/Klicken */
+@custom-variant is-field-focus {
+  &:focus {
+    @slot;
+  }
+  &[data-force="focus"] {
+    @slot;
+  }
+}
+
+/* Seitenrand 16 px, ab 390 px Breite 20 px (docs/09 §2) */
+@utility px-gutter {
+  padding-inline: calc(var(--spacing) * 4);
+  @variant xs {
+    padding-inline: calc(var(--spacing) * 5);
+  }
+}
+
+/* Safe Areas im Standalone-Modus (docs/09 §4, docs/10) */
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+@utility pb-safe {
+  padding-bottom: calc(var(--spacing) * 4 + env(safe-area-inset-bottom));
+}
+
+/* Toast unten über der Aktionsleiste bzw. dem Spielerstreifen */
+@utility bottom-toast {
+  bottom: calc(var(--spacing) * 24 + env(safe-area-inset-bottom));
+}
+
+/* Sheets lassen oben Luft für den Scrim */
+@utility max-h-sheet {
+  max-height: calc(100dvh - var(--spacing) * 12);
+}
+
+/*
+ * Zustandswechsel als kurze Transition (Farbe/Rahmen: duration-base, Druck-Skalierung: duration-fast).
+ * Der Fokus-Ring ist bewusst nicht animiert – er erscheint sofort.
+ */
+@utility transition-control {
+  transition-property: color, background-color, border-color, opacity, scale;
+  transition-duration:
+    var(--duration-base), var(--duration-base), var(--duration-base), var(--duration-base), var(--duration-fast);
+  transition-timing-function: var(--ease-standard);
+}
+
+/*
+ * Timer (docs/09 §5, §7): reine CSS-Animation über die Restzeit, in den letzten 5 s danger.
+ * Die Werte setzt die Komponente als CSS-Variablen aus ihren Props:
+ * --timer-remaining (Restzeit), --timer-from (Anteil 0–1 beim Start), --timer-danger-delay.
+ * Bleibt bei reduzierter Bewegung aktiv (Information, docs/09 §7).
+ */
+@utility animate-timer-bar {
+  transform-origin: left;
+  animation:
+    timer-shrink var(--timer-remaining) linear forwards,
+    timer-danger-fill var(--duration-base) var(--ease-standard) var(--timer-danger-delay) forwards;
+}
+@utility animate-timer-ring {
+  animation:
+    timer-deplete var(--timer-remaining) linear forwards,
+    timer-danger-stroke var(--duration-base) var(--ease-standard) var(--timer-danger-delay) forwards;
+}
+@utility animate-timer-text {
+  animation: timer-danger-text var(--duration-base) var(--ease-standard) var(--timer-danger-delay) forwards;
+}
+
+@keyframes timer-shrink {
+  from {
+    transform: scaleX(var(--timer-from));
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+/* Einheit px (= Nutzereinheiten, skaliert über pathLength="100"), damit Browser interpolieren */
+@keyframes timer-deplete {
+  from {
+    stroke-dashoffset: calc(100px * (1 - var(--timer-from)));
+  }
+  to {
+    stroke-dashoffset: 100px;
+  }
+}
+@keyframes timer-danger-fill {
+  to {
+    background-color: var(--color-danger);
+  }
+}
+@keyframes timer-danger-stroke {
+  to {
+    stroke: var(--color-danger);
+  }
+}
+@keyframes timer-danger-text {
+  to {
+    color: var(--color-danger);
+  }
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Sichtbarer Fokus für alles Fokussierbare: 2 px primary mit 2 px Abstand (docs/09 §5) */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled, [aria-disabled="true"]),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  /* Platzhalter mit ausreichendem Kontrast (Tailwind-Standard mischt Farben) */
+  ::placeholder {
+    color: var(--color-text-2);
+  }
+
+  ::selection {
+    background-color: var(--color-primary-tint);
+    color: var(--color-text);
+  }
+}
