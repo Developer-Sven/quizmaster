@@ -1,0 +1,18 @@
+{
+  "name": "@quizmaster/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.63.0",
+    "@quizmaster/db": "workspace:*",
+    "@quizmaster/shared": "workspace:*",
+    "jose": "6.2.12",
+    "socket.io-client": "4.8.4"
+  }
+}

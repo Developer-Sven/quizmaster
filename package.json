@@ -1,0 +1,32 @@
+{
+  "name": "quizmaster",
+  "private": true,
+  "description": "Live-Quiz-Duelle für 2–8 Personen als PWA – Web (Next.js) + Realtime (Socket.IO) + MongoDB.",
+  "license": "MIT",
+  "packageManager": "pnpm@12.8.1+sha512.f64ba907507f5ceafe06c8d38e6052d0179444580ec1279ddd5bfc11cb48aa8a2644b66598e07e761da84872a9fc57d5f902b87fa49d024198d558612aabbe45",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "setup:env": "node scripts/setup-env.mjs",
+    "env:check": "node scripts/env/check.ts",
+    "dev": "node scripts/env/run.ts dev -- turbo run dev --concurrency=4",
+    "build": "turbo run build --concurrency=2",
+    "check": "biome check . && turbo run typecheck --concurrency=2 && pnpm test",
+    "test": "vitest run",
+    "test:e2e": "pnpm --filter @quizmaster/e2e test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "turbo run typecheck --concurrency=2",
+    "content:validate": "pnpm --filter @quizmaster/scripts content:validate"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "24.19.0",
+    "tsx": "4.23.15",
+    "turbo": "2.11.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vitest": "5.0.2"
+  }
+}

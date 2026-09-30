@@ -1,0 +1,29 @@
+{
+  "name": "@quizmaster/realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "start": "node dist/index.mjs",
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@prometheus-io/client": "0.16.1",
+    "@quizmaster/db": "workspace:*",
+    "@quizmaster/game-engine": "workspace:*",
+    "@quizmaster/shared": "workspace:*",
+    "jose": "6.2.12",
+    "mongodb": "7.7.0",
+    "pino": "10.3.1",
+    "rate-limiter-flexible": "11.2.1",
+    "socket.io": "4.8.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "mongodb-memory-server-core": "11.3.0",
+    "socket.io-client": "4.8.4",
+    "tsdown": "0.23.0"
+  }
+}

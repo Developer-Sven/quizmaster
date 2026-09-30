@@ -1,0 +1,41 @@
+{
+  "name": "@quizmaster/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/prebuild.ts && next dev --turbopack -H 127.0.0.1 -p ${PORT:-3000}",
+    "build": "node scripts/prebuild.ts && next build",
+    "start": "next start -H 127.0.0.1 -p ${PORT:-3000}",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@quizmaster/db": "workspace:*",
+    "@quizmaster/shared": "workspace:*",
+    "jose": "6.2.12",
+    "lucide-react": "1.48.0",
+    "mongodb": "7.7.0",
+    "motion": "13.4.6",
+    "next": "16.3.8",
+    "pino": "10.3.1",
+    "qrcode": "1.5.4",
+    "rate-limiter-flexible": "11.2.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "serwist": "9.5.12",
+    "socket.io-client": "4.8.4",
+    "zod": "4.6.5",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/qrcode": "1.5.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "babel-plugin-react-compiler": "1.0.0",
+    "esbuild": "0.28.2",
+    "flag-icons": "7.5.0",
+    "sharp": "0.35.5",
+    "tailwindcss": "4.3.3"
+  }
+}

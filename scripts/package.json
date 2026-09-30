@@ -1,0 +1,22 @@
+{
+  "name": "@quizmaster/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "content:validate": "node content/validate.ts"
+  },
+  "dependencies": {
+    "@quizmaster/db": "workspace:*",
+    "@quizmaster/game-engine": "workspace:*",
+    "@quizmaster/shared": "workspace:*",
+    "jose": "6.2.12",
+    "mongodb": "7.7.0",
+    "socket.io-client": "4.8.4",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "lighthouse": "13.5.0"
+  }
+}

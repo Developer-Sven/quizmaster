@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/turbo/schema.json",
+  "ui": "stream",
+  "globalPassThroughEnv": [
+    "PATH",
+    "HOME",
+    "CI",
+    "QM_*",
+    "XDG_*",
+    "COREPACK_*",
+    "npm_config_cache",
+    "NODE_OPTIONS",
+    "NODE_ENV",
+    "MONGOMS_*",
+    "MONGODB_*",
+    "TEST_MONGODB_*",
+    "PLAYWRIGHT_*",
+    "CHROME_PATH",
+    "NEXT_DIST_DIR",
+    "NEXT_TELEMETRY_DISABLED",
+    "TURBO_TELEMETRY_DISABLED",
+    "DO_NOT_TRACK",
+    "QUIZMASTER_*",
+    "REALTIME_*",
+    "APP_ORIGIN",
+    "PORT",
+    "HOST",
+    "HOSTNAME",
+    "SESSION_SECRET",
+    "IP_HASH_SECRET",
+    "METRICS_TOKEN",
+    "TURNSTILE_*",
+    "TRUSTED_IP_HEADER",
+    "GAME_TIMING",
+    "QUESTION_POOL",
+    "MAX_CONNECTIONS",
+    "DEV_BOTS_ENABLED",
+    "LOG_LEVEL",
+    "SEARCH_INDEXING",
+    "E2E_*"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "typecheck": {
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

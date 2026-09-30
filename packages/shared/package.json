@@ -1,0 +1,18 @@
+{
+  "name": "@quizmaster/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./env": "./src/env/index.ts",
+    "./moderation": "./src/moderation/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "obscenity": "0.4.6",
+    "zod": "4.6.5"
+  }
+}

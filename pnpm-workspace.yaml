@@ -1,0 +1,19 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "scripts"
+  - "e2e"
+
+# Supply-Chain-Schutz (docs/03, docs/06)
+minimumReleaseAge: 1440 # Minuten: Pakete erst 24 h nach Veröffentlichung
+minimumReleaseAgeExclude:
+  # Ausnahme nur für das Next.js-Security-Release vom 30.09.2026 (7 GHSA, ADR-021 ff.).
+  # Nach 2026-10-01 16:07 UTC entfernen – dann greift die 24-h-Regel wieder.
+  - "next@16.3.8"
+  - "@next/*"
+blockExoticSubdeps: true
+trustPolicy: no-downgrade
+# Parallele Prozesse dürfen nie selbst installieren – fehlende Pakete brechen ab.
+verifyDepsBeforeRun: error
+allowBuilds:
+  esbuild: true

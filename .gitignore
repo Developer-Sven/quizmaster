@@ -1,0 +1,40 @@
+# Nur lokal – gehört nicht ins öffentliche Repo
+/docs/
+/content/
+/.claude/
+/CLAUDE.md
+/AGENTS.md
+/apps/web/AGENTS.md
+/apps/web/CLAUDE.md
+/.mcp.json
+/reports/
+
+# Umgebungen, Secrets, Laufzeit
+.env
+.env.*
+!.env.*.example
+/.tooling/
+/.deploy/
+
+# Abhängigkeiten & Build-Ausgaben
+node_modules/
+.next/
+.next-*/
+dist/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+/apps/web/public/sw.js
+/apps/web/public/sw.js.map
+/apps/web/public/flags/
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Sonstiges
+*.log
+.DS_Store

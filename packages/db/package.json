@@ -1,0 +1,21 @@
+{
+  "name": "@quizmaster/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@quizmaster/shared": "workspace:*",
+    "mongodb": "7.7.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "mongodb-memory-server-core": "11.3.0"
+  }
+}
