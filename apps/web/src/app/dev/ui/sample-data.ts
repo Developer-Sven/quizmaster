@@ -64,3 +64,7 @@ export const LONGEST_QUESTION =
   "Welcher Fluss fließt auf seinem Weg zum Schwarzen Meer durch mehr Hauptstädte Europas als jeder andere, nämlich durch vier verschiedene davon?";
 export const LONGEST_ANSWER = "Die Donau mit ihren vielen Nebenflüssen X";
 export const SHORT_QUESTION = "Wie heißt die Hauptstadt von Australien?";
+
+/** Wartungstext nahe der Grenze von `appConfig.maintenance.message` (200 Zeichen) – bricht im Banner um. */
+export const LONG_MAINTENANCE_MESSAGE =
+  "Heute Abend spielen wir ein größeres Update ein. Zwischen 22 und 23 Uhr kann es kurze Unterbrechungen geben, laufende Spiele enden vorher sauber. Danke für deine Geduld, bis gleich wieder am Tisch.";

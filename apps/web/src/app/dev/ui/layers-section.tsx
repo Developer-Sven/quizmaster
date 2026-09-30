@@ -22,7 +22,7 @@ import {
   WifiOffIcon,
   XIcon,
 } from "../../../lib/ui/icons";
-import { SHORT_QUESTION, sampleCategory } from "./sample-data";
+import { LONG_MAINTENANCE_MESSAGE, SHORT_QUESTION, sampleCategory } from "./sample-data";
 import { ComponentTitle, Demo, Section } from "./section";
 
 type SheetView = "settings" | "review" | "report" | null;
@@ -159,7 +159,10 @@ export function LayersSection() {
         <Button
           variant="secondary"
           size="compact"
-          onClick={() => setToast({ text: errorMessage("RATE_LIMITED") ?? "", tone: "error", withCrown: false })}
+          // längster Fehlertext aus docs/09 §11: bricht bei 360 px auf zwei Zeilen um
+          onClick={() =>
+            setToast({ text: errorMessage("TOO_MANY_CONNECTIONS") ?? "", tone: "error", withCrown: false })
+          }
         >
           Fehler
         </Button>
@@ -174,6 +177,7 @@ export function LayersSection() {
       <ComponentTitle>Banner</ComponentTitle>
       <div className="-mx-4 flex flex-col gap-3 xs:-mx-5">
         <Banner tone="maintenance" message={de.maintenance.message(null)} />
+        <Banner tone="maintenance" message={de.maintenance.message(LONG_MAINTENANCE_MESSAGE)} />
         <Banner tone="update" onAction={() => {}} />
       </div>
 

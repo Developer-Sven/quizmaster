@@ -1,7 +1,13 @@
 /**
  * Tastenkürzel (docs/09 §12): Antworten mit `1`–`4` bzw. `A`–`D`, Kategorien mit `1`–`3`.
- * Die Overlays hängen einen `keydown`-Listener an und übersetzen die Taste hiermit; Eingaben in
- * Textfeldern und Tasten mit Modifikatoren werden ignoriert.
+ * Die Overlays übersetzen die Taste hiermit; Eingaben in Textfeldern und Tasten mit Modifikatoren
+ * werden ignoriert.
+ *
+ * WCAG 2.1.4 (Einzeltasten-Kürzel, Stufe A): den `keydown`-Listener nicht global am `document`
+ * anhängen, sondern am Container der Antwort- bzw. Kachelgruppe – dann wirken die Kürzel nur, solange
+ * der Fokus darin liegt. Alternative wäre ein Schalter zum Abschalten (braucht Änderung an docs/09).
+ * Sonst lösen Diktat, Screenreader-Fokusmodus oder versehentliche Tasten eine Antwort aus, die sich
+ * nicht mehr ändern lässt (docs/09 §7.5).
  */
 export type AnswerIndex = 0 | 1 | 2 | 3;
 

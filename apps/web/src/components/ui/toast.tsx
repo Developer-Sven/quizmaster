@@ -24,7 +24,7 @@ export interface ToastProps {
 }
 
 /**
- * Toast (docs/09 §5): unten über der Aktionsleiste, eine Zeile, Icon 20, 3 s; info oder Fehler.
+ * Toast (docs/09 §5): unten über der Aktionsleiste, Icon 20, 3 s; info oder Fehler.
  * Die Live-Regionen bleiben dauerhaft im DOM, damit Screenreader neue Meldungen sicher ansagen –
  * die Komponente deshalb immer rendern und nur `message` wechseln.
  */
@@ -38,24 +38,13 @@ export function Toast({ message, tone = "info", icon, onDismiss, durationMs = TO
     return () => window.clearTimeout(timeout);
   }, [message, durationMs]);
 
-  const Icon = icon ?? (tone === "error" ? TriangleAlertIcon : CheckIcon);
-  const visual = message ? (
-    <m.div
-      key={message}
-      {...panelMotion(reduce)}
-      aria-hidden="true"
-      className="flex w-full max-w-column items-center gap-3 rounded-lg border border-line-strong bg-surface-2 px-4 py-3"
-    >
-      <Icon size={20} className={cx("shrink-0", tone === "error" ? "text-danger" : "text-text-2")} />
-      <span className="min-w-0 flex-1 truncate text-body text-text">{message}</span>
-    </m.div>
-  ) : null;
-
   return (
     <Portal>
       <div className="pointer-events-none fixed inset-x-0 bottom-toast z-toast flex justify-center px-gutter">
         <MotionProvider>
-          <AnimatePresence mode="wait">{visual}</AnimatePresence>
+          <AnimatePresence mode="wait">
+            {message ? <ToastPanel key={message} message={message} tone={tone} icon={icon} reduce={reduce} /> : null}
+          </AnimatePresence>
         </MotionProvider>
         <span className="sr-only" role="status">
           {tone === "info" ? message : null}
@@ -65,5 +54,32 @@ export function Toast({ message, tone = "info", icon, onDismiss, durationMs = TO
         </span>
       </div>
     </Portal>
+  );
+}
+
+export interface ToastPanelProps {
+  message: string;
+  tone: ToastTone;
+  icon?: LucideIcon | undefined;
+  reduce?: boolean;
+}
+
+/**
+ * Sichtbarer Teil des Toasts: schwebendes Panel der Ebene 2 (`surface-1`, 1 px `line`, `radius-xl`,
+ * Schatten – docs/09 §2), damit er sich über Sheets nicht wie eine Listenzeile oder ein Button liest.
+ * Lange Meldungen (docs/09 §11, bis ~50 Zeichen) brechen um statt abgeschnitten zu werden – bei 360 px
+ * zwei Zeilen. Für Screenreader verborgen: Ansagen kommen aus den Live-Regionen von {@link Toast}.
+ */
+export function ToastPanel({ message, tone, icon, reduce = false }: ToastPanelProps) {
+  const Icon = icon ?? (tone === "error" ? TriangleAlertIcon : CheckIcon);
+  return (
+    <m.div
+      {...panelMotion(reduce)}
+      aria-hidden="true"
+      className="flex w-full max-w-column items-center gap-3 rounded-xl border border-line bg-surface-1 px-4 py-3 shadow-level-2"
+    >
+      <Icon size={20} className={cx("shrink-0", tone === "error" ? "text-danger" : "text-text-2")} />
+      <span className="min-w-0 flex-1 text-body text-text">{message}</span>
+    </m.div>
   );
 }

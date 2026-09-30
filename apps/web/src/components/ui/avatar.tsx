@@ -65,7 +65,9 @@ export function Avatar({
   const dimmed = offline || resigned;
 
   return (
-    <span {...a11y} className="relative inline-flex shrink-0">
+    // size-fit: Als Flex-/Grid-Item (stretch) würde der Wrapper sonst breiter als der Kreis – die
+    // absolut positionierten Badges säßen dann an der Zellecke statt am Avatar.
+    <span {...a11y} className="relative inline-flex size-fit shrink-0">
       <span
         className={cx(
           "relative flex items-center justify-center rounded-full select-none",

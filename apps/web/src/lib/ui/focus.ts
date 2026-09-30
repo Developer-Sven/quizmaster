@@ -27,6 +27,21 @@ export function nextTrapIndex(current: number, count: number, backwards: boolean
   return current === count - 1 ? 0 : current + 1;
 }
 
+/**
+ * Ob ein Ansichtswechsel den Fokus auf den Titel der Ebene setzt (Sheet-Unteransichten), damit
+ * Screenreader die neue Ansicht ansagen. Nur solange die Ebene offen ist: Setzen die Eltern `view`
+ * beim Schließen zurück, hat `useModalLayer` den Fokus bereits an den Auslöser zurückgegeben – ihn
+ * auf den Titel des ausblendenden Panels zu ziehen, ließe ihn nach der Exit-Animation auf `<body>`
+ * fallen (WCAG 2.4.3).
+ */
+export function focusTitleOnViewChange(
+  previousView: string | undefined,
+  view: string | undefined,
+  open: boolean,
+): boolean {
+  return open && previousView !== view;
+}
+
 /** Hält Tab/Umschalt+Tab innerhalb von `container` (Fokusfalle für Sheet und Dialog). */
 export function trapTabKey(event: KeyboardEvent, container: HTMLElement): void {
   const items = focusableWithin(container);

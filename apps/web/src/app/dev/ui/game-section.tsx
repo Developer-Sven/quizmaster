@@ -102,35 +102,32 @@ export function GameSection() {
       </Demo>
 
       <ComponentTitle>QuestionCard und TimerBar</ComponentTitle>
-      <QuestionCard key={`q-${timerRun}`} prompt={SHORT_QUESTION} timer={{ remainingMs: 20_000, durationMs: 20_000 }} />
+      {/* runId = Lauf-Identität: „Timer neu starten“ vergibt eine neue, sonst läuft jeder Timer ungestört */}
+      <QuestionCard prompt={SHORT_QUESTION} timer={{ runId: timerRun, remainingMs: 20_000, durationMs: 20_000 }} />
       <Demo label="lange Frage (140 Zeichen, question-long) · letzte 5 s rot">
-        <QuestionCard
-          key={`l-${timerRun}`}
-          prompt={LONGEST_QUESTION}
-          timer={{ remainingMs: 7_000, durationMs: 20_000 }}
-        />
+        <QuestionCard prompt={LONGEST_QUESTION} timer={{ runId: timerRun, remainingMs: 7_000, durationMs: 20_000 }} />
       </Demo>
       <Demo label="Bildfrage (Flagge) · Timer abgelaufen">
         <QuestionCard
           prompt="Zu welchem Land gehört diese Flagge?"
           media={{ kind: "flag", code: "de" }}
-          timer={{ remainingMs: 0, durationMs: 20_000 }}
+          timer={{ runId: 0, remainingMs: 0, durationMs: 20_000 }}
         />
       </Demo>
       <Demo label="TimerBar einzeln (läuft)">
-        <TimerBar key={`b-${timerRun}`} remainingMs={12_000} durationMs={20_000} announce={false} />
+        <TimerBar runId={timerRun} remainingMs={12_000} durationMs={20_000} announce={false} />
       </Demo>
 
       <ComponentTitle>TimerRing</ComponentTitle>
       <div className="flex flex-wrap items-center gap-6">
         <Demo label="läuft (15 s)">
-          <TimerRing key={`r-${timerRun}`} remainingMs={15_000} durationMs={15_000} />
+          <TimerRing runId={timerRun} remainingMs={15_000} durationMs={15_000} />
         </Demo>
         <Demo label="letzte 5 s">
-          <TimerRing key={`d-${timerRun}`} remainingMs={4_500} durationMs={15_000} announce={false} />
+          <TimerRing runId={timerRun} remainingMs={4_500} durationMs={15_000} announce={false} />
         </Demo>
         <Demo label="abgelaufen">
-          <TimerRing remainingMs={0} durationMs={15_000} />
+          <TimerRing runId={0} remainingMs={0} durationMs={15_000} />
         </Demo>
       </div>
       <Button variant="ghost" size="compact" onClick={() => setTimerRun((run) => run + 1)}>

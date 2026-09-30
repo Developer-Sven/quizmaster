@@ -5,6 +5,7 @@ import * as m from "motion/react-m";
 import { type ReactNode, useEffect, useId, useRef } from "react";
 import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
+import { focusTitleOnViewChange } from "../../lib/ui/focus";
 import { ChevronDownIcon, ChevronLeftIcon } from "../../lib/ui/icons";
 import { useModalLayer } from "../../lib/ui/modal-layer";
 import { MotionProvider } from "../../lib/ui/motion";
@@ -53,11 +54,10 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
   // Unteransicht gewechselt: Fokus auf den neuen Titel (der alte Fokus ist mit dem Inhalt verschwunden).
   const previousView = useRef(view);
   useEffect(() => {
-    if (previousView.current !== view) {
-      previousView.current = view;
-      titleRef.current?.focus({ preventScroll: true });
-    }
-  }, [view]);
+    const focusTitle = focusTitleOnViewChange(previousView.current, view, open);
+    previousView.current = view;
+    if (focusTitle) titleRef.current?.focus({ preventScroll: true });
+  }, [view, open]);
 
   const motionProps = sheetMotion(reduce);
 

@@ -7,7 +7,13 @@ import { secondsLeft, timerState, timerStyle } from "../../lib/ui/timer";
 import { TimerAnnouncer } from "../../lib/ui/timer-announcer";
 
 export interface TimerRingProps {
-  /** Restzeit beim (Neu-)Start in ms; nur bei Phasenstart oder Resync neu berechnen */
+  /**
+   * Identität des Timer-Laufs, z. B. `phaseStartedAt` der Kategoriewahl. Nur ein neuer Wert startet
+   * den Ring neu (auch beim Resync nach einem Reconnect); spätere Änderungen von
+   * `remainingMs`/`durationMs` im selben Lauf werden ignoriert.
+   */
+  runId: string | number;
+  /** Restzeit beim Start des Laufs in ms */
   remainingMs: number;
   /** Gesamtdauer in ms (Kategoriewahl 15 000) */
   durationMs: number;
@@ -20,9 +26,13 @@ export interface TimerRingProps {
  * Sekundenzahl (`label`, tabular) in der Mitte. Der Ring läuft als CSS-Animation über
  * `stroke-dashoffset`; nur die kleine Zahl aktualisiert sich einmal pro Sekunde.
  */
-export function TimerRing({ remainingMs, durationMs, announce = true }: TimerRingProps) {
-  const state = timerState(remainingMs, durationMs);
-  const runKey = `${state.remainingMs}/${durationMs}`;
+export function TimerRing({ runId, ...run }: TimerRingProps) {
+  return <TimerRingRun key={runId} {...run} />;
+}
+
+/** Ein Lauf: Startwerte beim Mount eingefroren, damit Re-Renders der Eltern den Ring nicht zurücksetzen. */
+function TimerRingRun({ remainingMs, durationMs, announce = true }: Omit<TimerRingProps, "runId">) {
+  const [state] = useState(() => timerState(remainingMs, durationMs));
   return (
     <>
       <div
@@ -35,7 +45,6 @@ export function TimerRing({ remainingMs, durationMs, announce = true }: TimerRin
           <circle cx="24" cy="24" r="22" fill="none" strokeWidth="4" className="stroke-line" />
           {state.expired ? null : (
             <circle
-              key={runKey}
               cx="24"
               cy="24"
               r="22"
@@ -47,9 +56,9 @@ export function TimerRing({ remainingMs, durationMs, announce = true }: TimerRin
             />
           )}
         </svg>
-        <TimerSeconds key={runKey} remainingMs={state.remainingMs} />
+        <TimerSeconds remainingMs={state.remainingMs} />
       </div>
-      {announce && !state.expired ? <TimerAnnouncer key={runKey} remainingMs={state.remainingMs} /> : null}
+      {announce && !state.expired ? <TimerAnnouncer remainingMs={state.remainingMs} /> : null}
     </>
   );
 }

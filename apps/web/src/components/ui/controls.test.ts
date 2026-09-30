@@ -118,6 +118,28 @@ describe("CodeInput", () => {
     expect(html).toContain('aria-invalid="true"');
   });
 
+  it("kündigt den Auto-Beitritt vorab an und verknüpft Hinweis und Fehler (WCAG 3.2.2)", () => {
+    const html = renderToStaticMarkup(
+      h(CodeInput, { onComplete: noop, hint: "Nach dem 6. Zeichen trittst du automatisch bei." }),
+    );
+    const hintId = /<p id="([^"]+)"[^>]*>Nach dem 6\. Zeichen trittst du automatisch bei\.<\/p>/.exec(html)?.[1];
+    expect(hintId).toBeTruthy();
+    expect(html).toContain(`aria-describedby="${hintId}"`);
+    const withError = renderToStaticMarkup(
+      h(CodeInput, { onComplete: noop, hint: "Hinweis", error: "Lobby nicht gefunden." }),
+    );
+    const describedBy = /aria-describedby="([^"]+)"/.exec(withError)?.[1]?.split(" ") ?? [];
+    expect(describedBy).toHaveLength(2);
+    for (const id of describedBy) expect(withError).toContain(`id="${id}"`);
+  });
+
+  it("verlangt mit Auto-Beitritt einen Hinweis (Typfehler ohne) und bleibt ohne onComplete schlicht", () => {
+    // @ts-expect-error hint ist Pflicht, sobald onComplete gesetzt ist (Kontextwechsel, WCAG 3.2.2)
+    const withoutHint = renderToStaticMarkup(h(CodeInput, { onComplete: noop }));
+    expect(withoutHint).not.toContain("aria-describedby");
+    expect(renderToStaticMarkup(h(CodeInput, { defaultValue: "AB" }))).not.toContain("<p");
+  });
+
   it("markiert die aktive Zelle mit 2 px primary", () => {
     const html = renderToStaticMarkup(h(CodeInput, { defaultValue: "AB", "data-force": "focus" }));
     expect(html.match(/border-primary outline-1 -outline-offset-2 outline-primary/g)).toHaveLength(1);

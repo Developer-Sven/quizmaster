@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -110,7 +111,7 @@ describe("AnswerButton", () => {
 
 describe("TimerBar und TimerRing", () => {
   it("läuft als CSS-Animation mit Restzeit-Variablen und role=timer", () => {
-    const html = renderToStaticMarkup(h(TimerBar, { remainingMs: 12_000, durationMs: 20_000 }));
+    const html = renderToStaticMarkup(h(TimerBar, { runId: "q1", remainingMs: 12_000, durationMs: 20_000 }));
     expect(html).toContain('role="timer"');
     expect(html).toContain("h-1.5");
     expect(html).toContain("animate-timer-bar");
@@ -118,20 +119,45 @@ describe("TimerBar und TimerRing", () => {
     expect(html).toContain('aria-live="polite"');
   });
 
+  it("bleibt im Kontrastmodus (forced colors) sichtbar: Spur mit Rahmen, Balken in Textfarbe", () => {
+    const html = renderToStaticMarkup(h(TimerBar, { runId: 1, remainingMs: 12_000, durationMs: 20_000 }));
+    expect(html).toContain("forced-colors:outline");
+    const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+    const utility = /@utility animate-timer-bar \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(utility).toMatch(/@variant forced-colors \{[^}]*forced-color-adjust: none;[^}]*CanvasText/);
+    // Die Farbe kommt aus dem Utility selbst: eine bg-Klasse stünde später im Stylesheet und gewönne
+    expect(utility).toContain("background-color: var(--color-primary);");
+    expect(/class="([^"]*animate-timer-bar[^"]*)"/.exec(html)?.[1]).not.toMatch(/\bbg-/);
+  });
+
+  it("braucht eine Lauf-Identität (runId) statt Restzeit/Dauer als Schlüssel", () => {
+    // Ohne runId entschied `${remainingMs}/${durationMs}` über den Neustart: gleiche (geklemmte) Werte
+    // zweier Fragen starteten nicht neu, jede andere Wertänderung setzte den Timer zurück.
+    // @ts-expect-error runId ist Pflicht – tsc (pnpm typecheck) prüft das
+    const bar = renderToStaticMarkup(h(TimerBar, { remainingMs: 12_000, durationMs: 20_000 }));
+    // @ts-expect-error runId ist Pflicht – tsc (pnpm typecheck) prüft das
+    const ring = renderToStaticMarkup(h(TimerRing, { remainingMs: 12_000, durationMs: 15_000 }));
+    expect(bar).toContain('role="timer"');
+    expect(ring).toContain('role="timer"');
+    // runId landet nicht im DOM
+    const html = renderToStaticMarkup(h(TimerBar, { runId: "r1-t2-q3", remainingMs: 12_000, durationMs: 20_000 }));
+    expect(html).not.toContain("r1-t2-q3");
+  });
+
   it("zeigt abgelaufen keinen Balken mehr", () => {
-    const html = renderToStaticMarkup(h(TimerBar, { remainingMs: 0, durationMs: 20_000 }));
+    const html = renderToStaticMarkup(h(TimerBar, { runId: "q1", remainingMs: 0, durationMs: 20_000 }));
     expect(html).not.toContain("animate-timer-bar");
     expect(html).not.toContain("aria-live");
   });
 
   it("zeigt im Ring die Sekunden tabular und wird abgelaufen rot", () => {
-    const running = renderToStaticMarkup(h(TimerRing, { remainingMs: 15_000, durationMs: 15_000 }));
+    const running = renderToStaticMarkup(h(TimerRing, { runId: "p1", remainingMs: 15_000, durationMs: 15_000 }));
     expect(running).toContain('role="timer"');
     expect(running).toContain("size-12");
     expect(running).toContain('pathLength="100"');
     expect(running).toContain("stroke-primary animate-timer-ring");
     expect(running).toMatch(/tabular-nums[^"]*">15</);
-    const expired = renderToStaticMarkup(h(TimerRing, { remainingMs: 0, durationMs: 15_000 }));
+    const expired = renderToStaticMarkup(h(TimerRing, { runId: "p1", remainingMs: 0, durationMs: 15_000 }));
     expect(expired).toContain("text-danger");
     expect(expired).toMatch(/>0</);
     expect(expired).not.toContain("animate-timer-ring");
@@ -141,7 +167,7 @@ describe("TimerBar und TimerRing", () => {
 describe("QuestionCard", () => {
   it("wechselt ab 101 Zeichen auf question-long und zeigt den TimerBar oben", () => {
     const short = renderToStaticMarkup(
-      h(QuestionCard, { prompt: "Kurz?", timer: { remainingMs: 20_000, durationMs: 20_000 } }),
+      h(QuestionCard, { prompt: "Kurz?", timer: { runId: "q1", remainingMs: 20_000, durationMs: 20_000 } }),
     );
     expect(short).toContain("text-question ");
     expect(short).toContain('role="timer"');
@@ -176,6 +202,26 @@ describe("ResultSquare und Board", () => {
     expect(render("none")).toContain("size-3.5 shrink-0 rounded-sm");
   });
 
+  it("zeigt richtig/falsch zusätzlich per Glyphe, nicht nur per Farbe (docs/09 §12, WCAG 1.4.1)", () => {
+    const render = (result: "correct" | "wrong" | "open" | "none", appearDelayMs?: number) =>
+      renderToStaticMarkup(h(ResultSquare, { result, appearDelayMs }));
+    expect(render("correct")).toContain("lucide-check");
+    expect(render("wrong")).toContain("lucide-x");
+    expect(render("open")).not.toContain("<svg");
+    expect(render("none")).not.toContain("<svg");
+    expect(render("correct", 80)).toContain("lucide-check");
+    expect(render("wrong", 80)).toContain("lucide-x");
+  });
+
+  it("zeichnet im Kontrastmodus (forced colors) einen Rahmen statt nur einer Fläche", () => {
+    for (const result of ["correct", "wrong", "open"] as const) {
+      expect(renderToStaticMarkup(h(ResultSquare, { result })), result).toContain("border border-transparent");
+    }
+    expect(renderToStaticMarkup(h(ResultSquare, { result: "wrong", appearDelayMs: 0 }))).toContain(
+      "border border-transparent",
+    );
+  });
+
   it("übersetzt Tafelwerte", () => {
     expect([true, false, null, undefined].map(squareResult)).toEqual(["correct", "wrong", "none", "open"]);
   });
@@ -198,6 +244,38 @@ describe("ResultSquare und Board", () => {
     expect(html).toContain('aria-label="Platz verbessert"');
     expect(html).toContain('aria-label="Platz verschlechtert"');
     expect(html).toContain("overflow-x-auto");
+  });
+
+  it("nennt „aufgegeben“ im Spaltenkopf und dimmt die Kästchen Aufgegebener nicht", () => {
+    const html = renderToStaticMarkup(
+      h(Board, {
+        players: [
+          { id: "a", name: "Mia", color: "blue", score: 5 },
+          { id: "b", name: "Tom", color: "yellow", score: 2, resigned: true },
+        ],
+        rows: [{ key: "r1", category: books, results: { a: [true], b: [false] } }],
+        questionsPerTurn: 1,
+      }),
+    );
+    expect(html).toContain("Mia, Summe");
+    expect(html).toContain("Tom, aufgegeben, Summe");
+    // nur der Avatar (docs/09 §5) ist gedimmt, nicht die Ergebnis-Kästchen (Kontrast ≥ 3:1)
+    expect(html.match(/opacity-40/g)).toHaveLength(1);
+  });
+
+  it("bricht Kästchen nach 3 um, damit Spalten bei K bis 10 schmal bleiben", () => {
+    const html = renderToStaticMarkup(
+      h(Board, {
+        players: [{ id: "a", name: "Mia", color: "blue", score: 5 }],
+        rows: [{ key: "r1", category: books, results: { a: [true, true, false, true, false, true] } }],
+        questionsPerTurn: 10,
+      }),
+    );
+    expect(html.match(/role="img" aria-label="(richtig|falsch|offen)"/g)).toHaveLength(10);
+    // Zeilen à höchstens 3 Kästchen (3 + 3 + 3 + 1): min-content bleibt 3 Kästchen breit, die Tabelle
+    // quetscht die Spalten also nicht, sondern scrollt bei 6–8 Personen weiter horizontal
+    expect(html.match(/<span class="flex gap-1">/g)).toHaveLength(4);
+    expect(html).toContain('<td class="px-1 py-2">');
   });
 
   it("staffelt die Füllung neuer Zeilen", () => {

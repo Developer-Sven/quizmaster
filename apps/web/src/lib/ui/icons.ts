@@ -18,6 +18,7 @@
  * | Ton an / aus                            | Volume2Icon / VolumeXIcon |
  * | Offline                                 | WifiOffIcon        |
  * | Richtig / Falsch                        | CircleCheckIcon / CircleXIcon |
+ * | Richtig / Falsch im Ergebnis-Kästchen   | CheckIcon / XIcon (12 px)     |
  * | Eingeloggt / Zeit / Laden               | LockIcon / TimerIcon / LoaderCircleIcon |
  * | Platz hoch / runter                     | ArrowUpIcon / ArrowDownIcon |
  * | Warnung/Fehler                          | TriangleAlertIcon  |

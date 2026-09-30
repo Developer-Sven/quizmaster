@@ -1,20 +1,22 @@
 "use client";
 
-import { type ChangeEvent, type ClipboardEvent, type Ref, type SyntheticEvent, useId, useState } from "react";
+import { type ChangeEvent, type ClipboardEvent, type Ref, type SyntheticEvent, useId, useRef, useState } from "react";
 import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
 import { TriangleAlertIcon } from "../../lib/ui/icons";
 import {
+  activeCodeCell,
   applyCodeInput,
   applyCodePaste,
+  type CaretSource,
   type CodeInputChange,
-  LOBBY_CODE_LENGTH,
+  caretAfterSelect,
   normalizeCodeInput,
 } from "../../lib/ui/lobby-code";
 
 const CELLS = [0, 1, 2, 3, 4, 5] as const;
 
-export interface CodeInputProps {
+interface CodeInputBaseProps {
   /** Sichtbare Beschriftung (Standard „Lobby-Code“) */
   label?: string;
   /** Kontrollierter Wert (wird normalisiert angezeigt) */
@@ -23,8 +25,6 @@ export interface CodeInputProps {
   defaultValue?: string;
   /** Jede Änderung, bereits normalisiert (Großbuchstaben, ohne Leerzeichen/Bindestriche, max. 6) */
   onChange?: (code: string) => void;
-  /** Sobald eine Eingabe den Code auf 6 Zeichen vervollständigt (Auto-Beitritt) */
-  onComplete?: (code: string) => void;
   /** Fehler: alle Zellen roter Rahmen, Hinweis darunter */
   error?: string | null;
   disabled?: boolean;
@@ -35,9 +35,29 @@ export interface CodeInputProps {
 }
 
 /**
+ * Auto-Beitritt wechselt den Kontext allein durch die Eingabe – das muss vorher angekündigt sein
+ * (WCAG 3.2.2): Mit `onComplete` ist `hint` Pflicht (z. B. `de.fields.lobbyCodeHint`).
+ */
+type CodeInputCompletionProps =
+  | {
+      onComplete?: undefined;
+      /** Hinweis unter den Zellen (`caption`, `text-2`), mit dem Feld verknüpft */
+      hint?: string;
+    }
+  | {
+      /** Sobald eine Eingabe den Code auf 6 Zeichen vervollständigt (Auto-Beitritt) */
+      onComplete: (code: string) => void;
+      /** Kündigt den Auto-Beitritt an; sichtbar vor der Eingabe und per aria-describedby vorgelesen */
+      hint: string;
+    };
+
+export type CodeInputProps = CodeInputBaseProps & CodeInputCompletionProps;
+
+/**
  * CodeInput (docs/09 §5): 6 Zellen à 48 × 56, Lücke nach Zelle 3, Zeichen im Stil `code`.
- * Ein einziges (unsichtbares) Eingabefeld liegt über den Zellen: Tastatur, Einfügen, Autokorrektur-
- * Schutz und Screenreader funktionieren wie bei einem normalen Feld.
+ * Ein einziges (unsichtbares) Eingabefeld liegt über den Zellen: Tastatur (inkl. Pfeiltasten),
+ * Einfügen, Autokorrektur-Schutz und Screenreader funktionieren wie bei einem normalen Feld; die
+ * aktive Zelle folgt der Einfügemarke.
  */
 export function CodeInput({
   label = de.fields.lobbyCode,
@@ -45,6 +65,7 @@ export function CodeInput({
   defaultValue = "",
   onChange,
   onComplete,
+  hint,
   error,
   disabled = false,
   name,
@@ -52,13 +73,21 @@ export function CodeInput({
   "data-force": force,
 }: CodeInputProps) {
   const id = useId();
+  const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const [uncontrolled, setUncontrolled] = useState(() => normalizeCodeInput(defaultValue));
   const [focused, setFocused] = useState(false);
+  const [caret, setCaret] = useState<number | null>(null);
+  // Letzte Bedienart: Zeigerbedienung setzt die Marke ans Ende, Tastatur bewegt sie frei.
+  const lastInput = useRef<CaretSource>("pointer");
   const code = value === undefined ? uncontrolled : normalizeCodeInput(value);
   const invalid = Boolean(error);
   const showActive = (focused || force === "focus") && !disabled;
-  const activeIndex = Math.min(code.length, LOBBY_CODE_LENGTH - 1);
+  const activeIndex = activeCodeCell(code.length, caret);
+  const describedIds: string[] = [];
+  if (hint) describedIds.push(hintId);
+  if (invalid) describedIds.push(errorId);
+  const describedBy = describedIds.length > 0 ? describedIds.join(" ") : undefined;
 
   const commit = (change: CodeInputChange) => {
     if (value === undefined) setUncontrolled(change.value);
@@ -75,12 +104,12 @@ export function CodeInput({
     commit(applyCodePaste(code, event.clipboardData.getData("text")));
   };
 
-  // Die Zellen zeigen immer das Ende der Eingabe: Einfügemarke ans Ende (Alles-Markieren bleibt erlaubt).
-  const keepCaretAtEnd = (event: SyntheticEvent<HTMLInputElement>) => {
+  const handleSelect = (event: SyntheticEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
-    const end = input.value.length;
-    const all = input.selectionStart === 0 && input.selectionEnd === end;
-    if (!all && (input.selectionStart !== end || input.selectionEnd !== end)) input.setSelectionRange(end, end);
+    const start = input.selectionStart ?? input.value.length;
+    const forced = caretAfterSelect(lastInput.current, start, input.selectionEnd ?? start, input.value.length);
+    if (forced !== null) input.setSelectionRange(forced, forced);
+    setCaret(forced ?? start);
   };
 
   return (
@@ -96,7 +125,13 @@ export function CodeInput({
           value={code}
           onChange={handleChange}
           onPaste={handlePaste}
-          onSelect={keepCaretAtEnd}
+          onSelect={handleSelect}
+          onPointerDown={() => {
+            lastInput.current = "pointer";
+          }}
+          onKeyDown={() => {
+            lastInput.current = "keyboard";
+          }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           disabled={disabled}
@@ -110,7 +145,7 @@ export function CodeInput({
           data-1p-ignore=""
           data-lpignore="true"
           aria-invalid={invalid || undefined}
-          aria-describedby={invalid ? errorId : undefined}
+          aria-describedby={describedBy}
           className="absolute inset-0 z-1 size-full cursor-text opacity-0 disabled:cursor-not-allowed"
         />
         {CELLS.map((cell) => {
@@ -132,6 +167,11 @@ export function CodeInput({
           );
         })}
       </div>
+      {hint ? (
+        <p id={hintId} className={cx("text-caption text-text-2", disabled && "opacity-40")}>
+          {hint}
+        </p>
+      ) : null}
       {invalid ? (
         <p id={errorId} role="alert" className="flex items-center gap-1 text-caption text-danger">
           <TriangleAlertIcon size={16} className="shrink-0" />

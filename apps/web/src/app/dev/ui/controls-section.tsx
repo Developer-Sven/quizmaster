@@ -130,7 +130,7 @@ export function ControlsSection() {
 
       <ComponentTitle>CodeInput</ComponentTitle>
       <Demo label={completed ? `vollständig: ${completed}` : "leer – tippen oder einfügen (z. B. „abc-234“)"}>
-        <CodeInput value={code} onChange={setCode} onComplete={setCompleted} />
+        <CodeInput value={code} onChange={setCode} onComplete={setCompleted} hint={de.fields.lobbyCodeHint} />
       </Demo>
       <Demo label="aktiv">
         <CodeInput defaultValue="AB" data-force="focus" />

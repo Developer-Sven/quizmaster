@@ -43,6 +43,8 @@ export const de = {
   fields: {
     name: "Dein Name",
     lobbyCode: "Lobby-Code",
+    /** Kündigt den Auto-Beitritt des CodeInput an (WCAG 3.2.2) – die eine Hilfezeile der Startseite */
+    lobbyCodeHint: "Nach dem 6. Zeichen trittst du automatisch bei.",
   },
 
   start: {

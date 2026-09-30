@@ -26,12 +26,26 @@ export interface PodiumProps {
   animate?: boolean;
 }
 
-/** Säulen in Anzeige-Reihenfolge 2-1-3 mit Höhen 96/128/72 (docs/09 §5). */
-const COLUMNS = [
-  { rank: 1, order: "order-2", height: "h-32", growStep: 2 },
-  { rank: 2, order: "order-1", height: "h-24", growStep: 1 },
-  { rank: 3, order: "order-3", height: "h-18", growStep: 0 },
-] as const;
+/** Anzeige-Reihenfolge 2-1-3 (docs/09 §5): Eintrag 0 in der Mitte, 1 links, 2 rechts. */
+const COLUMN_ORDER = ["order-2", "order-1", "order-3"] as const;
+
+/**
+ * Säulenhöhe nach tatsächlichem Platz, nicht nach Position: 1 → 128, 2 → 96, 3 → 72 (docs/09 §5).
+ * Gleichstand = gleicher Platz (ADR-017) steht so auf gleich hohen Säulen.
+ */
+function columnHeight(place: number): string {
+  if (place <= 1) return "h-32";
+  return place === 2 ? "h-24" : "h-18";
+}
+
+/**
+ * Wachstumsschritt einer Säule (Platz 3 → 2 → 1, je 160 ms, docs/09 §7.9): gezählt über die
+ * verschiedenen Plätze auf dem Podest, damit Gleichplatzierte gemeinsam und ohne Leerlauf wachsen.
+ */
+export function podiumGrowStep(place: number, podiumPlaces: readonly number[]): number {
+  const descending = [...new Set(podiumPlaces)].sort((a, b) => b - a);
+  return Math.max(0, descending.indexOf(place));
+}
 
 /**
  * Podium (docs/09 §5): 3 Säulen (2-1-3), Avatar 56 oben, Platzziffer. Im DOM steht Platz 1 zuerst
@@ -39,19 +53,25 @@ const COLUMNS = [
  */
 export function Podium({ entries, animate = false }: PodiumProps) {
   const reduce = useReducedMotion() ?? false;
+  const podium = entries.slice(0, COLUMN_ORDER.length);
+  const places = podium.map((entry) => entry.place);
   return (
     <MotionProvider>
       <ol aria-label={de.result.podium} className="flex items-end justify-center gap-3">
-        {COLUMNS.map((column, index) => {
-          const entry = entries[index];
-          if (!entry) return null;
-          const delay = seconds(column.growStep * STAGGER_MS.podium);
+        {podium.map((entry, index) => {
+          const delay = seconds(podiumGrowStep(entry.place, places) * STAGGER_MS.podium);
           return (
-            <li key={entry.playerId} className={cx("flex w-24 min-w-0 flex-col items-center gap-2", column.order)}>
+            <li
+              key={entry.playerId}
+              className={cx("flex w-24 min-w-0 flex-col items-center gap-2", COLUMN_ORDER[index])}
+            >
               <Avatar name={entry.name} color={entry.color} size={56} winner={entry.place === 1} />
               <span className="max-w-full truncate text-label text-text">{entry.name}</span>
               <m.span
-                className={cx("flex w-full origin-bottom justify-center rounded-t-lg bg-surface-2 pt-2", column.height)}
+                className={cx(
+                  "flex w-full origin-bottom justify-center rounded-t-lg bg-surface-2 pt-2",
+                  columnHeight(entry.place),
+                )}
                 initial={animate ? (reduce ? { opacity: 0 } : { scaleY: 0 }) : false}
                 animate={reduce ? { opacity: 1 } : { scaleY: 1 }}
                 transition={

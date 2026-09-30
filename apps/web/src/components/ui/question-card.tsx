@@ -1,5 +1,5 @@
 import { de } from "../../i18n/de";
-import { TimerBar } from "./timer-bar";
+import { TimerBar, type TimerBarProps } from "./timer-bar";
 
 /** Fragen mit mehr Zeichen nutzen den kleineren Stil `question-long` (19/27, docs/09 §3). */
 export const LONG_QUESTION_CHARS = 100;
@@ -11,8 +11,8 @@ export interface QuestionCardProps {
   prompt: string;
   /** Bildfrage (docs/05 `media`): Flagge max. 160 × 120 mit 1 px Rahmen */
   media?: { kind: "flag"; code: string } | null;
-  /** TimerBar oben; ohne Wert kein Timer (z. B. in der Auflösung) */
-  timer?: { remainingMs: number; durationMs: number } | null;
+  /** TimerBar oben; ohne Wert kein Timer (z. B. in der Auflösung). `runId`: siehe {@link TimerBarProps} */
+  timer?: Pick<TimerBarProps, "runId" | "remainingMs" | "durationMs"> | null;
 }
 
 /**
@@ -26,7 +26,7 @@ export function QuestionCard({ prompt, media, timer }: QuestionCardProps) {
     <div className="relative overflow-hidden rounded-xl border border-line bg-surface-1 p-5">
       {timer ? (
         <div className="absolute inset-x-0 top-0">
-          <TimerBar remainingMs={timer.remainingMs} durationMs={timer.durationMs} />
+          <TimerBar runId={timer.runId} remainingMs={timer.remainingMs} durationMs={timer.durationMs} />
         </div>
       ) : null}
       <p className={prompt.length > LONG_QUESTION_CHARS ? "text-question-long text-text" : "text-question text-text"}>

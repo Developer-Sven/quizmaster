@@ -286,9 +286,19 @@
  */
 @utility animate-timer-bar {
   transform-origin: left;
+  /* Farbe hier statt per bg-Klasse: bg-* stünde im Stylesheet später und überschriebe die
+     Kontrastmodus-Regel unten */
+  background-color: var(--color-primary);
   animation:
     timer-shrink var(--timer-remaining) linear forwards,
     timer-danger-fill var(--duration-base) var(--ease-standard) var(--timer-danger-delay) forwards;
+  /* Kontrastmodus (forced colors): Flächen würden zu Canvas und der Balken verschwände – dort in
+     Textfarbe zeichnen, ohne Wechsel auf danger (Systemfarben kennen kein Rot); docs/09 §12 */
+  @variant forced-colors {
+    forced-color-adjust: none;
+    background-color: CanvasText;
+    animation: timer-shrink var(--timer-remaining) linear forwards;
+  }
 }
 @utility animate-timer-ring {
   animation:

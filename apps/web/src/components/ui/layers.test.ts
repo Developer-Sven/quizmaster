@@ -8,7 +8,7 @@ import { EmptyState } from "./empty-state";
 import { Sheet } from "./sheet";
 import { Skeleton } from "./skeleton";
 import { renderHtml } from "./ssr-render";
-import { Toast } from "./toast";
+import { Toast, ToastPanel } from "./toast";
 
 const noop = () => {};
 
@@ -31,6 +31,25 @@ describe("Ebenen (Sheet, Dialog, Toast)", () => {
   });
 });
 
+describe("ToastPanel (sichtbarer Teil des Toasts)", () => {
+  const longest = "Zu viele offene Verbindungen. Schließ andere Tabs.";
+
+  it("bricht lange Meldungen um statt sie abzuschneiden (docs/09 §11-Texte passen nicht in 1 Zeile)", () => {
+    const html = renderToStaticMarkup(h(ToastPanel, { message: longest, tone: "error" }));
+    expect(html).toContain(longest);
+    expect(html).not.toMatch(/truncate|line-clamp|whitespace-nowrap/);
+    expect(html).toContain("lucide-triangle-alert");
+  });
+
+  it("ist ein schwebendes Panel der Ebene 2, nicht in Button-/Eingabe-Optik (docs/09 §2)", () => {
+    const html = renderToStaticMarkup(h(ToastPanel, { message: "Danke, wir prüfen die Frage.", tone: "info" }));
+    expect(html).toContain("rounded-xl border border-line bg-surface-1");
+    expect(html).toContain("shadow-level-2");
+    expect(html).not.toMatch(/border-line-strong|bg-surface-2|rounded-lg/);
+    expect(html).toContain('aria-hidden="true"');
+  });
+});
+
 describe("Banner", () => {
   it("bietet bei Update „Aktualisieren“ an", () => {
     const html = renderToStaticMarkup(h(Banner, { tone: "update", onAction: noop }));
@@ -38,6 +57,13 @@ describe("Banner", () => {
     expect(html).toContain("Neue Version verfügbar");
     expect(html).toMatch(/<button[^>]*>.*Aktualisieren/);
     expect(html).toContain("min-h-14");
+  });
+
+  it("zeigt lange Wartungstexte vollständig (Schema erlaubt 200 Zeichen), ohne abzuschneiden", () => {
+    const message = `${"Wir spielen ein Update ein, laufende Spiele enden vorher sauber. ".repeat(3)}Bis gleich.`;
+    const html = renderToStaticMarkup(h(Banner, { tone: "maintenance", message }));
+    expect(html).toContain(message);
+    expect(html).not.toMatch(/line-clamp|truncate/);
   });
 
   it("zeigt bei Wartung den Standardtext mit triangle-alert", () => {
