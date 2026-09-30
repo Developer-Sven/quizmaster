@@ -390,6 +390,9 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
+      flag-icons:
+        specifier: 7.5.0
+        version: 7.5.0
       lighthouse:
         specifier: 13.5.0
         version: 13.5.0(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))(yauzl@3.4.0)

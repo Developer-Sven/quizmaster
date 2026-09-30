@@ -18,7 +18,12 @@
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck --concurrency=2",
-    "content:validate": "pnpm --filter @quizmaster/scripts content:validate"
+    "content:validate": "pnpm --filter @quizmaster/scripts content:validate",
+    "content:dedupe": "pnpm --filter @quizmaster/scripts content:dedupe",
+    "content:digest": "pnpm --filter @quizmaster/scripts content:digest",
+    "content:stats": "pnpm --filter @quizmaster/scripts content:stats",
+    "content:seed": "pnpm --filter @quizmaster/scripts content:seed",
+    "content:ids": "pnpm --filter @quizmaster/scripts content:ids"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

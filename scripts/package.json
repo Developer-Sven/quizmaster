@@ -17,6 +17,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "flag-icons": "7.5.0",
     "lighthouse": "13.5.0"
   }
 }
