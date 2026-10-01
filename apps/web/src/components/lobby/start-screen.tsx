@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { FormError } from "@/components/app/form-error";
-import { Banner } from "@/components/ui/banner";
+import { InstallRow } from "@/components/pwa/install-row";
+import { UpdateBanner } from "@/components/pwa/update-banner";
 import { Button } from "@/components/ui/button";
 import { CodeInput } from "@/components/ui/code-input";
 import { TextField } from "@/components/ui/text-field";
@@ -19,7 +20,6 @@ import {
 import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-realtime";
 import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
-import { reloadPage } from "@/lib/client/reload";
 import { readStoredName, writeStoredName } from "@/lib/client/storage";
 import { LOBBY_CODE_LENGTH } from "@/lib/ui/lobby-code";
 
@@ -37,6 +37,8 @@ export interface StartScreenProps {
  * Startseite (docs/09 §6): Wortmarke, Claim, Name (aus localStorage vorbefüllt), „Lobby erstellen“,
  * „oder“, Lobby-Code mit Auto-Beitritt bei 6 Zeichen, „Beitreten“, Footer-Link „Regeln“.
  * Impressum/Datenschutz bleiben bis zum Umzug auf eine eigene Domain weg (ADR-030).
+ * PWA (docs/10): oben das Update-Banner (neue Version oder `UPDATE_REQUIRED`), über dem Footer die Zeile
+ * „Als App installieren“ (nur nach dem ersten beendeten Spiel und wenn installierbar).
  */
 export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   const router = useRouter();
@@ -134,9 +136,10 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      {updateRequired ? <Banner tone="update" onAction={reloadPage} /> : null}
-      <main className="mx-auto flex w-full max-w-column flex-1 flex-col px-gutter pt-safe">
+    // Safe Area oben am äußeren Rahmen: Das Update-Banner steht unter der (durchscheinenden) Statusleiste.
+    <div className="flex min-h-dvh flex-col pt-safe">
+      <UpdateBanner required={updateRequired} />
+      <main className="mx-auto flex w-full max-w-column flex-1 flex-col px-gutter">
         <div className="flex flex-1 flex-col justify-center gap-8 py-10">
           <header className="flex flex-col gap-2">
             <h1 className="text-wordmark text-text">
@@ -204,6 +207,7 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
           </div>
         </div>
 
+        <InstallRow />
         <footer className="flex justify-center pt-4 pb-safe">
           <Link
             href="/regeln"

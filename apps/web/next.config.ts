@@ -43,6 +43,12 @@ const SERVICE_WORKER_HEADERS = [
   { key: "Content-Type", value: "application/javascript; charset=utf-8" },
 ];
 
+/**
+ * Web-App-Manifest (app/manifest.ts, docs/10): immer revalidieren, nie lange im CDN – Name, Icons und Kurzbefehle
+ * sollen nach einem Deploy sofort gelten (entspricht Nexts Standard für Metadaten-Routen, hier festgeschrieben).
+ */
+const MANIFEST_HEADERS = [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }];
+
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
@@ -57,6 +63,7 @@ const nextConfig: NextConfig = {
       { source: "/:path*", headers: SECURITY_HEADERS },
       { source: "/api/:path*", headers: API_HEADERS },
       { source: "/sw.js", headers: SERVICE_WORKER_HEADERS },
+      { source: "/manifest.webmanifest", headers: MANIFEST_HEADERS },
     ];
   },
 };

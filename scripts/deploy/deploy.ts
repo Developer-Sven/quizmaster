@@ -72,6 +72,11 @@ import {
   writeState,
 } from "./lib/state.ts";
 
+/** Build-Umgebung eines Releases: der Service Worker trägt die Release-Kennung (docs/10 „Update-Banner“). */
+function releaseBuildEnv(sha: string): Record<string, string> {
+  return { ...buildEnv(), SW_VERSION: sha.slice(0, 12) };
+}
+
 const ROOT = resolve(import.meta.dirname, "../..");
 const KEEP_RELEASES = 3;
 const MIN_FREE_BYTES = 3 * 1024 ** 3;
@@ -463,7 +468,7 @@ async function commandDeploy(): Promise<void> {
     const scratch = mkdtempSync(join(tmpdir(), "quizmaster-deploy-"));
     try {
       await extractArchive(repo, sha, scratch);
-      const buildCtx: BuildContext = { layout, repo, sha, subject, pnpm: tools.pnpm, env: buildEnv() };
+      const buildCtx: BuildContext = { layout, repo, sha, subject, pnpm: tools.pnpm, env: releaseBuildEnv(sha) };
       if (values["skip-audit"]) warn("Audit-Gate übersprungen (--skip-audit)");
       else await auditGate(buildCtx, scratch);
     } finally {
@@ -481,7 +486,7 @@ async function commandDeploy(): Promise<void> {
     ok(`Interpreter: ${relative(ROOT, runtime.node)} → ${runtime.version}`);
 
     step("Build");
-    const buildCtx: BuildContext = { layout, repo, sha, subject, pnpm: tools.pnpm, env: buildEnv() };
+    const buildCtx: BuildContext = { layout, repo, sha, subject, pnpm: tools.pnpm, env: releaseBuildEnv(sha) };
     try {
       const dir = await prepareSource(buildCtx);
       if (values["skip-audit"]) warn("Audit-Gate übersprungen (--skip-audit) – nur im Notfall!");

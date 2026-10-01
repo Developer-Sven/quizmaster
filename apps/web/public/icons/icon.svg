@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>quizmaster</title>
+  <!-- quizmaster App-Icon und Vorlage für scripts/generate-icons.ts (docs/10): orangefarbenes Quadrat-Signet
+       (#FF8A1F) mit dem Wortmarken-Initial „q“ auf Studio-Navy (#0B1426). Das Skript liest #background und
+       #signet und setzt daraus alle Varianten (192, 512, maskable, Apple 180, Favicon) zusammen. -->
+  <rect id="background" width="512" height="512" rx="96" fill="#0B1426"/>
+  <g id="signet">
+    <rect x="112" y="112" width="288" height="288" rx="56" fill="#FF8A1F"/>
+    <circle cx="256" cy="225" r="51" fill="none" stroke="#0B1426" stroke-width="38"/>
+    <rect x="288" y="155" width="38" height="202" rx="8" fill="#0B1426"/>
+  </g>
+</svg>

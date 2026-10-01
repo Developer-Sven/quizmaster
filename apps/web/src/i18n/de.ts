@@ -199,6 +199,15 @@ export const de = {
     updateAvailable: "Neue Version verfügbar",
     update: "Aktualisieren",
     offline: "Du bist offline.",
+    /** Web-App-Manifest (docs/10): Name, Beschreibung, Screenshot-Beschriftungen, Kurzbefehle */
+    manifest: {
+      name: "quizmaster – Das Live-Quiz",
+      description: "Quiz-Duelle live mit Freund:innen – ohne Anmeldung.",
+      screenshotLobby: "Lobby mit Code",
+      screenshotQuestion: "Frage mit Timer",
+      shortcutCreate: "Lobby erstellen",
+      shortcutJoin: "Lobby beitreten",
+    },
   },
 
   maintenance: {
@@ -259,6 +268,8 @@ export const de = {
     correct: "Richtig. Plus 1 Punkt.",
     wrong: (correctAnswer: string) => `Falsch. Richtig war: ${correctAnswer}.`,
     roundEnded: (round: number, place: number) => `Runde ${round} beendet. Du bist auf Platz ${place}.`,
+    /** Spielende mit dem eigenen Ergebnis, z. B. „Spiel beendet. Gewonnen.“ */
+    gameEnded: (headline: string) => `Spiel beendet. ${headline}.`,
     connectionLost: "Verbindung unterbrochen",
   },
 };
