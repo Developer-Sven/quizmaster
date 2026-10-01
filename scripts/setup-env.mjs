@@ -5,8 +5,9 @@
 //   pnpm setup:env prod --domain quiz.example.com --port 7400 --tls-cert /pfad/cert.pem --tls-key /pfad/key.pem
 //   pnpm setup:env prod --rotate SESSION_SECRET     # ein Secret neu erzeugen
 //   pnpm setup:env dev --add-missing                # neue Schlüssel aus der Vorlage ergänzen
+//   pnpm setup:env prod --set TURNSTILE_ENABLED=true # einen Schalter umlegen (nur SWITCHES, ohne die Datei zu zeigen)
 //
-// Grundsätze: überschreibt nie bestehende Werte (außer --rotate für genau einen Schlüssel),
+// Grundsätze: überschreibt nie bestehende Werte (außer --rotate für genau einen Schlüssel bzw. --set für Schalter),
 // schreibt atomar mit Rechten 600 und gibt niemals Werte aus – nur Schlüsselnamen.
 // Bewusst ohne Abhängigkeiten, damit es vor `pnpm install` und mit jeder Node-Version ≥ 22 läuft.
 
@@ -26,6 +27,12 @@ const SECRET_KEYS = new Set([
   "BACKUP_PASSPHRASE",
 ]);
 const KEY_LINE = /^([A-Z][A-Z0-9_]*)=(.*)$/;
+/** Nicht geheime Schalter, die `--set` umlegen darf – mit erlaubten Werten (Schema: packages/shared/src/env). */
+const SWITCHES = new Map([
+  ["TURNSTILE_ENABLED", ["true", "false"]],
+  ["SEARCH_INDEXING", ["true", "false"]],
+  ["LOG_LEVEL", ["fatal", "error", "warn", "info", "debug", "trace", "silent"]],
+]);
 
 function fail(message) {
   console.error(`setup:env – ${message}`);
@@ -47,6 +54,7 @@ function parseCli() {
       "tls-key": { type: "string" },
       rotate: { type: "string" },
       "add-missing": { type: "boolean", default: false },
+      set: { type: "string", multiple: true },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -54,7 +62,8 @@ function parseCli() {
     console.log(
       "Aufruf: setup-env.mjs <dev|prod> [--domain D] [--port P] [--realtime-port P] [--tls-cert F] [--tls-key F]\n" +
         "        setup-env.mjs <dev|prod> --rotate <SECRET_KEY>\n" +
-        "        setup-env.mjs <dev|prod> --add-missing",
+        "        setup-env.mjs <dev|prod> --add-missing\n" +
+        `        setup-env.mjs <dev|prod> --set KEY=WERT [--set …]   (KEY: ${[...SWITCHES.keys()].join(", ")})`,
     );
     process.exit(values.help ? 0 : 1);
   }
@@ -167,12 +176,56 @@ function addMissing(env, examplePath, targetPath) {
   console.log(`setup:env – ergänzt: ${additions.map((line) => line.split("=")[0]).join(", ")}`);
 }
 
+function parseSwitches(assignments) {
+  const changes = new Map();
+  for (const assignment of assignments) {
+    const match = /^([A-Z][A-Z0-9_]*)=(.*)$/.exec(assignment);
+    if (!match) fail(`--set erwartet KEY=WERT (${assignment.split("=")[0]})`);
+    const [, key, value] = match;
+    const allowed = SWITCHES.get(key);
+    if (!allowed)
+      fail(`${key} ist kein Schalter für --set (${[...SWITCHES.keys()].join(", ")}) – Werte trägst du selbst ein`);
+    if (!allowed.includes(value)) fail(`${key} erlaubt nur ${allowed.join(" | ")}`);
+    if (changes.has(key)) fail(`${key} mehrfach angegeben`);
+    changes.set(key, value);
+  }
+  return changes;
+}
+
+function setSwitches(env, targetPath, changes) {
+  const seen = new Set();
+  const report = [];
+  const out = readLines(targetPath).map((line) => {
+    const match = KEY_LINE.exec(line);
+    if (!match || !changes.has(match[1])) return line;
+    const [, key, current] = match;
+    seen.add(key);
+    report.push(current === changes.get(key) ? `${key}=${current} (unverändert)` : `${key}=${changes.get(key)}`);
+    return `${key}=${changes.get(key)}`;
+  });
+  const missing = [...changes.keys()].filter((key) => !seen.has(key));
+  if (missing.length > 0) fail(`${missing.join(", ")} fehlt in .env.${env} – erst mit --add-missing ergänzen`);
+  writeAtomic(targetPath, out.join("\n"));
+  console.log(`setup:env – .env.${env}: ${report.join(", ")}`);
+  console.log(
+    env === "prod"
+      ? "  Wirksam nach `pnpm deploy:restart` (betroffene Apps neu starten, README „Betrieb“)."
+      : "  Wirksam nach einem Neustart von `pnpm dev`.",
+  );
+}
+
 const { env, opts } = parseCli();
 const examplePath = join(ROOT, `.env.${env}.example`);
 const targetPath = join(ROOT, `.env.${env}`);
 if (!existsSync(examplePath)) fail(`Vorlage .env.${env}.example fehlt`);
 
-if (opts.rotate) {
+const modes = [opts.rotate !== undefined, opts["add-missing"], opts.set !== undefined].filter(Boolean).length;
+if (modes > 1) fail("--rotate, --add-missing und --set nur einzeln verwenden");
+
+if (opts.set) {
+  if (!existsSync(targetPath)) fail(`.env.${env} existiert nicht`);
+  setSwitches(env, targetPath, parseSwitches(opts.set));
+} else if (opts.rotate) {
   if (!existsSync(targetPath)) fail(`.env.${env} existiert nicht`);
   rotate(env, targetPath, opts.rotate);
 } else if (opts["add-missing"]) {

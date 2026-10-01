@@ -304,6 +304,21 @@ Einstellungen in Cloudflare für die Domain:
 - Möglicher Ausbau: Authenticated Origin Pulls (mTLS zwischen Cloudflare und Server) – wirkt erst, wenn die
   Caddy-Site zusätzlich das Cloudflare-Client-Zertifikat verlangt (`client_auth`)
 
+### Schalter umlegen
+
+Nicht geheime Schalter ändert `--set`, ohne die Env-Datei zu öffnen oder Werte anderer Schlüssel auszugeben:
+
+```bash
+pnpm setup:env prod --set TURNSTILE_ENABLED=true   # Turnstile beim Anlegen der Gast-Session verlangen
+pnpm deploy:restart --apps web                     # Env neu aufteilen, nur web neu starten
+```
+
+| Schalter | Werte | Neu starten |
+|---|---|---|
+| `TURNSTILE_ENABLED` | `true` \| `false` | `web` (Site- und Secret-Key müssen eingetragen sein) |
+| `SEARCH_INDEXING` | `true` \| `false` | `web` (`false` = `robots.txt` sperrt alles, Seiten mit `noindex`, ADR-030) |
+| `LOG_LEVEL` | `fatal` … `trace`, `silent` | betroffene Apps |
+
 ### Secrets rotieren
 
 ```bash
