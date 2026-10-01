@@ -7,7 +7,22 @@
  * wird er in ein Anführungszeichen gesetzt, das Node wörtlich liest. Jede Datei wird vor dem Schreiben mit
  * `util.parseEnv` (derselbe Parser wie `--env-file`) zurückgelesen und muss exakt übereinstimmen.
  */
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
+import {
+  chmodSync,
+  chownSync,
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fchownSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { parseEnv } from "node:util";
 import { type ResolvedEnv, realtimeProcessEnv, watchdogProcessEnv, webProcessEnv } from "@quizmaster/shared/env";
@@ -71,25 +86,66 @@ export function renderAppEnvFile(resolved: ResolvedEnv, app: AppKey, sha: string
   ]);
 }
 
-/** Schreibt eine Datei atomar mit Rechten 600 (Verzeichnis 700). */
-export function writePrivateFile(path: string, content: string): void {
+/**
+ * Besitz und Rechte einer Datei samt Verzeichnis: Env-Dateien mit Dienstbenutzer 640 root:<gruppe> (Verzeichnis
+ * 750), ohne 600/700 root (lib/access.ts `envAccess`). Besitzer ist immer der Deploy-Benutzer.
+ */
+export interface FileAccess {
+  uid: number;
+  gid: number;
+  fileMode: number;
+  dirMode: number;
+}
+
+/** Verzeichnis anlegen bzw. Gruppe und Rechte angleichen; es muss ein echtes Verzeichnis des Besitzers sein. */
+function ensureDirectory(dir: string, access: FileAccess | undefined): void {
+  mkdirSync(dir, { recursive: true, mode: access?.dirMode ?? 0o700 });
+  if (access === undefined) return;
+  const stat = lstatSync(dir);
+  if (!stat.isDirectory() || stat.uid !== access.uid) {
+    throw new DeployError("FILE_DIR", `${dir} ist kein Verzeichnis des Deploy-Benutzers (uid ${access.uid})`);
+  }
+  if (stat.gid !== access.gid) chownSync(dir, access.uid, access.gid);
+  if ((stat.mode & 0o7777) !== access.dirMode) chmodSync(dir, access.dirMode);
+}
+
+/**
+ * Schreibt eine Datei atomar (temporär 600 im Zielverzeichnis, fsync, rename): ohne `access` mit Rechten 600
+ * (Verzeichnis 700), sonst mit Besitz und Rechten aus `access` – gesetzt, bevor die Datei ihren Namen bekommt.
+ */
+export function writeFileAtomic(path: string, content: string, access?: FileAccess): void {
   const dir = dirname(path);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  ensureDirectory(dir, access);
   const tmp = join(dir, `.${Date.now()}-${process.pid}.tmp`);
   const fd = openSync(tmp, "wx", 0o600);
   try {
-    writeSync(fd, content);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    try {
+      writeSync(fd, content);
+      if (access !== undefined) {
+        fchownSync(fd, access.uid, access.gid);
+        fchmodSync(fd, access.fileMode);
+      }
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  } catch (error) {
+    // Keine halbe Kopie (womöglich mit Secrets) liegen lassen.
+    rmSync(tmp, { force: true });
+    throw error;
   }
-  renameSync(tmp, path);
   const dirFd = openSync(dir, "r");
   try {
     fsyncSync(dirFd);
   } finally {
     closeSync(dirFd);
   }
+}
+
+/** Schreibt eine Datei atomar mit Rechten 600 (Verzeichnis 700). */
+export function writePrivateFile(path: string, content: string): void {
+  writeFileAtomic(path, content);
 }
 
 /** Liest nur `RELEASE` aus einer erzeugten Env-Datei (für Status-Ausgaben). */

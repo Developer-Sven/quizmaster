@@ -1,11 +1,13 @@
 /**
  * Verzeichnislayout des Releases auf dem Server (ADR-025) – gleiche Pfade wie in `ecosystem.config.js`:
  *
- * .deploy/                      (700, gitignored)
+ * .deploy/                      (700, gitignored; mit Dienstbenutzer 711 – lib/access.ts)
  *   runtime/node -> node-v24…   verifizierte Node-24-Kopie aus .tooling (pm2-Interpreter)
- *   releases/<sha>/{web,realtime}
+ *   releases/<sha>/{web,realtime}   755/644 root; nur web/apps/web/.next/cache gehört dem Dienstbenutzer (700);
+ *                               releases selbst 750 root:<gruppe> (ohne Dienstbenutzer 700 root)
  *   current -> releases/<sha>   aktives Release (atomar umgehängt)
- *   env/{web,realtime,watchdog}.env   aus .env.prod erzeugt, nur die Schlüssel je App (600)
+ *   env/{web,realtime,watchdog}.env   aus .env.prod erzeugt, nur die Schlüssel je App (600; mit Dienstbenutzer
+ *                               640 root:<gruppe>, Verzeichnis 750)
  *   build/<sha>/                temporärer Build aus `git archive`
  *   state.json                  Aktivierungen (Rollback-Stapel) und Historie
  *   deploy.lock                 verhindert parallele Deploys

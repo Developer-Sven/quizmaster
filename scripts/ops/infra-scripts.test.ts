@@ -517,6 +517,147 @@ describe("restore.sh", () => {
   });
 });
 
+describe("create-user.sh", () => {
+  const isRoot = process.getuid?.() === 0;
+  const SERVICE = "quizmaster:x:995:996:quizmaster (pm2-Apps, ohne Login):/nonexistent:/usr/sbin/nologin";
+  const BASE_PASSWD = ["root:x:0:0:root:/root:/bin/bash", "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin"];
+  const BASE_GROUP = ["root:x:0:", "www-data:x:33:"];
+
+  /** Synthetisches /etc und Stubs für getent/groupadd/useradd, die nur diese Dateien ändern. */
+  const setup = (passwd: string[] = BASE_PASSWD, group: string[] = BASE_GROUP) => {
+    const etc = dir("etc");
+    writeFileSync(join(etc, "passwd"), `${passwd.join("\n")}\n`);
+    writeFileSync(join(etc, "group"), `${group.join("\n")}\n`);
+    writeFileSync(join(etc, "shadow"), "root:*:19000:0:99999:7:::\n", { mode: 0o640 });
+    writeFileSync(join(etc, "gshadow"), "root:*::\n", { mode: 0o640 });
+    const bin = dir("bin");
+    writeFileSync(
+      join(bin, "getent"),
+      `#!/usr/bin/env bash
+if [ "$1" = "-s" ]; then printf '%s\\n' "$2" >>"$STUB_ETC/getent-services"; shift 2; fi
+file="$STUB_ETC/$1"
+if [ $# -lt 2 ]; then cat "$file"; exit 0; fi
+grep -m1 "^$2:" "$file" || exit 2
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, "groupadd"),
+      `#!/usr/bin/env bash\nprintf 'groupadd %s\\n' "$*" >>"$STUB_ETC/calls"\nprintf '%s:x:996:\\n' "\${@: -1}" >>"$STUB_ETC/group"\n`,
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      join(bin, "useradd"),
+      `#!/usr/bin/env bash
+printf 'useradd %s\\n' "$*" >>"$STUB_ETC/calls"
+gid="" home="" shell="" comment=""
+while [ $# -gt 1 ]; do
+  case "$1" in
+    --gid) gid="$(grep -m1 "^$2:" "$STUB_ETC/group" | cut -d: -f3)"; shift 2 ;;
+    --home-dir) home="$2"; shift 2 ;;
+    --shell) shell="$2"; shift 2 ;;
+    --comment) comment="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s:x:995:%s:%s:%s:%s\\n' "$1" "$gid" "$comment" "$home" "$shell" >>"$STUB_ETC/passwd"
+`,
+      { mode: 0o755 },
+    );
+    const backups = dir("backup-root");
+    const run = (args: string[] = []) =>
+      bash([join(OPS, "create-user.sh"), ...args], {
+        PATH: `${bin}:${process.env.PATH ?? ""}`,
+        STUB_ETC: etc,
+        QM_ETC_DIR: etc,
+        QM_BACKUP_ROOT: backups,
+      });
+    const calls = () => (existsSync(join(etc, "calls")) ? readFileSync(join(etc, "calls"), "utf8") : "");
+    return { etc, backups, run, calls };
+  };
+
+  it("Dry-Run ohne Benutzer: plant groupadd und useradd (system, ohne Home, nologin) – ändert nichts", async () => {
+    const { etc, backups, run, calls } = setup();
+    const result = await run(["--dry-run"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("geplant: groupadd --system quizmaster");
+    expect(result.stdout).toMatch(
+      /geplant: useradd --system --gid quizmaster --no-user-group --no-create-home --home-dir \/nonexistent --shell \S*\/(nologin|false) /,
+    );
+    expect(calls()).toBe("");
+    expect(readdirSync(backups)).toEqual([]);
+    // Vorhanden heißt: in /etc/passwd bzw. /etc/group (wie pm2 und ecosystem.config.js) – nicht LDAP o. Ä.
+    expect(readFileSync(join(etc, "getent-services"), "utf8").trim().split("\n")).toEqual(["files", "files"]);
+  });
+
+  it.skipIf(!isRoot)(
+    "legt an, sichert vorher passwd/group/shadow/gshadow (600) – zweiter Lauf ändert nichts",
+    async () => {
+      const { etc, backups, run, calls } = setup();
+      const first = await run();
+      expect(first.stderr).not.toContain("FEHLER");
+      expect(first.code).toBe(0);
+      expect(calls().trim().split("\n")).toEqual([
+        "groupadd --system quizmaster",
+        expect.stringMatching(
+          /^useradd --system --gid quizmaster --no-user-group --no-create-home --home-dir \/nonexistent --shell \S+ --comment quizmaster \(pm2-Apps, ohne Login\) --no-log-init quizmaster$/,
+        ),
+      ]);
+      expect(first.stdout).toContain("fertig: quizmaster (uid 995, gid 996");
+      const [stamp] = readdirSync(backups);
+      const saved = join(backups, stamp ?? "", "users");
+      expect(readdirSync(saved).sort()).toEqual(["group", "gshadow", "passwd", "shadow"]);
+      for (const file of readdirSync(saved)) expect(statSync(join(saved, file)).mode & 0o777).toBe(0o600);
+      expect(readFileSync(join(saved, "passwd"), "utf8")).not.toContain("quizmaster");
+      expect(readFileSync(join(etc, "passwd"), "utf8")).toContain("quizmaster:x:995:996:");
+
+      const second = await run();
+      expect(second.code).toBe(0);
+      expect(second.stdout).toContain("nichts zu tun");
+      expect(calls().trim().split("\n")).toHaveLength(2);
+      expect(readdirSync(backups)).toHaveLength(1);
+    },
+  );
+
+  it("verweigert unsichere Bestandseinträge, statt sie zu ändern", async () => {
+    const cases: Array<[string[], string[], RegExp]> = [
+      [[...BASE_PASSWD, SERVICE.replace(":995:", ":0:")], [...BASE_GROUP, "quizmaster:x:996:"], /uid 0/],
+      [[...BASE_PASSWD, SERVICE.replace(/:[^:]*$/, ":/bin/bash")], [...BASE_GROUP, "quizmaster:x:996:"], /Login-Shell/],
+      [[...BASE_PASSWD, SERVICE], [...BASE_GROUP, "quizmaster:x:996:www-data"], /weitere Mitglieder \(www-data\)/],
+      [
+        [...BASE_PASSWD, SERVICE, "other:x:1500:996::/home/other:/bin/bash"],
+        [...BASE_GROUP, "quizmaster:x:996:"],
+        /weiterer Konten \(other\)/,
+      ],
+      [[...BASE_PASSWD, SERVICE], BASE_GROUP, /ohne Gruppe quizmaster/],
+      [
+        [...BASE_PASSWD, SERVICE.replace(":996:", ":33:")],
+        [...BASE_GROUP, "quizmaster:x:996:"],
+        /primäre gid 33 statt 996/,
+      ],
+      [
+        [...BASE_PASSWD, SERVICE, "twin:x:995:33::/:/bin/false"],
+        [...BASE_GROUP, "quizmaster:x:996:"],
+        /gehört auch twin/,
+      ],
+      [BASE_PASSWD, [...BASE_GROUP, "quizmaster:x:0:"], /gid 0/],
+    ];
+    for (const [passwd, group, message] of cases) {
+      const { run, calls } = setup(passwd, group);
+      const result = await run(["--dry-run"]);
+      expect(result.code, String(message)).toBe(1);
+      expect(result.stderr).toMatch(message);
+      expect(calls()).toBe("");
+    }
+  });
+
+  it.skipIf(isRoot)("ohne root nur als Vorschau", async () => {
+    const result = await setup().run();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("nur als root");
+  });
+});
+
 describe("install-cron.sh", () => {
   it("verweigert ohne ALERT_WEBHOOK_URL, schreibt sonst alle Jobs mit QM_UNATTENDED=1", async () => {
     const env = syntheticEnv();

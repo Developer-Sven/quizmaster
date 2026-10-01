@@ -8,8 +8,10 @@
  * stimmt die Nonce nicht, wäre die Seite im Browser kaputt, obwohl /api/health antwortet). Realtime `GET
  * /healthz` 200, Socket.IO-Handshake ohne Ticket (Polling + WebSocket) wird mit UNAUTHORIZED abgelehnt,
  * `/metrics` ist ohne Token nicht lesbar. Zusätzlich: der Port gehört dem neuen pm2-Prozess und lauscht nur auf
- * Loopback, und dessen Arbeitsverzeichnis liegt im erwarteten Release. Nicht abgedeckt (siehe README): ein
- * Lobby-Durchlauf mit Session + Ticket und die Bereitschaft von Mongo/Change Streams (Aufgabe des Watchdogs).
+ * Loopback, und dessen Arbeitsverzeichnis liegt im erwarteten Release. Jede App läuft mit der erwarteten Identität
+ * (/proc/<pid>/status): mit Dienstbenutzer dessen uid/gid ohne Zusatzgruppen – also nie root –, ohne ihn als
+ * Benutzer des Deploys (root). Nicht abgedeckt (siehe README): ein Lobby-Durchlauf mit Session + Ticket und die
+ * Bereitschaft von Mongo/Change Streams (Aufgabe des Watchdogs).
  */
 import {
   chmodSync,
@@ -24,8 +26,10 @@ import {
   symlinkSync,
 } from "node:fs";
 import { basename, join } from "node:path";
+import type { ServiceIdentity } from "../service-user.cjs";
+import { appIdentity, describeIdentity, envAccess, identityMismatch, readProcStatus } from "./access.ts";
 import { readReleaseMeta } from "./build.ts";
-import { renderAppEnvFile, writePrivateFile } from "./envfiles.ts";
+import { renderAppEnvFile, writeFileAtomic } from "./envfiles.ts";
 import { APP_NAMES, APPS, type AppKey, envFile, type Layout, releaseDir, SHA_PATTERN } from "./layout.ts";
 import { DeployError, describeError, fail, info, ok, short, stamp, step, warn } from "./log.ts";
 import {
@@ -52,6 +56,8 @@ export interface DeployContext {
   pm2: Pm2Client;
   pm2Home: string;
   source: SourceContext;
+  /** Benutzer der Apps (ecosystem.config.js): Dienstbenutzer oder Rückfall root – bestimmt Env-Rechte und Smoke. */
+  identity: ServiceIdentity;
   /** Zielordner für dump.pm2-Sicherungen (…/<zeitstempel>/dump.pm2). */
   backupRoot: string;
   /** Nur Tests (--simulate-failure): Smoke-Test dieser App schlägt absichtlich fehl (nicht auf dem Rückweg). */
@@ -158,8 +164,34 @@ async function assertNotRestarted(ctx: DeployContext, app: AppKey, proc: Pm2App)
   }
 }
 
+/** Läuft der Prozess mit der erwarteten uid/gid (Dienstbenutzer: auch ohne Zusatzgruppen)? */
+function verifyIdentity(ctx: DeployContext, app: AppKey, pid: number): void {
+  const expected = appIdentity(ctx.identity);
+  let mismatch: string | null;
+  try {
+    mismatch = identityMismatch(readProcStatus(pid), expected, ctx.identity.kind === "service");
+  } catch (error) {
+    throw new DeployError(
+      "APP_IDENTITY",
+      `${APPS[app].name}: Identität von PID ${pid} nicht prüfbar (${describeError(error)})`,
+    );
+  }
+  if (mismatch !== null) {
+    throw new DeployError(
+      "APP_IDENTITY",
+      `${APPS[app].name} läuft mit ${mismatch} – erwartet ${describeIdentity(ctx.identity)}`,
+    );
+  }
+  if (ctx.identity.kind === "service") {
+    ok(`${APPS[app].name} läuft als ${ctx.identity.user} (uid ${expected.uid}, gid ${expected.gid}), nicht als root`);
+  } else {
+    info(`${APPS[app].name} läuft als uid ${expected.uid} – ${describeIdentity(ctx.identity)}`);
+  }
+}
+
 async function smoke(ctx: DeployContext, app: AppKey, sha: string, proc: Pm2App): Promise<void> {
   const { resolved } = ctx.source;
+  verifyIdentity(ctx, app, proc.pid);
   if (app === "web") {
     const health = await waitForHealth("127.0.0.1", resolved.webPort, "/api/health", 90_000);
     if (!health.ok)
@@ -260,7 +292,7 @@ async function bringUp(
     return { kind: "skipped" };
   }
   step(`Start ${APPS[app].name} (Release ${short(sha)})`);
-  writePrivateFile(envFile(ctx.layout, app), envFor(app, sha));
+  writeFileAtomic(envFile(ctx.layout, app), envFor(app, sha), envAccess(ctx.identity));
   for (const message of await ctx.pm2.startOrReload(APPS[app].name)) info(message);
   const proc = await waitOnline(ctx, app);
   ok(`${APPS[app].name} online (PID ${proc.pid})`);

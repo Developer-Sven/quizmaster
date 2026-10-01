@@ -6,7 +6,14 @@
 //   .deploy/current          Symlink auf das aktive Release (.deploy/releases/<sha>); pm2 speichert den
 //                            Symlink-Pfad, ein Neustart nach dem Umhängen startet also das neue Release
 //   .deploy/runtime/node     verifizierte Node-24-Kopie aus .tooling (System-Node bleibt Version 22)
-//   .deploy/env/<app>.env    nur die Schlüssel der App (webProcessEnv/realtimeProcessEnv/watchdogProcessEnv), 600
+//   .deploy/env/<app>.env    nur die Schlüssel der App (webProcessEnv/realtimeProcessEnv/watchdogProcessEnv);
+//                            mit Dienstbenutzer 640 root:quizmaster (Verzeichnis 750), ohne 600 root
+//
+// Benutzer: Existiert der Systembenutzer `quizmaster` (infra/ops/create-user.sh), startet der pm2-Daemon (root)
+// alle drei Apps mit dessen uid/gid (docs/12 „Nicht-Root-User“, README „Systembenutzer“); sonst wie vor der
+// Umstellung als root – der Deploy-Preflight warnt dann. Aufgelöst wird über /etc/passwd und /etc/group
+// (scripts/deploy/service-user.cjs, gemeinsam mit dem Deploy-Werkzeug); uid/gid 0, eine nicht exklusive Gruppe
+// oder unlesbare Kataloge brechen ab, statt still als root zu starten.
 //
 // Secrets stehen nie hier, nie in `env` und nie in dump.pm2: Node liest sie beim Start selbst (`--env-file`).
 // `filter_env: [""]` hält die Umgebung der aufrufenden Shell von den Apps fern – Werte wie HOSTNAME, PORT oder
@@ -16,6 +23,7 @@
 // `pnpm deploy:restart` benutzen.
 
 const path = require("node:path");
+const { readServiceIdentity, SERVICE_USER } = require("./scripts/deploy/service-user.cjs");
 
 /**
  * `.deploy` der Produktion. Nur Tests des Deploy-Werkzeugs (`--test-env`, eigener pm2-Daemon) setzen
@@ -37,17 +45,39 @@ const deployDir = resolveDeployDir();
 const current = path.join(deployDir, "current");
 const interpreter = path.join(deployDir, "runtime", "node", "bin", "node");
 
+/**
+ * Benutzer der Apps: `quizmaster`, falls vorhanden, sonst root (Rückfall). Nur Tests des Deploy-Werkzeugs
+ * (`--test-user`, Layout `.deploy/test`, eigener pm2-Daemon) wählen über `QM_SERVICE_USER` einen anderen,
+ * vorhandenen Benutzer, z. B. nobody – dessen Gruppe darf dort mit anderen Konten geteilt sein.
+ */
+function resolveIdentity() {
+  const requested = process.env.QM_SERVICE_USER;
+  if (requested === undefined || requested === "") {
+    return readServiceIdentity({ user: SERVICE_USER, required: false, allowSharedGroup: false });
+  }
+  if (deployDir !== path.join(__dirname, ".deploy", "test")) {
+    throw new Error("QM_SERVICE_USER ist nur für Tests des Deploy-Werkzeugs erlaubt (QM_DEPLOY_DIR=.deploy/test)");
+  }
+  return readServiceIdentity({ user: requested, required: true, allowSharedGroup: true });
+}
+
+const identity = resolveIdentity();
+const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 /** `--env-file=<abs>/.deploy/env/<app>.env` (absolut, damit der Pfad nicht vom Arbeitsverzeichnis abhängt). */
 const envFile = (app) => `--env-file=${path.join(deployDir, "env", `${app}.env`)}`;
 
-// Restrisiko: Die Apps laufen – wie alle Apps dieses Servers – als root (pm2-root.service, kein uid/gid);
-// docs/12 sah einen Nicht-Root-Benutzer vor. Umstellung (Systembenutzer, uid/gid je App, Rechte unter .deploy)
-// steht in README „Vor dem Go-live offen“ und braucht eine Entscheidung des Betreibers.
 const common = {
   namespace: "quizmaster",
   exec_mode: "fork",
   instances: 1,
   interpreter,
+  // Immer numerisch und immer gesetzt: pm2 übernimmt bei startOrReload nur vorhandene Schlüssel in den
+  // gespeicherten Prozess – 0 (= Benutzer des Daemons, root) setzt daher eine früher gespeicherte uid zurück,
+  // wenn der Dienstbenutzer wieder entfernt wurde (README „Systembenutzer“, Rückweg). pm2 setzt uid/gid beim
+  // Start (spawn) und verwirft dabei alle Zusatzgruppen des Daemons.
+  uid: identity.uid,
+  gid: identity.gid,
   autorestart: true,
   // Absturz innerhalb von 10 s gilt als instabil; nach 30 solchen Neustarts (in den ersten 5 min) → errored.
   min_uptime: 10_000,
@@ -56,7 +86,8 @@ const common = {
   exp_backoff_restart_delay: 200,
   merge_logs: true,
   filter_env: [""],
-  env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+  // HOME des Dienstbenutzers (wie pm2 es beim Erststart setzt) auch bei Neustarts – nie /root aus dem Aufrufer.
+  env: identity.kind === "service" ? { PATH: SYSTEM_PATH, HOME: identity.home } : { PATH: SYSTEM_PATH },
   // Kein @pm2/io, kein Git-Scan, keine eigene Source-Map-Unterstützung von pm2 im App-Prozess.
   pmx: false,
   vizion: false,

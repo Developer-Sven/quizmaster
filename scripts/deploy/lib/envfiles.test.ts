@@ -1,7 +1,10 @@
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { resolveEnv, type SourceEnv, sourceEnvSchema } from "@quizmaster/shared/env";
 import { describe, expect, it } from "vitest";
-import { appEnv, renderAppEnvFile, serializeEnv, serializeEnvValue } from "./envfiles.ts";
+import { appEnv, renderAppEnvFile, serializeEnv, serializeEnvValue, writeFileAtomic } from "./envfiles.ts";
 
 const secret = (char: string) => char.repeat(43);
 
@@ -97,5 +100,35 @@ describe("appEnv (Least Privilege je App, ADR-022)", () => {
     const text = renderAppEnvFile(resolved, "realtime", sha, ".env.prod");
     expect(parseEnv(text)).toEqual(appEnv(resolved, "realtime", sha));
     expect(text).toContain("aus .env.prod (Release 0123456789ab)");
+  });
+});
+
+describe("writeFileAtomic", () => {
+  const me = { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
+
+  it("setzt Rechte und Gruppe, bevor die Datei ihren Namen bekommt; Verzeichnis wird angeglichen", () => {
+    const base = mkdtempSync(join(tmpdir(), "qm-envfile-test-"));
+    try {
+      const file = join(base, "env", "web.env");
+      writeFileAtomic(file, "A=1\n", { ...me, dirMode: 0o750, fileMode: 0o640 });
+      expect(readFileSync(file, "utf8")).toBe("A=1\n");
+      expect(statSync(file).mode & 0o777).toBe(0o640);
+      expect(statSync(join(base, "env")).mode & 0o777).toBe(0o750);
+      writeFileAtomic(file, "A=2\n");
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it("scheitert das Schreiben, bleibt keine temporäre Kopie (womöglich mit Secrets) liegen", () => {
+    const base = mkdtempSync(join(tmpdir(), "qm-envfile-test-"));
+    try {
+      const file = join(base, "web.env");
+      expect(() => writeFileAtomic(file, "SECRET=x\n", { ...me, dirMode: 0o700, fileMode: -1 })).toThrow();
+      expect(readdirSync(base)).toEqual([]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

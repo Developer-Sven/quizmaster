@@ -39,6 +39,7 @@
     "ops:healthcheck": "bash infra/ops/healthcheck.sh",
     "ops:alert-test": "bash infra/ops/alert.sh \"Testalarm von quizmaster\"",
     "ops:install-cron": "bash infra/ops/install-cron.sh",
+    "ops:create-user": "bash infra/ops/create-user.sh",
     "ops:restore": "bash infra/ops/restore.sh",
     "admin:config": "node scripts/ops/admin.ts config",
     "admin:ban": "node scripts/ops/admin.ts ban",

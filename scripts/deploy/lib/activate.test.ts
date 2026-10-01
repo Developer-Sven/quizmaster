@@ -1,11 +1,25 @@
-import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ServiceIdentity } from "../service-user.cjs";
 import { ActivationError, activate, currentRelease, type DeployContext, type SmokeTest } from "./activate.ts";
 import { type AppKey, envFile, type Layout, layoutFor, releaseDir } from "./layout.ts";
 import type { Pm2App, Pm2Client } from "./pm2.ts";
 import type { SourceContext } from "./source-env.ts";
+
+const ROOT_FALLBACK: ServiceIdentity = { kind: "root", user: "quizmaster", uid: 0, gid: 0, reason: "Test" };
+/** Dienstbenutzer für Tests ohne root: fremde uid, eigene Gruppe (chown auf die eigene Gruppe ist erlaubt). */
+const SERVICE: ServiceIdentity = {
+  kind: "service",
+  user: "svc",
+  uid: (process.getuid?.() ?? 0) + 1,
+  gid: process.getgid?.() ?? 0,
+  group: "svc",
+  home: "/nonexistent",
+  shell: "/usr/sbin/nologin",
+  sharedWith: [],
+};
 
 // Aktivierung und Rückweg (ADR-025) ohne echten pm2-Daemon: pm2 als Prozesstabelle im Speicher, Smoke-Test
 // injiziert. Geprüft werden Reihenfolge, Symlink, Env-Dateien und der Rückweg bei jedem Fehlerbild.
@@ -73,12 +87,13 @@ function fakePm2() {
   return { client, procs, calls };
 }
 
-function context(pm2: Pm2Client, smokeTest: SmokeTest): DeployContext {
+function context(pm2: Pm2Client, smokeTest: SmokeTest, identity: ServiceIdentity = ROOT_FALLBACK): DeployContext {
   return {
     layout,
     pm2,
     pm2Home: join(root, "pm2"),
     source: { mode: "test", path: "", label: "test.env", resolved: {} } as unknown as SourceContext,
+    identity,
     backupRoot: join(root, "backups"),
     simulateFailure: null,
     smokeTest,
@@ -178,6 +193,40 @@ describe("activate", () => {
     expect((error as ActivationError).reverted).toBe(false);
     expect((error as Error).message).toContain("Rückweg unvollständig");
     expect(currentRelease(layout)).toBe(A);
+  });
+
+  it("ohne Dienstbenutzer: Env-Dateien 0600, Verzeichnis 0700 (Stand vor der Umstellung)", async () => {
+    release(A);
+    const { client } = fakePm2();
+    await activate(
+      context(client, async () => {}),
+      { target: A, fallback: null, apps: ["web", "realtime"], envFor },
+    );
+    for (const app of ["web", "realtime"] as const) expect(statSync(envFile(layout, app)).mode & 0o777).toBe(0o600);
+    expect(statSync(layout.envDir).mode & 0o777).toBe(0o700);
+  });
+
+  it("mit Dienstbenutzer: Env-Dateien 0640 mit dessen Gruppe, Verzeichnis 0750 – auch beim Wechsel von root", async () => {
+    release(A);
+    release(B);
+    const { client } = fakePm2();
+    await activate(
+      context(client, async () => {}),
+      { target: A, fallback: null, apps: ["web", "realtime"], envFor },
+    );
+    await activate(
+      context(client, async () => {}, SERVICE),
+      { target: B, fallback: A, apps: ["web", "realtime"], envFor },
+    );
+    for (const app of ["web", "realtime"] as const) {
+      const stat = statSync(envFile(layout, app));
+      expect(stat.mode & 0o777).toBe(0o640);
+      expect(stat.gid).toBe(SERVICE.gid);
+      expect(stat.uid).toBe(process.getuid?.() ?? 0);
+      expect(releaseIn(app)).toBe("b");
+    }
+    expect(statSync(layout.envDir).mode & 0o777).toBe(0o750);
+    expect(statSync(layout.envDir).gid).toBe(SERVICE.gid);
   });
 
   it("App stürzt nach dem Smoke-Test ab (pm2 startet neu) → Aktivierung gilt als gescheitert", async () => {

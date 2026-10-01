@@ -6,21 +6,35 @@
 //   pnpm deploy:status
 //
 // Ablauf deploy:prod: Preflight (Werkzeuge, sauberer Arbeitsbaum außer bei --sha, env:check prod --connect,
-// Ports, Platz, pm2-Daemon) → Build aus `git archive` in .deploy/build/<sha> → Audit-Gate → Env-Split je App →
-// Datenbank-Sicherung, falls Schema-Dateien sich ändern (lib/db-backup.ts) → current umhängen → web → Smoke →
-// realtime → Smoke → watchdog → bei Fehler automatischer Rollback (Exit ≠ 0) → Sicherung von dump.pm2 +
-// `pm2 save` (fremde Apps unverändert) → Kontrolle über Caddy → alte Releases bis auf 3 löschen. Ausgaben
-// enthalten keine Secrets. SIGINT/SIGTERM/SIGHUP brechen nur vor der Aktivierung ab (lib/interrupt.ts).
+// Ports, Platz, pm2-Daemon, Dienstbenutzer) → Build aus `git archive` in .deploy/build/<sha> → Audit-Gate →
+// Env-Split je App → Datenbank-Sicherung, falls Schema-Dateien sich ändern (lib/db-backup.ts) → Rechte für den
+// Dienstbenutzer (lib/access.ts) → current umhängen → web → Smoke → realtime → Smoke → watchdog → bei Fehler
+// automatischer Rollback (Exit ≠ 0) → Sicherung von dump.pm2 + `pm2 save` (fremde Apps unverändert) → Kontrolle
+// über Caddy → alte Releases bis auf 3 löschen. Ausgaben enthalten keine Secrets. SIGINT/SIGTERM/SIGHUP brechen
+// nur vor der Aktivierung ab (lib/interrupt.ts).
+//
+// Dienstbenutzer (README „Systembenutzer“): Existiert `quizmaster`, laufen alle Apps mit dessen uid/gid
+// (ecosystem.config.js) – der Smoke-Test prüft das je Prozess. Fehlt er, laufen sie als root (Warnung).
 //
 // Nur für Tests des Werkzeugs (verlangt ein eigenes PM2_HOME, nie den Haupt-Daemon; eigenes Layout .deploy/test,
 // damit current, Env-Dateien und Releases der Produktion unberührt bleiben):
-//   --test-env <datei>   eigene Quell-Env (Test-Ports, *_test-DB) statt .env.prod
+//   --test-env <datei>   eigene Quell-Env (Test-Ports, *_test-DB) statt .env.prod (drill-env.ts erzeugt eine)
 //   --repo <verz>        anderes Git-Repository als Quelle für `git archive`
 //   --simulate-failure <web|realtime|watchdog>   Smoke-Test dieser App schlägt absichtlich fehl
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statfsSync } from "node:fs";
+//   --test-user <name>   vorhandener Benutzer statt quizmaster (z. B. nobody; dessen Gruppe darf geteilt sein)
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statfsSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import {
+  describeIdentity,
+  describeStat,
+  mongoUriFiles,
+  prepareAccess,
+  readProcStatus,
+  removeTree,
+  userLabel,
+} from "./lib/access.ts";
 import {
   ActivationError,
   activate,
@@ -71,6 +85,7 @@ import {
   releasesToDelete,
   writeState,
 } from "./lib/state.ts";
+import { readServiceIdentity, SERVICE_USER, type ServiceIdentity } from "./service-user.cjs";
 
 /** Build-Umgebung eines Releases: der Service Worker trägt die Release-Kennung (docs/10 „Update-Banner“). */
 function releaseBuildEnv(sha: string): Record<string, string> {
@@ -88,7 +103,7 @@ const USAGE = `Aufruf:
   pnpm deploy:restart [--apps web,realtime,watchdog] [--dry-run]
   pnpm deploy:status
 Nur Tests (eigenes PM2_HOME, Layout .deploy/test): --test-env <datei> [--repo <verz>]
-  [--simulate-failure web|realtime|watchdog]`;
+  [--simulate-failure web|realtime|watchdog] [--test-user <name>]`;
 
 function parseCli() {
   try {
@@ -105,6 +120,7 @@ function parseCli() {
         "test-env": { type: "string" },
         repo: { type: "string" },
         "simulate-failure": { type: "string" },
+        "test-user": { type: "string" },
         help: { type: "boolean", short: "h", default: false },
       },
     });
@@ -135,8 +151,9 @@ interface Tools {
 
 function guardTestMode(): string | null {
   const testEnv = values["test-env"];
-  if ((values.repo !== undefined || values["simulate-failure"] !== undefined) && testEnv === undefined) {
-    throw new DeployError("USAGE", "--repo und --simulate-failure gibt es nur zusammen mit --test-env");
+  const testOnly = [values.repo, values["simulate-failure"], values["test-user"]];
+  if (testOnly.some((value) => value !== undefined) && testEnv === undefined) {
+    throw new DeployError("USAGE", "--repo, --simulate-failure und --test-user gibt es nur zusammen mit --test-env");
   }
   if (testEnv === undefined) return null;
   const home = process.env.PM2_HOME;
@@ -255,9 +272,49 @@ function checkDaemon(home: string, mode: SourceContext["mode"]): void {
   info(`Testmodus: pm2-Daemon in ${home} wird bei Bedarf gestartet`);
 }
 
+/**
+ * Benutzer der Apps – dieselbe Auflösung wie in ecosystem.config.js (scripts/deploy/service-user.cjs), im Testmodus
+ * mit `--test-user` ein anderer vorhandener Benutzer. Jede Unstimmigkeit bricht ab, bevor etwas geändert wird.
+ */
+function resolveIdentity(): ServiceIdentity {
+  const testUser = values["test-user"];
+  try {
+    return testUser === undefined
+      ? readServiceIdentity({ user: SERVICE_USER, required: false, allowSharedGroup: false })
+      : readServiceIdentity({ user: testUser, required: true, allowSharedGroup: true });
+  } catch (error) {
+    throw new DeployError(
+      "SERVICE_USER",
+      `${error instanceof Error ? error.message : String(error)} – README „Systembenutzer“`,
+    );
+  }
+}
+
+function checkIdentity(): ServiceIdentity {
+  const identity = resolveIdentity();
+  if (identity.kind === "root") {
+    warn(
+      `Dienstbenutzer ${identity.user} fehlt – web, realtime und watchdog laufen als root (Restrisiko). ` +
+        "Einrichten: pnpm ops:create-user (als root), danach pnpm deploy:restart (README „Systembenutzer“)",
+    );
+    return identity;
+  }
+  ok(`Dienstbenutzer ${describeIdentity(identity)} – die Apps laufen ohne root-Rechte`);
+  if (identity.sharedWith.length > 0) {
+    warn(
+      `Testmodus: Gruppe ${identity.group} ist nicht exklusiv (auch: ${identity.sharedWith.join(", ")}) – ` +
+        "die Env-Dateien des Tests sind für diese Konten lesbar",
+    );
+  }
+  if (!/\/(nologin|false)$/.test(identity.shell)) {
+    warn(`${identity.user} hat die Login-Shell ${identity.shell} – erwartet nologin (infra/ops/create-user.sh)`);
+  }
+  return identity;
+}
+
 // ── gemeinsame Bausteine ──────────────────────────────────────────────────────
 
-function createContext(layout: Layout, tools: Tools, source: SourceContext): DeployContext {
+function createContext(layout: Layout, tools: Tools, source: SourceContext, identity: ServiceIdentity): DeployContext {
   const home = pm2Home();
   const backupRoot =
     source.mode === "test" ? join(home, "backups") : (process.env.QM_BACKUP_ROOT ?? DEFAULT_BACKUP_ROOT);
@@ -267,14 +324,58 @@ function createContext(layout: Layout, tools: Tools, source: SourceContext): Dep
     pm2: createPm2({ bin: tools.pm2, env: pm2EnvFor(layout, source.mode), ecosystem: layout.ecosystem }),
     pm2Home: home,
     source,
+    identity,
     backupRoot,
     simulateFailure: simulate ?? null,
   };
 }
 
-/** pm2-Umgebung; im Testmodus zeigt ecosystem.config.js über QM_DEPLOY_DIR auf `.deploy/test`. */
+/**
+ * pm2-Umgebung; im Testmodus zeigt ecosystem.config.js über QM_DEPLOY_DIR auf `.deploy/test` und übernimmt
+ * `--test-user` über QM_SERVICE_USER (nur zusammen mit QM_DEPLOY_DIR erlaubt).
+ */
 function pm2EnvFor(layout: Layout, mode: SourceContext["mode"]): Record<string, string> {
-  return mode === "test" ? { ...pm2Env(), QM_DEPLOY_DIR: layout.deployDir } : pm2Env();
+  if (mode !== "test") return pm2Env();
+  const testUser = values["test-user"];
+  return {
+    ...pm2Env(),
+    QM_DEPLOY_DIR: layout.deployDir,
+    ...(testUser === undefined ? {} : { QM_SERVICE_USER: testUser }),
+  };
+}
+
+/** lib/ProcessContainerFork.js der verwendeten pm2-Installation (lädt im App-Prozess die App) oder null. */
+function pm2ContainerPath(pm2Bin: string): string | null {
+  try {
+    const file = join(dirname(realpathSync(pm2Bin)), "..", "lib", "ProcessContainerFork.js");
+    return existsSync(file) ? file : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Unmittelbar vor der Aktivierung: Besitz und Rechte für den Dienstbenutzer herstellen und prüfen (lib/access.ts)
+ * – für das Ziel und den Rückweg. Wirft, bevor etwas umgeschaltet wird.
+ */
+async function prepareServiceAccess(ctx: DeployContext, tools: Tools, releases: ReadonlyArray<string | null>) {
+  step(ctx.identity.kind === "service" ? `Rechte für ${ctx.identity.user}` : "Rechte (ohne Dienstbenutzer)");
+  const lines = await prepareAccess({
+    layout: ctx.layout,
+    identity: ctx.identity,
+    releases: releases.filter((sha): sha is string => sha !== null),
+    externalFiles: mongoUriFiles(ctx.source.resolved.source.MONGODB_URI),
+    pm2Container: pm2ContainerPath(tools.pm2),
+    rootCode: [
+      { label: "ecosystem.config.js", path: ctx.layout.ecosystem },
+      {
+        label: "scripts/deploy/service-user.cjs",
+        path: join(ctx.layout.root, "scripts", "deploy", "service-user.cjs"),
+      },
+    ],
+  });
+  for (const line of lines) ok(line);
+  stopIfInterrupted();
 }
 
 /**
@@ -382,11 +483,12 @@ function reportPersist(result: PersistResult): void {
   if (result.pruned > 0) info(`${result.pruned} alte dump.pm2-Sicherung(en) gelöscht (max. ${KEEP_DUMP_BACKUPS})`);
 }
 
-function applyRetention(layout: Layout, state: DeployState, protect: ReadonlySet<string>): void {
+async function applyRetention(layout: Layout, state: DeployState, protect: ReadonlySet<string>): Promise<void> {
   const existing = listReleases(layout);
   const doomed = releasesToDelete(state, existing, KEEP_RELEASES, protect);
   for (const sha of doomed) {
-    rmSync(releaseDir(layout, sha), { recursive: true, force: true });
+    // GNU rm statt einer Schleife als root: .next/cache gehört ggf. dem Dienstbenutzer (lib/access.ts).
+    await removeTree(releaseDir(layout, sha));
     info(`altes Release ${short(sha)} gelöscht`);
   }
   const remaining = new Set(listReleases(layout));
@@ -447,7 +549,8 @@ async function commandDeploy(): Promise<void> {
   await runEnvCheck(source);
   const home = pm2Home();
   checkDaemon(home, source.mode);
-  const ctx = createContext(layout, tools, source);
+  const identity = checkIdentity();
+  const ctx = createContext(layout, tools, source, identity);
   await checkPorts(daemonAlive(home) ? ctx.pm2 : null, source);
   checkDisk(layout);
 
@@ -495,7 +598,7 @@ async function commandDeploy(): Promise<void> {
       if (reuse) ok(`Release ${short(sha)} ist bereits gebaut – wird wiederverwendet`);
       else await buildRelease(buildCtx, dir);
     } finally {
-      cleanupBuild(layout);
+      await cleanupBuild(layout);
     }
     stopIfInterrupted();
 
@@ -505,6 +608,7 @@ async function commandDeploy(): Promise<void> {
     ok(`web.env, realtime.env, watchdog.env aus ${source.label} (nur die Schlüssel je App, RELEASE=${short(sha)})`);
     stopIfInterrupted();
     await backupBeforeActivation(backupNeed);
+    await prepareServiceAccess(ctx, tools, [sha, current]);
 
     await critical(async () => {
       step("Aktivieren");
@@ -538,7 +642,7 @@ async function commandDeploy(): Promise<void> {
     await checkCaddyPath(source);
 
     step("Aufräumen");
-    applyRetention(layout, readState(layout.stateFile), new Set([sha, ...(current ? [current] : [])]));
+    await applyRetention(layout, readState(layout.stateFile), new Set([sha, ...(current ? [current] : [])]));
 
     step(`Fertig: Release ${short(sha)} aktiv – ${subject}`);
     info(
@@ -558,6 +662,7 @@ async function commandRollback(): Promise<void> {
   const source = loadSource(ROOT, testEnv);
   const home = pm2Home();
   checkDaemon(home, source.mode);
+  const identity = checkIdentity();
   warnIfIncomplete(layout);
   const current = currentRelease(layout);
   const state = readState(layout.stateFile);
@@ -588,12 +693,13 @@ async function commandRollback(): Promise<void> {
 
   const lock = acquireLock(layout.lockFile, `rollback ${short(target)}`);
   try {
-    const ctx = createContext(layout, tools, source);
+    const ctx = createContext(layout, tools, source, identity);
     step("Node-Laufzeit");
     await ensureRuntime(layout);
     const envFor = envFromSource(ctx);
     stopIfInterrupted();
     await backupBeforeActivation(backupNeed);
+    await prepareServiceAccess(ctx, tools, [target, current]);
     await critical(async () => {
       step(`Aktivieren von ${short(target)}`);
       try {
@@ -649,6 +755,7 @@ async function commandRestart(): Promise<void> {
   await runEnvCheck(source);
   const home = pm2Home();
   checkDaemon(home, source.mode);
+  const identity = checkIdentity();
   const current = currentRelease(layout);
   if (!current || !readReleaseMeta(layout, current)) throw new DeployError("NO_RELEASE", "kein aktives Release");
   ok(`Release ${short(current)}, Apps: ${apps.map((app) => APPS[app].name).join(", ")}`);
@@ -658,10 +765,11 @@ async function commandRestart(): Promise<void> {
   }
   const lock = acquireLock(layout.lockFile, `restart ${apps.join(",")}`);
   try {
-    const ctx = createContext(layout, tools, source);
+    const ctx = createContext(layout, tools, source, identity);
     await ensureRuntime(layout);
     const envFor = envFromSource(ctx);
     stopIfInterrupted();
+    await prepareServiceAccess(ctx, tools, [current]);
     await critical(async () => {
       try {
         await activate(ctx, {
@@ -693,6 +801,16 @@ async function commandRestart(): Promise<void> {
   }
 }
 
+/** Effektiver Benutzer eines Prozesses („als quizmaster“) – pm2 zeigt in `user` nur den Aufrufer (root). */
+function processUser(pid: number): string {
+  if (pid <= 0) return "als –";
+  try {
+    return `als ${userLabel(readProcStatus(pid).uids[1] ?? -1)}`;
+  } catch {
+    return "als ?";
+  }
+}
+
 async function commandStatus(): Promise<void> {
   const testEnv = guardTestMode();
   const layout = layoutFor(ROOT, testEnv ? "test" : "prod");
@@ -712,9 +830,19 @@ async function commandStatus(): Promise<void> {
   info(`vorherig:  ${describe(previous)} ← Ziel von pnpm deploy:rollback`);
   const releases = listReleases(layout);
   info(`Releases:  ${releases.length > 0 ? releases.map(short).join(", ") : "keine"}`);
+  let identity: ServiceIdentity | null = null;
+  try {
+    identity = resolveIdentity();
+    info(`Benutzer:  ${describeIdentity(identity)}`);
+  } catch (error) {
+    warn(`Dienstbenutzer unklar – ${describeError(error)}`);
+  }
+  if (identity?.kind === "root") warn(`kein Dienstbenutzer ${identity.user} – die Apps laufen als root`);
   for (const app of APP_KEYS) {
-    const release = readRelease(envFile(layout, app));
-    info(`${app}.env:  ${release ? `RELEASE ${short(release)}` : "fehlt"}`);
+    const file = envFile(layout, app);
+    const release = readRelease(file);
+    const access = release ? `, ${describeStat(statSync(file))}` : "";
+    info(`${app}.env:  ${release ? `RELEASE ${short(release)}${access}` : "fehlt"}`);
   }
   if (current && readReleaseMeta(layout, current)?.hasWatchdog === false) {
     warn("aktives Release ohne Watchdog – Ausfälle meldet nur infra/ops/healthcheck.sh (Cron), keine /metrics-Alarme");
@@ -737,7 +865,7 @@ async function commandStatus(): Promise<void> {
         const since = entry?.startedAt ? new Date(entry.startedAt).toISOString() : "–";
         info(
           entry
-            ? `${APPS[app].name.padEnd(20)} ${entry.status.padEnd(8)} PID ${entry.pid}  ↺ ${entry.restarts}  ${memory}  seit ${since}`
+            ? `${APPS[app].name.padEnd(20)} ${entry.status.padEnd(8)} PID ${entry.pid}  ${processUser(entry.pid)}  ↺ ${entry.restarts}  ${memory}  seit ${since}`
             : `${APPS[app].name.padEnd(20)} nicht in pm2`,
         );
       }

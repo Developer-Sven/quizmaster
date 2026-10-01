@@ -4,12 +4,16 @@
  * public) und Realtime (tsdown + `pnpm deploy --prod` für produktive node_modules) → `.deploy/releases/<sha>`.
  *
  * Das Release ist in sich geschlossen: keine absoluten Symlinks, keine Verweise aus dem Release heraus –
- * das Build-Verzeichnis wird danach gelöscht.
+ * das Build-Verzeichnis wird danach gelöscht. Besitz und Rechte sind einheitlich (Deploy-Benutzer, Verzeichnisse
+ * und ausführbare Dateien 755, sonst 644): lesbar für den Dienstbenutzer, für ihn nicht veränderbar (lib/access.ts).
  */
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  lchownSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -19,6 +23,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { deployIdentity, removeTree, type TreeRemover } from "./access.ts";
 import { extractArchive } from "./git.ts";
 import { APPS, type Layout, releaseDir } from "./layout.ts";
 import { DeployError, info, ok, step } from "./log.ts";
@@ -141,6 +146,38 @@ export function verifySelfContained(root: string): { files: number; links: numbe
   return { files, links: links.length };
 }
 
+/**
+ * Vereinheitlicht Besitz und Rechte eines frisch gebauten Releases (ohne Symlinks zu folgen): Besitzer und Gruppe
+ * des Deploys, Verzeichnisse und ausführbare Dateien 0755, alle anderen Dateien 0644 – keine Schreibrechte für
+ * Gruppe/andere, keine setuid/setgid/sticky-Bits. Ändert nur, was abweicht; liefert die Anzahl der Änderungen.
+ */
+export function normalizeReleaseModes(root: string): number {
+  const owner = deployIdentity();
+  let changed = 0;
+  const pending = [resolve(root)];
+  while (pending.length > 0) {
+    const path = pending.pop() ?? root;
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) continue;
+    if (!stat.isDirectory() && !stat.isFile()) {
+      throw new DeployError("RELEASE_FILE_TYPE", `unerwarteter Dateityp im Release: ${relative(root, path)}`);
+    }
+    let touched = false;
+    if (stat.uid !== owner.uid || stat.gid !== owner.gid) {
+      lchownSync(path, owner.uid, owner.gid);
+      touched = true;
+    }
+    const wanted = stat.isDirectory() || (stat.mode & 0o100) !== 0 ? 0o755 : 0o644;
+    if ((stat.mode & 0o7777) !== wanted) {
+      chmodSync(path, wanted);
+      touched = true;
+    }
+    if (touched) changed += 1;
+    if (stat.isDirectory()) for (const name of readdirSync(path)) pending.push(join(path, name));
+  }
+  return changed;
+}
+
 /** Installiert, baut und setzt das Release zusammen. Liefert die Metadaten des fertigen Releases. */
 export async function buildRelease(ctx: BuildContext, dir: string): Promise<ReleaseMeta> {
   const { layout, sha } = ctx;
@@ -223,6 +260,8 @@ export async function buildRelease(ctx: BuildContext, dir: string): Promise<Rele
     }
 
     const counts = verifySelfContained(partial);
+    const normalized = normalizeReleaseModes(partial);
+    if (normalized > 0) info(`Rechte vereinheitlicht: ${normalized} Einträge (755/644, Besitzer Deploy-Benutzer)`);
     const hasWatchdog = existsSync(join(partial, APPS.watchdog.entry));
     const meta: ReleaseMeta = {
       sha,
@@ -238,7 +277,8 @@ export async function buildRelease(ctx: BuildContext, dir: string): Promise<Rele
       const aside = join(layout.releasesDir, `.${sha}.replaced-${Date.now()}`);
       renameSync(final, aside);
       renameSync(partial, final);
-      rmSync(aside, { recursive: true, force: true });
+      // Das ersetzte Release kann einen vom Dienstbenutzer beschriebenen .next/cache enthalten.
+      await removeTree(aside);
     } else {
       renameSync(partial, final);
     }
@@ -251,13 +291,16 @@ export async function buildRelease(ctx: BuildContext, dir: string): Promise<Rele
   }
 }
 
-/** Build-Verzeichnis und liegengebliebene Arbeitsverzeichnisse entfernen. */
-export function cleanupBuild(layout: Layout): void {
+/**
+ * Build-Verzeichnis und liegengebliebene Arbeitsverzeichnisse entfernen. Ersetzte Releases (`.replaced-`) können
+ * vom Dienstbenutzer beschriebene Verzeichnisse enthalten – sie löscht nur `remove` (GNU rm, lib/access.ts).
+ */
+export async function cleanupBuild(layout: Layout, remove: TreeRemover = removeTree): Promise<void> {
   rmSync(layout.buildRoot, { recursive: true, force: true });
   if (!existsSync(layout.releasesDir)) return;
   for (const name of readdirSync(layout.releasesDir)) {
     if (name.startsWith(".") && (name.includes(".partial") || name.includes(".replaced-"))) {
-      rmSync(join(layout.releasesDir, name), { recursive: true, force: true });
+      await remove(join(layout.releasesDir, name));
     }
   }
 }

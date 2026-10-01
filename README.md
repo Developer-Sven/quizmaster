@@ -44,7 +44,8 @@ Env-Dateien werden nie committet und von den Werkzeugen nie ausgegeben.
 | `pnpm dev` | Web und Realtime mit `.env.dev` (Standard: Web :3000, Realtime :4000) |
 | `pnpm check` | Biome, Typecheck, alle Tests und Content-Validierung |
 | `pnpm test` | Unit-, Property- und Integrationstests (Vitest) |
-| `pnpm test:e2e` | Playwright gegen einen Test-Stack (Web + Realtime + Test-Datenbank) |
+| `pnpm test:e2e` | Playwright gegen zwei Test-Stacks (siehe „Test-Stack & E2E“) |
+| `pnpm stack:test` | Test-Stack (Test-Datenbank, Fixtures, Web + Realtime) für E2E und manuelle Prüfungen |
 | `pnpm build` | Produktions-Build (Next standalone inkl. Service Worker, Realtime-Bundle) |
 
 Automatische Tests laufen nie gegen Dev- oder Produktionsdaten: lokal in `quizmaster_test` mit eigenem
@@ -57,6 +58,67 @@ als zwei YAML-Dokumente (zuerst nur pnpm selbst, dann das Projekt) und Trivy lie
 extrahiert deshalb das Projekt-Dokument und scannt es separat. Actions sind per Commit-SHA gepinnt, Dependabot
 schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Nach dem ersten Push unter *Insights →
 Dependency graph* prüfen, dass dort die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm.
+
+## Test-Stack & E2E
+
+`pnpm test:e2e` (= `pnpm --filter e2e test`) startet Playwright (`e2e/playwright.config.ts`, nur Chromium – auf dem
+Server aus `.tooling/ms-playwright`, ADR-026) mit Mobil-Viewports gegen zwei Test-Stacks. Beide startet Playwright
+selbst als `webServer` und beendet sie am Ende mit `SIGTERM`; sie räumen ihre Test-Collections dabei selbst ab.
+
+| Stack | Skript | Ports (Standard) | Timing | Szenarien (Projekte) |
+|---|---|---|---|---|
+| Test-Stack | `pnpm stack:test` (`scripts/dev/stack-test.ts`) | Web 3200, Realtime 4200 | `GAME_TIMING=fast` | 1–8, 10, 11 (`pixel-7`, `iphone-15`) |
+| Normal-Stack | `node e2e/stack/normal-stack.ts` | Web 3201, Realtime 4201 | `GAME_TIMING=normal` | 9 (`a11y-360`, `a11y-430`), 12 (`sync`) |
+
+```bash
+pnpm test:e2e                     # alle Projekte; sync läuft zuletzt und allein (nach allen anderen Projekten)
+pnpm --filter e2e test:a11y       # Szenario 9: axe, Design-Checks und Screenshots je Phase (360 × 740 und 430 × 932)
+pnpm --filter e2e test:sync       # Szenario 12: Synchronität zweier Geräte, ohne die anderen Projekte (--no-deps)
+E2E_REUSE_STACK=1 pnpm test:e2e   # bereits laufende Stacks auf denselben Ports nutzen statt neu zu starten
+```
+
+**`pnpm stack:test [--web-port <port>] [--realtime-port <port>] [--no-build] [--log-dir <pfad>] [--log-level
+fatal|error|warn|info|debug]`** – vollständiger Stack für E2E und manuelle Prüfungen:
+
+1. Test-Datenbank anlegen (`@quizmaster/db/testing`): `TEST_MONGODB_URI`, sonst lokal `quizmaster_test` auf dem
+   Dev-Cluster (`MONGODB_URI` + `TEST_MONGODB_DB` aus `.env.dev`), jeweils mit eigenem Collection-Präfix je Lauf; ohne
+   beides (CI) ein `MongoMemoryReplSet`.
+2. Fixtures aus `test/fixtures/content/` seeden (gleicher Weg wie `pnpm content:seed`, inkl. Validierung).
+3. Realtime (tsdown → `apps/realtime/dist`) und Web (`next build` nach `apps/web/.next-e2e`, eigenes
+   `NEXT_DIST_DIR`) nacheinander bauen – mit `--no-build` die vorhandenen Builds nutzen.
+4. Erst Realtime, dann Web (`next start`) nur auf `127.0.0.1` starten, jeweils bis `/healthz` bzw. `/api/health`
+   antwortet: `GAME_TIMING=fast`, `DEV_BOTS_ENABLED=true`, `RATE_LIMIT_MODE=relaxed`, `TURNSTILE_ENABLED=false`,
+   zufällige Secrets je Lauf.
+5. Bereit-Zeile `STACK_READY web=… realtime=…`; der Stack läuft bis Strg+C, `SIGTERM` oder `SIGHUP`. Stirbt ein
+   Server, endet er mit Exit 1.
+6. Beim Ende: Server stoppen (`SIGTERM`, nach 15 s `SIGKILL`), Test-Collections droppen (Reste abgebrochener Läufe
+   entfernt der Janitor nach 6 h).
+
+Standards: Ports 3200/4200, Log-Level `info`, Logs in `<tmp>/quizmaster-stack-test/<web-port>/` (`realtime.log`,
+`web.log`, `realtime-build.log`, `web-build.log`). Ausgaben und Log-Auszüge enthalten keine Zugangsdaten.
+
+**Normal-Stack** (`node e2e/stack/normal-stack.ts [--web-port 3201] [--realtime-port 4201] [--log-dir <pfad>]
+[--log-level warn]`): nutzt die Builds des Test-Stacks (also erst `pnpm stack:test` bauen lassen – Playwright startet
+ihn erst, wenn der erste Stack bereit ist), eine eigene Test-Datenbank mit Präfix und seedet jede Fixture-Frage als
+Langtext-Variante (140 Zeichen Frage, 40 Zeichen je Antwort), damit Layout-Prüfungen den ungünstigsten Fall sehen.
+Phasen laufen in Originallänge (`GAME_TIMING=normal`). Standard-Logs: `e2e/test-results/stack-logs-normal/`, Log-Level
+`warn`.
+
+| Variable | Standard | Wirkung |
+|---|---|---|
+| `E2E_WEB_PORT`, `E2E_REALTIME_PORT` | 3200, 4200 | Ports des Test-Stacks |
+| `E2E_NORMAL_WEB_PORT`, `E2E_NORMAL_REALTIME_PORT` | jeweils +1 (3201, 4201) | Ports des Normal-Stacks |
+| `E2E_WORKERS` | 2 | parallele Worker (1–2) |
+| `E2E_REUSE_STACK=1` | aus | laufende Stacks mit denselben Ports nutzen |
+| `E2E_NO_BUILD=1` | aus | Test-Stack mit `--no-build` (vorhandene Builds) |
+| `E2E_OUTPUT_DIR` | `e2e/test-results` | Ordner für Artefakte (relativ zu `e2e/`) |
+| `E2E_SCREENSHOT_DIR` | `docs/screenshots/w3`, ohne `docs/` `<Artefakte>/screenshots` | Phasen-Screenshots aus Szenario 9 |
+
+**Artefakte:** `e2e/playwright-report/` (HTML-Bericht, öffnet nicht automatisch) und `e2e/test-results/` – Traces und
+Screenshots fehlgeschlagener Tests (`trace: retain-on-failure`, `screenshot: only-on-failure`) sowie die Stack-Logs in
+`stack-logs/` und `stack-logs-normal/`. Die Screenshots aus Szenario 9 heißen `<name>-<breite>x<höhe>.png`. Beides ist
+nicht im Repo (`e2e/.gitignore`); die CI lädt die Ordner bei Fehlern hoch (7 Tage). Jeder Test wird einmal
+wiederholt (Szenario 12: zweimal), Zeitlimit 150 s je Test.
 
 ## Fragenkatalog
 
@@ -85,6 +147,64 @@ Domain und Port stehen ausschließlich in `.env.prod`. Web lauscht auf `127.0.0.
 `127.0.0.1:<Port + 1>` (oder `REALTIME_PORT`). `TRUSTED_IP_HEADER=cf-connecting-ip` ist nur gesetzt, weil die
 Site ausschließlich über Cloudflare erreichbar ist (siehe Caddy).
 
+### Systembenutzer
+
+Web, Realtime und Watchdog laufen nicht als root, sondern als Systembenutzer `quizmaster` (docs/12
+„Nicht-Root-User“). Eine Lücke in Next.js oder Socket.IO bleibt damit auf dessen Rechte beschränkt: er kann die
+Env-Dateien der Apps lesen und `.next/cache` beschreiben, aber weder Releases, Laufzeit oder Deploy-Zustand ändern
+noch Dateien lesen, die nur root lesen darf (z. B. Env-Dateien anderer Apps mit 600, Origin-Schlüssel, Backups).
+
+```bash
+pnpm ops:create-user --dry-run   # Vorschau, ändert nichts (geht auch ohne root)
+pnpm ops:create-user             # als root: Gruppe und Benutzer quizmaster anlegen (idempotent)
+pnpm deploy:restart              # bzw. das nächste pnpm deploy:prod – erst dann laufen die Apps als quizmaster
+pnpm deploy:status               # Benutzer je App und Rechte der Env-Dateien
+```
+
+`infra/ops/create-user.sh` sichert zuerst `/etc/passwd`, `/etc/group`, `/etc/shadow` und `/etc/gshadow` nach
+`/root/backups/quizmaster/<zeit>/users/` und legt dann – nur, falls sie fehlen – die Systemgruppe und den
+Systembenutzer `quizmaster` an: ohne Home (`/nonexistent`), Shell `nologin`, gesperrtes Passwort. Vorhandene
+Einträge prüft es nur; uid/gid 0, eine Login-Shell, eine andere primäre Gruppe, eine zweite Kennung mit derselben uid
+oder weitere Konten in der Gruppe brechen ab, ohne etwas zu ändern.
+
+**Wirkung:** `ecosystem.config.js` löst den Benutzer über `/etc/passwd` und `/etc/group` auf (gemeinsam mit dem
+Deploy, `scripts/deploy/service-user.cjs`) und gibt pm2 dessen uid/gid; der pm2-Daemon (root) startet die Apps damit
+und ohne Zusatzgruppen. Vor jeder Aktivierung (`deploy:prod`, `deploy:rollback`, `deploy:restart`) setzt und prüft
+der Deploy die Rechte – passt etwas nicht, bricht er mit `SERVICE_ACCESS` ab, bevor etwas umgeschaltet wird:
+
+| Pfad | Rechte |
+|---|---|
+| `.deploy` | 0711 root – erreichbar, aber nicht auflistbar |
+| `.deploy/env`, `.deploy/env/*.env` | 0750 bzw. 0640 root:quizmaster – lesbar, nicht änderbar |
+| `.deploy/releases` | 0750 root:quizmaster – nur für die Gruppe: der Next.js-Build enthält Schlüssel (Preview-Modus, Server Actions) |
+| `.deploy/releases/<sha>`, `.deploy/runtime` | 0755/0644 root – lesbar; dass `quizmaster` nichts davon ändern kann, prüft der Deploy Datei für Datei |
+| `.deploy/releases/<sha>/web/apps/web/.next/cache` | 0700 quizmaster – die einzige beschreibbare Stelle (Next.js-Cache) |
+
+Dateien, auf die `MONGODB_URI` verweist (`tlsCAFile`, `tlsCertificateKeyFile`, `tlsCRLFile`), müssen für
+`quizmaster` lesbar sein, und was der pm2-CLI als root lädt (`ecosystem.config.js`, `scripts/deploy/service-user.cjs`),
+darf `quizmaster` nicht ändern können – beides prüft der Deploy ebenfalls. Der Smoke-Test prüft je App über
+`/proc/<pid>/status`, dass sie mit uid/gid `quizmaster` läuft (nie root); `pnpm deploy:status` zeigt den Benutzer je
+App. `pm2 status` nennt in der Spalte `user` nur den Aufrufer (root) und ist dafür nicht maßgeblich. Nach einem
+Neustart des Servers stellt `pm2 resurrect` die Apps mit derselben uid/gid wieder her (`dump.pm2`).
+
+**Ohne Dienstbenutzer** laufen die Apps wie vor der Umstellung als root (Env-Dateien 0600, `.deploy/env` und
+`.deploy/releases` 0700 root); Preflight und `pnpm deploy:status` warnen dann. Uneindeutige Einträge (uid/gid 0,
+Gruppe mit weiteren Konten, unlesbare `/etc/passwd`) brechen ab, statt still auf root zurückzufallen.
+
+**Rückweg** (zurück zu root), als root:
+
+```bash
+backup=/root/backups/quizmaster/$(date +%Y%m%d-%H%M%S)/users && install -d -m 700 "$backup"
+cp -p /etc/passwd /etc/group /etc/shadow /etc/gshadow "$backup"/
+userdel quizmaster && groupdel quizmaster     # kein Home zu löschen
+pnpm deploy:restart                           # startet alle Apps wieder als root
+```
+
+`ecosystem.config.js` gibt pm2 dann uid/gid 0 – das setzt die in pm2 gespeicherte uid zurück –, der Deploy stellt die
+Env-Dateien wieder auf 0600 root, `.deploy/env` und `.deploy/releases` auf 0700 root und ersetzt `.next/cache` des
+laufenden Releases durch ein root-Verzeichnis (andere Releases beim nächsten Aktivieren). Wieder hin:
+`pnpm ops:create-user` und `pnpm deploy:restart`.
+
 ### Deploy und Rollback
 
 ```bash
@@ -97,15 +217,18 @@ pnpm deploy:status               # aktives/vorheriges Release, pm2-Zustand, letz
 pnpm deploy:restart --apps web,realtime   # Env aus .env.prod neu erzeugen und Apps neu starten
 ```
 
-`deploy:prod` prüft zuerst Werkzeuge, Arbeitsbaum, `.env.prod` (inkl. Datenbankverbindung), Ports und Platz.
-Dann baut es aus `git archive` in `.deploy/build/<sha>` (Installation offline mit gefrorenem Lockfile), führt
-das Audit-Gate aus (`pnpm audit --prod --audit-level high`; `--skip-audit` nur im Notfall) und legt das Release
-unter `.deploy/releases/<sha>` ab. Aus `.env.prod` entsteht je App eine Env-Datei mit nur ihren Schlüsseln
-(`.deploy/env/*.env`, 600). Danach wird `.deploy/current` atomar umgehängt und in der Reihenfolge
-Web → Smoke-Test → Realtime → Smoke-Test → Watchdog gestartet. Der Smoke-Test prüft `/api/health`, die
-Startseite (HTML mit CSP-Nonce, die ihre Skripte tragen) und ein darin referenziertes `/_next/static`-Asset,
-`/healthz`, dass ein Socket.IO-Handshake ohne Ticket mit `UNAUTHORIZED` abgelehnt wird, dass `/metrics` ohne
-Token gesperrt ist und dass die Prozesse nur auf Loopback lauschen. Schlägt etwas fehl, geht der Deploy
+`deploy:prod` prüft zuerst Werkzeuge, Arbeitsbaum, `.env.prod` (inkl. Datenbankverbindung), Ports, Platz und den
+Dienstbenutzer (siehe Systembenutzer). Dann baut es aus `git archive` in `.deploy/build/<sha>` (Installation
+offline mit gefrorenem Lockfile), führt das Audit-Gate aus (`pnpm audit --prod --audit-level high`; `--skip-audit`
+nur im Notfall) und legt das Release unter `.deploy/releases/<sha>` ab (einheitlich 755/644, Besitzer root). Aus
+`.env.prod` entsteht je App eine Env-Datei mit nur ihren Schlüsseln (`.deploy/env/*.env`, 0640 root:quizmaster,
+ohne Dienstbenutzer 0600). Unmittelbar vor der Aktivierung setzt und prüft der Deploy die Rechte für den
+Dienstbenutzer. Danach wird `.deploy/current` atomar umgehängt und in der Reihenfolge
+Web → Smoke-Test → Realtime → Smoke-Test → Watchdog gestartet. Der Smoke-Test prüft, dass jede App mit der
+erwarteten uid/gid läuft (mit Dienstbenutzer nie als root), `/api/health`, die Startseite (HTML mit CSP-Nonce, die
+ihre Skripte tragen) und ein darin referenziertes `/_next/static`-Asset, `/healthz`, dass ein Socket.IO-Handshake
+ohne Ticket mit `UNAUTHORIZED` abgelehnt wird, dass `/metrics` ohne Token gesperrt ist und dass die Prozesse nur
+auf Loopback lauschen. Schlägt etwas fehl, geht der Deploy
 automatisch auf das vorherige Release zurück und endet mit Fehler. Bei Erfolg wird `dump.pm2` gesichert (die
 letzten 20 Sicherungen unter `/root/backups/quizmaster/<zeit>/dump.pm2`), `pm2 save` ausgeführt, danach über
 den Host-Caddy `https://<domain>/api/health` kontrolliert (nur Warnung) und es bleiben die letzten drei Releases.
@@ -297,23 +420,29 @@ IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`
 | Secret kompromittiert | rotieren (siehe oben), betroffene Apps neu starten, Vorfall dokumentieren |
 | Alarm „Backup fehlgeschlagen“ / „Backup-Kontrolle“ | `journalctl -t quizmaster-backup -t quizmaster-check-backup`, Ursache beheben (z. B. nicht committete Betriebswerkzeuge), `pnpm ops:backup` erneut |
 | Alarm „Cloudflare-IP-Liste … nicht abrufbar“ | `journalctl -t quizmaster-caddy`, `pnpm caddy:dry-run`; bei geänderter Liste `pnpm caddy:install` und Datei committen |
+| Deploy bricht mit `SERVICE_USER` oder `SERVICE_ACCESS` ab | nichts wurde umgeschaltet; die Meldung nennt Eintrag bzw. Pfad mit Rechten → `pnpm ops:create-user --dry-run` bzw. Rechte korrigieren, erneut deployen (siehe Systembenutzer) |
+| Smoke-Test meldet `APP_IDENTITY` | App lief nicht mit uid/gid `quizmaster` → der Deploy ist schon zurückgegangen; `pnpm deploy:status` (Benutzer je App) und `getent passwd quizmaster` prüfen |
 
 ### Vor dem Go-live offen
 
+- **Systembenutzer anlegen** (siehe Systembenutzer): `pnpm ops:create-user` als root *vor* dem ersten
+  `pnpm deploy:prod`; ohne ihn laufen die Apps als root (Preflight-Warnung).
 - **Drill** mit eigenem pm2-Daemon (`PM2_HOME=…/.tooling/pm2-test`, nie `~/.pm2`) und `--test-env` (Test-Ports,
   `*_test`-Datenbank): Erst-Deploy, `--simulate-failure web|realtime|watchdog` (auch beim Erst-Deploy),
   `deploy:rollback`, `kill -9` auf Realtime, `pm2 kill` + `pm2 resurrect` im Test-Daemon; danach
   `ops:backup` → `ops:restore-test` (Entschlüsselung mit der Passphrase aus dem Passwortmanager) und
-  `ops:alert-test` mit Empfang – Ergebnisse in `docs/13` protokollieren. Automatisiert getestet sind bisher
-  Aktivierung/Rückweg mit simuliertem pm2 und die Betriebsskripte mit Stubs (`scripts/deploy`, `scripts/ops`).
+  `ops:alert-test` mit Empfang – Ergebnisse in `docs/13` protokollieren. Die Quell-Env für `--test-env` erzeugt
+  `node scripts/deploy/drill-env.ts create <datei>` (Test-Datenbank der automatischen Tests mit eigenem
+  Collection-Präfix, Ports 7490/7491, frische Secrets, 600); danach `… cleanup <datei>` (droppt das Präfix, löscht die
+  Datei). Mit `--test-user nobody` laufen die Test-Apps unter einem vorhandenen unprivilegierten Benutzer, ohne
+  `quizmaster` anzulegen. Bereits durchgespielt (01.10.2026, Test-Daemon, `nobody`): Erst-Deploy direkt als
+  Dienstbenutzer, Erst-Deploy als root (Rückfall) mit anschließender Umstellung per `deploy:restart`, Deploy eines
+  zweiten Releases, `deploy:rollback`, automatischer Rückweg nach `--simulate-failure realtime`, `pm2 kill` +
+  `pm2 resurrect` (uid/gid bleiben), Rückweg zu root – jeweils mit Smoke-Test inkl. Prozess-uid; dazu Zugriffsproben
+  (Dienstbenutzer liest Env und Release, schreibt nur `.next/cache`; ein drittes Konto erreicht weder Env noch
+  Releases). Offen sind die übrigen Punkte oben.
 - **Offsite-Backups** (siehe oben).
 - **Externer Uptime-Check** und der **Watchdog** (siehe Monitoring).
-- **Apps laufen als root:** pm2-Daemon und alle Apps des Servers laufen als root (Bestand). Eine Lücke in
-  Next.js/Socket.IO wäre damit Root auf einem Host mit weiteren Apps (deren Env-Dateien, Origin-Schlüssel,
-  Caddy/Cron). docs/12 sah einen Nicht-Root-Benutzer vor. Umstellung: Systembenutzer `quizmaster` (nologin),
-  in `ecosystem.config.js` `uid`/`gid` je App, `.deploy` 711, `.deploy/env` 700 mit Besitzer `quizmaster`
-  (Env-Dateien per `chown`), `.next/cache` des Web-Releases beschreibbar – danach Drill wiederholen. Bis dahin
-  bewusst akzeptiertes Restrisiko; Entscheidung und Umsetzung durch den Betreiber.
 
 ## Sicherheit
 
