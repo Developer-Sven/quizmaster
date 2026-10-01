@@ -1,7 +1,8 @@
 /**
  * `POST /api/realtime/ticket` – kurzlebiges Socket-Ticket (docs/05 §Verbindung 1, docs/06 §Identität).
- * Reihenfolge: Origin (403) → Rate-Limit IP 300/min (429) → Body (400) → Cookie gültig (401) → Rate-Limit
- * Gast 30/min (429) → Gast existiert (401) → nicht gesperrt (Gast oder IP-Schlüssel, 403 BANNED) →
+ * Reihenfolge: Origin (403) → Cookie lesen (lokale HMAC-Prüfung) → Rate-Limit IP 300/min (429; Anfragen ohne
+ * gültige Session in einem eigenen Schlüssel, siehe `sessionlessIpKey`) → Body (400) → Cookie gültig (401) →
+ * Rate-Limit Gast 30/min (429) → Gast existiert (401) → nicht gesperrt (Gast oder IP-Schlüssel, 403 BANNED) →
  * optional Turnstile (Claim `tsv`) → JWT 60 s; Session-Cookie wird dabei ggf. rollierend erneuert.
  */
 import { type TicketResponse, ticketRequestSchema } from "@quizmaster/shared";
@@ -14,17 +15,29 @@ import type { ApiHandler } from "./route";
 
 const ENDPOINT = "POST /api/realtime/ticket";
 
+/**
+ * Schlüssel im IP-Limit (Regel `http.ticket.ip`, 300/min) für Anfragen OHNE gültige Session: weiter je IP, aber
+ * getrennt vom Eimer gültiger Sessions. Solche Anfragen kosten nichts (kein Cookie nötig, der `Origin`-Header ist
+ * außerhalb eines Browsers fälschbar) – im gemeinsamen Eimer sperrte eine Flut alle Nutzer hinter derselben IP
+ * (CGNAT, Schul-WLAN) von Tickets und von der Session-Weiterverwendung (`session.ts`, gleicher Eimer) aus.
+ */
+export function sessionlessIpKey(ipKey: string): string {
+  return `ohne-session:${ipKey}`;
+}
+
 export const handleTicketRequest: ApiHandler = async (request, ctx) => {
   assertAllowedOrigin(request.headers, ctx.env);
   const client = clientAddress(request.headers, ctx.env);
-  await consumeRateLimit(ctx, ENDPOINT, "ip", client.key);
-  const body = await readJsonBody(request, ticketRequestSchema);
 
   const nowMs = ctx.now();
   const now = new Date(nowMs);
   const nowSec = nowSeconds(nowMs);
 
+  // Cookie vor dem IP-Limit lesen (nur HMAC, ohne Datenbank), damit es den richtigen Eimer trifft.
   const session = await readSession(request, ctx, nowSec);
+  await consumeRateLimit(ctx, ENDPOINT, "ip", session === null ? sessionlessIpKey(client.key) : client.key);
+  const body = await readJsonBody(request, ticketRequestSchema);
+
   if (session === null) throw new ApiError("UNAUTHORIZED", "Keine gültige Session");
   const guestId = session.sub;
   await consumeRateLimit(ctx, ENDPOINT, "guest", guestId);

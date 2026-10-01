@@ -1,3 +1,4 @@
+import { Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "./logger";
 import { createTurnstileVerifier, hostnamesOf, TURNSTILE_TOKEN_TTL_MS } from "./turnstile";
@@ -58,6 +59,48 @@ describe("Turnstile-Siteverify", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     clock.now += TURNSTILE_TOKEN_TTL_MS;
     expect((await instance.verify("einmal", null)).ok).toBe(true);
+  });
+
+  it("Konfigurationsfehler (Secret fehlt/ungültig, bad-request) → unavailable mit Fehler-Log, nie rejected", async () => {
+    const lines: string[] = [];
+    const captured = createLogger({
+      level: "info",
+      destination: new Writable({
+        write(chunk, _encoding, done) {
+          lines.push(String(chunk));
+          done();
+        },
+      }),
+    });
+    // Live geprüft (01.10.2026): Siteverify antwortet auf ein falsches oder fehlendes Secret mit HTTP 400 und den
+    // Codes im JSON-Body; die Doku beschreibt dieselben Codes auch mit HTTP 200 – beides muss gleich enden.
+    const answers = [
+      { code: "missing-input-secret", status: 400 },
+      { code: "invalid-input-secret", status: 400 },
+      { code: "invalid-input-secret", status: 200 },
+      { code: "bad-request", status: 200 },
+    ];
+    for (const { code, status } of answers) {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        Response.json({ success: false, "error-codes": [code], messages: [] }, { status }),
+      );
+      const instance = createTurnstileVerifier({
+        secretKey: "0x4AAAAAAA-echter-schluessel",
+        allowedHostnames: ["quiz.example.com"],
+        fetch: fetchMock,
+        logger: captured,
+        now: () => 1_000,
+      });
+      // Jede Person sähe sonst wie ein Bot aus (403 TURNSTILE_REQUIRED) – der Fehler liegt beim Betreiber.
+      expect(await instance.verify(`token-${code}-${status}`, null)).toEqual({ ok: false, reason: "unavailable" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+    const errors = lines.map((line) => JSON.parse(line) as { level: number; msg: string; errorCodes?: string[] });
+    expect(errors.map((entry) => entry.level)).toEqual([50, 50, 50, 50]);
+    // Der Log nennt die Ursache (Secret) statt „nicht verfügbar / HTTP 400“ – sonst sähe es wie ein Cloudflare-Ausfall aus.
+    expect(errors.map((entry) => entry.errorCodes)).toEqual(answers.map(({ code }) => [code]));
+    expect(errors.every((entry) => entry.msg.includes("TURNSTILE_SECRET_KEY"))).toBe(true);
+    expect(lines.join("")).not.toContain("0x4AAAAAAA-echter-schluessel");
   });
 
   it("lehnt fremde oder fehlende Hostnamen ab", async () => {

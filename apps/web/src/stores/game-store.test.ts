@@ -212,6 +212,15 @@ describe("Verbindung und Reconnect-Frist", () => {
     expect(state().connection.lastError).toBeNull();
   });
 
+  it("vergisst eine gemerkte Ablehnung nur, wenn es genau diese ist", () => {
+    gameActions.connectionRejected("TOO_MANY_CONNECTIONS");
+    gameActions.clearRejection("TURNSTILE_REQUIRED");
+    expect(state().connection.lastError).toBe("TOO_MANY_CONNECTIONS");
+    gameActions.connectionRejected("TURNSTILE_REQUIRED");
+    gameActions.clearRejection("TURNSTILE_REQUIRED");
+    expect(state().connection.lastError).toBeNull();
+  });
+
   it("zeigt die Wartung bis zur nächsten neuen Verbindung", () => {
     gameActions.connected();
     gameActions.applyNotice("MAINTENANCE");

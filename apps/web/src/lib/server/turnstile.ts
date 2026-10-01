@@ -17,6 +17,19 @@ const REPLAY_CACHE_MAX = 50_000;
 const ATTEMPT_TIMEOUT_MS = 3_500;
 const MAX_ATTEMPTS = 2;
 
+/**
+ * Siteverify-Fehlercodes, mit denen Cloudflare die eigene Konfiguration ablehnt statt des Tokens: Secret fehlt,
+ * ist ungültig/rotiert (bzw. ein Test-Secret mit echtem Token) oder die Anfrage ist fehlerhaft. Dann scheitert
+ * jede Prüfung – wie „nicht verfügbar“ behandeln (503, fail-closed) und mit der Ursache loggen, statt jede Person
+ * als Bot abzuweisen (403 sähe aus wie eine normale Ablehnung) oder nur „nicht verfügbar“ zu melden (sähe aus wie
+ * ein Cloudflare-Ausfall). Live antwortet Siteverify darauf mit HTTP 400, laut Doku auch mit 200 – beides zählt.
+ */
+const CONFIGURATION_ERROR_CODES: ReadonlySet<string> = new Set([
+  "missing-input-secret",
+  "invalid-input-secret",
+  "bad-request",
+]);
+
 const siteverifyResponseSchema = z.object({
   success: z.boolean(),
   "error-codes": z.array(z.string()).optional(),
@@ -27,7 +40,10 @@ const siteverifyResponseSchema = z.object({
 export type TurnstileOutcome =
   | { ok: true; verifiedAt: number }
   | { ok: false; reason: "rejected" | "hostname_mismatch" | "replayed"; errorCodes?: readonly string[] }
-  /** Siteverify nicht erreichbar oder fehlerhaft → Aufrufer antwortet 503 (fail-closed). */
+  /**
+   * Siteverify nicht erreichbar, fehlerhaft oder lehnt die eigene Konfiguration ab (Secret, siehe
+   * `CONFIGURATION_ERROR_CODES`) → Aufrufer antwortet 503 (fail-closed).
+   */
   | { ok: false; reason: "unavailable" };
 
 export interface TurnstileVerifier {
@@ -46,6 +62,8 @@ export interface TurnstileVerifierOptions {
 
 type AttemptResult =
   | { kind: "answer"; data: z.output<typeof siteverifyResponseSchema> }
+  /** Siteverify lehnt die eigene Konfiguration ab (`CONFIGURATION_ERROR_CODES`). */
+  | { kind: "config"; errorCodes: readonly string[] }
   | { kind: "retry"; detail: string }
   | { kind: "fail"; detail: string };
 
@@ -92,18 +110,21 @@ export function createTurnstileVerifier(options: TurnstileVerifierOptions): Turn
       return { kind: "retry", detail: error instanceof Error ? error.name : "fetch-fehler" };
     }
     if (response.status >= 500) return { kind: "retry", detail: `HTTP ${response.status}` };
-    if (!response.ok) return { kind: "fail", detail: `HTTP ${response.status}` };
+    // Auch 4xx-Antworten tragen die Fehlercodes im Body: Ein falsches oder fehlendes Secret meldet Siteverify mit
+    // HTTP 400 + `invalid-input-secret` bzw. `missing-input-secret` (live geprüft); jede andere 4xx bleibt „fail“.
+    const status = `HTTP ${response.status}`;
     let json: unknown;
     try {
       json = await response.json();
     } catch {
-      return { kind: "fail", detail: "Antwort ist kein JSON" };
+      return { kind: "fail", detail: response.ok ? "Antwort ist kein JSON" : status };
     }
     const parsed = siteverifyResponseSchema.safeParse(json);
-    if (!parsed.success) return { kind: "fail", detail: "Antwort unerwartet" };
-    if (!parsed.data.success && (parsed.data["error-codes"] ?? []).includes("internal-error")) {
-      return { kind: "retry", detail: "internal-error" };
-    }
+    if (!parsed.success) return { kind: "fail", detail: response.ok ? "Antwort unerwartet" : status };
+    const errorCodes = parsed.data.success ? [] : (parsed.data["error-codes"] ?? []);
+    if (errorCodes.some((code) => CONFIGURATION_ERROR_CODES.has(code))) return { kind: "config", errorCodes };
+    if (!response.ok) return { kind: "fail", detail: status };
+    if (errorCodes.includes("internal-error")) return { kind: "retry", detail: "internal-error" };
     return { kind: "answer", data: parsed.data };
   };
 
@@ -122,6 +143,13 @@ export function createTurnstileVerifier(options: TurnstileVerifierOptions): Turn
       for (let round = 1; round <= MAX_ATTEMPTS; round++) {
         last = await attempt(body);
         if (last.kind !== "retry") break;
+      }
+      if (last?.kind === "config") {
+        options.logger.error(
+          { errorCodes: last.errorCodes },
+          "Turnstile-Siteverify lehnt die Konfiguration ab – TURNSTILE_SECRET_KEY prüfen (jede Prüfung scheitert)",
+        );
+        return { ok: false, reason: "unavailable" };
       }
       if (last === undefined || last.kind !== "answer") {
         options.logger.error({ detail: last?.detail }, "Turnstile-Siteverify nicht verfügbar");

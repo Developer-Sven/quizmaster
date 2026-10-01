@@ -18,6 +18,7 @@ import {
 } from "../test-support";
 import { hmacKey, signSessionToken } from "../tokens";
 import { runApi } from "./route";
+import { handleSessionRequest } from "./session";
 import { handleTicketRequest } from "./ticket";
 
 const DAY_SEC = 24 * 60 * 60;
@@ -248,5 +249,48 @@ describe("POST /api/realtime/ticket – Ablehnungen", () => {
     const ip = freshIp();
     for (let i = 0; i < 300; i++) expect((await post(h, { ip })).status).toBe(401);
     expect((await post(h, { ip })).status).toBe(429);
+  });
+
+  it("Anfragen ohne gültige Session sperren gültige Sessions derselben IP nicht aus (eigener IP-Eimer)", async () => {
+    const h = harness();
+    const ip = freshIp();
+    const { cookie } = await guestWithSession();
+    // Flut ohne bzw. mit kaputtem Cookie (Origin-Header außerhalb eines Browsers fälschbar) bis zum Limit …
+    for (let i = 0; i < 300; i++) expect((await post(h, { ip })).status).toBe(401);
+    expect((await post(h, { ip, cookie: "kd_sid=kaputt" })).status).toBe(429);
+    // … trifft weder Tickets noch die Wiederverwendung gültiger Sessions hinter derselben IP (CGNAT, WLAN).
+    expect((await post(h, { ip, cookie })).status).toBe(200);
+    const reuse = await runApi(
+      "POST /api/session",
+      testRequest("/api/session", { body: {}, cookie, ip }),
+      () => h.ctx,
+      handleSessionRequest,
+    );
+    expect(reuse.status).toBe(200);
+  });
+
+  it("zählt gültige Sessions gegen IP und Gast, Anfragen ohne Session getrennt – weiter je IP", async () => {
+    const h = harness();
+    const consume = vi.spyOn(h.ctx.limiters, "consume");
+    const ip = freshIp();
+    const otherIp = freshIp();
+    const key = ipKey(ip, TEST_SECRETS.IP_HASH_SECRET) ?? "";
+    const { guestId, cookie } = await guestWithSession();
+
+    expect((await post(h, { ip, cookie })).status).toBe(200);
+    expect(consume.mock.calls).toEqual([
+      ["POST /api/realtime/ticket", "ip", key],
+      ["POST /api/realtime/ticket", "guest", guestId],
+    ]);
+
+    consume.mockClear();
+    expect((await post(h, { ip })).status).toBe(401);
+    expect((await post(h, { ip: otherIp })).status).toBe(401);
+    const [own, other] = consume.mock.calls.map(([endpoint, scope, bucket]) => ({ endpoint, scope, bucket }));
+    expect(consume).toHaveBeenCalledTimes(2);
+    expect(own).toMatchObject({ endpoint: "POST /api/realtime/ticket", scope: "ip" });
+    expect(own?.bucket).not.toBe(key);
+    expect(own?.bucket).toContain(key);
+    expect(other?.bucket).not.toBe(own?.bucket);
   });
 });

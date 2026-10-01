@@ -19,6 +19,7 @@ import {
   type ErrorPlacement,
   errorText,
   joinErrorPlacement,
+  turnstileFailureText,
 } from "@/lib/client/errors";
 import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-realtime";
 import { lobbyPath } from "@/lib/client/paths";
@@ -131,9 +132,9 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
       return;
     }
     setBusy(null);
-    // Turnstile gescheitert: Den Fehler zeigt die Prüfung selbst (ohne Widget: allgemeiner Turnstile-Hinweis).
     if (result.code === "TURNSTILE_REQUIRED") {
-      if (solver === null) setFormError({ at: kind, text: de.turnstile.failed });
+      const text = turnstileFailureText(solver === null ? null : solver.getStatus());
+      if (text !== null) setFormError({ at: kind, text });
       return;
     }
     showError(result.code, placement(result.code), kind);

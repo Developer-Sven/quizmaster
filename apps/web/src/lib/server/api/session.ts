@@ -22,6 +22,8 @@ const ENDPOINT = "POST /api/session";
 /**
  * Weiterverwenden einer gültigen Session ist so billig wie ein Ticket-Abruf (Cookie prüfen, lastSeen setzen)
  * und zählt deshalb gegen dessen IP-Limit (300/min, Speicher) – begrenzt, ohne das Anlege-Limit zu berühren.
+ * Es teilt sich den Eimer nur mit Tickets gültiger Sessions: Ticket-Anfragen ohne Session zählen getrennt
+ * (`sessionlessIpKey` in ticket.ts) und können ihn nicht leeren.
  */
 const REUSE_LIMIT_ENDPOINT = "POST /api/realtime/ticket";
 

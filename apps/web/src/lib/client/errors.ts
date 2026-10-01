@@ -6,6 +6,7 @@
  */
 import type { ErrorCode } from "@quizmaster/shared";
 import { de, errorPresentation, errorPresentations } from "../../i18n/de";
+import type { TurnstileStatus } from "./turnstile";
 
 /** Fehler einer Aktion: Protokoll-Code oder `NETWORK` (kein Ack: Zeitüberschreitung, Trennung, kein Netz). */
 export type ClientErrorCode = ErrorCode | "NETWORK";
@@ -47,6 +48,18 @@ export function errorText(code: ClientErrorCode): string {
     default:
       return errorPresentations.INTERNAL.text;
   }
+}
+
+/**
+ * Hinweis zu einer Aktion (Lobby erstellen, Beitreten), die mit `TURNSTILE_REQUIRED` endet – nach dem automatischen
+ * zweiten Versuch (docs/09 §11); `status` = Zustand der Turnstile-Prüfung der Seite, `null` = keine Prüfung (kein
+ * Site Key). Die Prüfung zeigt nur ihre eigenen Fehler (Status `error`, `TurnstileSlot`). Hat Cloudflare sie
+ * bestanden und der Server das Token trotzdem abgelehnt (falscher Schlüssel, fremder Hostname, Wiederholung), steht
+ * sie wieder auf `idle` – dann braucht die Aktion den Hinweis selbst, sonst endete sie ohne jede Rückmeldung.
+ * `null` als Ergebnis = die Prüfung zeigt den Fehler schon.
+ */
+export function turnstileFailureText(status: TurnstileStatus | null): string | null {
+  return status === "error" ? null : de.turnstile.failed;
 }
 
 /** Beitreten (Startseite und `/j/[code]`): Lobby-Fehler unter dem Code, Namensfehler unter dem Namen. */

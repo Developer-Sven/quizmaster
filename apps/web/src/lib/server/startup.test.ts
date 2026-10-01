@@ -104,6 +104,50 @@ describe("Start-Checks (instrumentation → runWebStartupChecks)", () => {
     expect(text).not.toContain(TURNSTILE_TEST.secretKey);
   });
 
+  it("Produktions-Datenbank ohne Turnstile → Warnungen beim Start (Bot-Schutz aus, Notfall-Schalter ohne Schlüssel)", async () => {
+    // Remote-Host ohne TLS: Der Start endet danach am DB-Check – die Turnstile-Warnungen stehen schon vorher im Log.
+    const prodWithout = { MONGODB_URI: "mongodb://db.example.invalid:27017/", MONGODB_DB: "quizmaster" };
+    const off = capture();
+    const env = parseWebEnv(testEnvSource(prodWithout));
+    await expect(runWebStartupChecks({ logger: off.logger, exit: off.exit, env: () => env })).rejects.toThrow(
+      ExitCalled,
+    );
+    const warnings = off.lines
+      .map((line) => JSON.parse(line) as { level: number; msg: string })
+      .filter((entry) => entry.level === 40 && entry.msg.includes("Turnstile"));
+    expect(warnings.map((entry) => entry.msg)).toEqual([
+      expect.stringContaining("TURNSTILE_ENABLED"),
+      expect.stringContaining("turnstileOnJoin"),
+    ]);
+
+    // Eingeschaltet und vollständig konfiguriert: keine Warnung; Werte stehen nie im Log.
+    const on = capture();
+    const keys = { TURNSTILE_SITE_KEY: "0x4AAAAAAA-site-key", TURNSTILE_SECRET_KEY: "0x4AAAAAAA-secret-key-value" };
+    const configured = parseWebEnv(testEnvSource({ ...prodWithout, TURNSTILE_ENABLED: "true", ...keys }));
+    await expect(runWebStartupChecks({ logger: on.logger, exit: on.exit, env: () => configured })).rejects.toThrow(
+      ExitCalled,
+    );
+    expect(on.lines.join("")).not.toContain("Turnstile");
+    expect(on.lines.join("")).not.toContain(keys.TURNSTILE_SECRET_KEY);
+
+    // Ausgeschaltet, aber Schlüssel vorhanden (Notfall-Schalter funktioniert): nur der Hinweis „Bot-Schutz aus“.
+    const keysOnly = capture();
+    const standby = parseWebEnv(testEnvSource({ ...prodWithout, ...keys }));
+    await expect(
+      runWebStartupChecks({ logger: keysOnly.logger, exit: keysOnly.exit, env: () => standby }),
+    ).rejects.toThrow(ExitCalled);
+    expect(keysOnly.lines.filter((line) => line.includes("Turnstile") && line.includes('"level":40'))).toHaveLength(1);
+    await closeMongoClient(createMongoClient(prodWithout.MONGODB_URI, { appName: WEB_APP_NAME, maxPoolSize: 10 }));
+  });
+
+  it("Dev-/Test-Datenbank ohne Turnstile → keine Warnung (docs/06: Dev mit TURNSTILE_ENABLED=false)", async () => {
+    const { lines, logger, exit } = capture();
+    const env = parseWebEnv(testEnvSource({ MONGODB_URI: t.uri, MONGODB_DB: t.dbName }));
+    await runWebStartupChecks({ logger, exit, env: () => env });
+    expect(exit).not.toHaveBeenCalled();
+    expect(lines.join("")).not.toContain("Turnstile");
+  });
+
   it("TLS-Ausnahme nur für *_dev und *_test – nie an NODE_ENV gekoppelt", () => {
     expect(allowInsecureDatabaseTransport("quizmaster_dev")).toBe(true);
     expect(allowInsecureDatabaseTransport("quizmaster_test")).toBe(true);

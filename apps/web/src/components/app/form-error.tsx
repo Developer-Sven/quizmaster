@@ -1,4 +1,4 @@
-import { TriangleAlertIcon } from "@/lib/ui/icons";
+import { TriangleAlertIcon } from "../../lib/ui/icons";
 
 export interface FormErrorProps {
   /** Fehlertext (`null` = nichts anzeigen) */

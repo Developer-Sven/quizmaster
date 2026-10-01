@@ -587,6 +587,12 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     if (useGameStore.getState().connection.fatal) return;
     wanted = true;
     if (socket.connected || socket.active) return;
+    // Neuer Versuch nach einer abgelehnten Turnstile-Prüfung (`abortForTurnstile`): Die alte Ablehnung gilt nicht mehr
+    // – sonst zeigte die Lobby-Seite ihren Fehler schon wieder, während die neue Prüfung läuft.
+    if (lastRejection === "TURNSTILE_REQUIRED") {
+      lastRejection = null;
+      gameActions.clearRejection("TURNSTILE_REQUIRED");
+    }
     gameActions.connecting();
     socket.connect();
   }

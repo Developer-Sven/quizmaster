@@ -10,6 +10,8 @@ const KEYS = {
   membership: "qm.lobby",
   categories: "qm.categories",
   session: "qm.session",
+  /** Nur kurz beschrieben, um die Schreibbarkeit zu prüfen (`isKnownNonMember`). */
+  probe: "qm.probe",
 } as const;
 
 let warned = false;
@@ -87,6 +89,36 @@ export function readMembership(): string | null {
 
 export function writeMembership(code: string | null): void {
   write(KEYS.membership, code);
+}
+
+/**
+ * Lässt sich der Speicher lesen UND beschreiben? Manche Browser (privater Modus, volles Kontingent, gesperrte
+ * Website-Daten) liefern beim Lesen nur `null`, während jedes Schreiben scheitert – „nichts gespeichert“ hieße
+ * dann nichts. Die Probe hinterlässt keinen Eintrag.
+ */
+function writable(): boolean {
+  const store = storage();
+  if (!store) return false;
+  try {
+    store.setItem(KEYS.probe, "1");
+    store.removeItem(KEYS.probe);
+    return true;
+  } catch (error) {
+    reportStorageProblem(error);
+    return false;
+  }
+}
+
+/**
+ * Sicher kein Mitglied der Lobby `code`: Der Speicher funktioniert und merkt sich keine Mitgliedschaft für diesen
+ * Code (nie beigetreten, verlassen, entfernt oder inzwischen in einer anderen Lobby). Dann führt `/lobby/<code>`
+ * sofort zur Beitreten-Seite – ohne Lobby-App und ohne Verbindung (Erstaufruf eines geteilten Lobby-Links, docs/07
+ * LCP). Ist ein Mitglied doch gemeint (Merker gelöscht, zweiter Tab in einer anderen Lobby), führt „Beitreten“ es
+ * zurück: Realtime behandelt `lobby:join` eines Mitglieds wie eine Wiederaufnahme. Im Zweifel (Speicher nicht
+ * nutzbar) `false` – dann entscheidet der Server per `lobby:resume`.
+ */
+export function isKnownNonMember(code: string): boolean {
+  return readMembership() !== code && writable();
 }
 
 /**

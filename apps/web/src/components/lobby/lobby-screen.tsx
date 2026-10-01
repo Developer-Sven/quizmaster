@@ -9,6 +9,7 @@ import { ConnectionOverlay } from "@/components/game/overlays/connection-overlay
 import { preloadOverlays } from "@/components/game/overlays/preload";
 import { type TurnstileClientConfig, TurnstileSlot, useTurnstile } from "@/components/turnstile/turnstile-slot";
 import { loadCategoryCatalog } from "@/lib/client/categories";
+import { preloadExtendedGlyphs } from "@/lib/client/font-preload";
 import { pageModalityTracker } from "@/lib/client/keyboard";
 import { joinPath } from "@/lib/client/paths";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
@@ -50,7 +51,8 @@ export interface LobbyScreenProps {
  * zeigt je nach Phase die Lobby oder das Spiel. Das Verbindungs-Overlay liegt im Haupt-Bundle, die
  * Spiel-Overlays werden beim Betreten vorgeladen (docs/07) – sobald der erste Zustand da ist: vorher
  * konkurrierten ihre neun Chunks mit Ticket und Handshake um die Bandbreite und verzögerten die Lobby.
- * Wer die Seite ohne Mitgliedschaft öffnet (geteilter Lobby-Link), landet auf der Beitreten-Seite.
+ * Wer die Seite ohne Mitgliedschaft öffnet (geteilter Lobby-Link), landet auf der Beitreten-Seite: meist schon vorher
+ * über `LobbyEntry` (Merker im Speicher); ist der Speicher nicht nutzbar, hier nach `lobby:resume` → LOBBY_NOT_FOUND.
  */
 export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile, maintenance }: LobbyScreenProps) {
   const router = useRouter();
@@ -67,6 +69,8 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
   const waitingForState = phase === null && exit === null && fatal === null && connected;
   const hasState = phase !== null;
   const solver = useTurnstile(turnstile);
+  // Verbindungsaufbau endete mit TURNSTILE_REQUIRED, obwohl die Prüfung bestanden war (Server lehnte das Token ab).
+  const turnstileRejected = useGameStore((state) => state.connection.lastError === "TURNSTILE_REQUIRED");
 
   useEffect(() => {
     setMemberAtEntry(readMembership() === code);
@@ -86,7 +90,9 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
   }, [code, realtimeUrl, solver, turnstile.enabled]);
 
   useEffect(() => {
-    if (hasState) preloadOverlays();
+    if (!hasState) return;
+    preloadOverlays();
+    preloadExtendedGlyphs();
   }, [hasState]);
 
   // Verbunden, aber kein Zustand (Resync scheitert dauerhaft): nach 15 s Hinweis statt endlosem Skeleton.
@@ -134,7 +140,12 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
       <LiveToasts />
       <LobbyAnnouncer />
       {/* Über dem Verbindungs-Overlay: Turnstile beim Wiederverbinden (nur sichtbar bei Bestätigung/Fehler). */}
-      <TurnstileSlot solver={solver} variant="panel" onRetry={() => getRealtimeClient({ realtimeUrl }).connect()} />
+      <TurnstileSlot
+        solver={solver}
+        variant="panel"
+        rejected={turnstileRejected}
+        onRetry={() => getRealtimeClient({ realtimeUrl }).connect()}
+      />
     </MaintenanceNoticeContext>
   );
 }

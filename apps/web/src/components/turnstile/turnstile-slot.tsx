@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { FormError } from "@/components/app/form-error";
-import { Button } from "@/components/ui/button";
-import { de } from "@/i18n/de";
-import { createTurnstileSolver, type TurnstileSolver, type TurnstileStatus } from "@/lib/client/turnstile";
-import { cx } from "@/lib/ui/cx";
-import { RefreshCwIcon } from "@/lib/ui/icons";
+import { de } from "../../i18n/de";
+import { createTurnstileSolver, type TurnstileSolver, type TurnstileStatus } from "../../lib/client/turnstile";
+import { cx } from "../../lib/ui/cx";
+import { RefreshCwIcon } from "../../lib/ui/icons";
+import { FormError } from "../app/form-error";
+import { Button } from "../ui/button";
 
 /** Öffentliche Turnstile-Konfiguration aus der Laufzeit-Konfiguration (ADR-023, `getPublicRuntimeConfig`). */
 export interface TurnstileClientConfig {
@@ -42,6 +42,11 @@ export interface TurnstileSlotProps {
   variant?: "inline" | "panel";
   /** Nur `panel`: „Erneut versuchen“ nach einem Fehler (z. B. Verbindung neu aufbauen). */
   onRetry?: () => void;
+  /**
+   * Der Server hat das Token der letzten Prüfung abgelehnt (Verbindungsaufbau endete mit `TURNSTILE_REQUIRED`).
+   * Hatte Cloudflare die Prüfung bestanden, steht sie wieder auf `idle` und zeigte sonst keinen Fehler.
+   */
+  rejected?: boolean;
 }
 
 /**
@@ -51,7 +56,7 @@ export interface TurnstileSlotProps {
  * jeder Formularfehler darunter (`caption`, rot, `triangle-alert`). Der Container bleibt immer eingehängt –
  * Cloudflare blendet sein iframe selbst ein und aus.
  */
-export function TurnstileSlot({ solver, variant = "inline", onRetry }: TurnstileSlotProps) {
+export function TurnstileSlot({ solver, variant = "inline", onRetry, rejected = false }: TurnstileSlotProps) {
   const status = useSyncExternalStore(solver?.subscribe ?? noSubscription, solver?.getStatus ?? idle, idle);
   // Eigene Callback-Ref (statt `solver.attach` direkt): der Compiler hielte sonst `solver` für eine Ref.
   const attach = useCallback((element: HTMLDivElement | null) => solver?.attach(element), [solver]);
@@ -62,7 +67,8 @@ export function TurnstileSlot({ solver, variant = "inline", onRetry }: Turnstile
     if (interactive) frame.current?.scrollIntoView({ block: "center" });
   }, [interactive]);
   if (solver === null) return null;
-  const failed = status === "error";
+  // Eigener Fehler der Prüfung oder vom Server abgelehnt (dann ruht sie; läuft schon die nächste, gilt das nicht).
+  const failed = status === "error" || (rejected && status === "idle");
   // Ein stabiles Element für Überschrift + Widget: ohne Bestätigung außerhalb des Flusses (keine Höhe, kein
   // Abstand im Formular), mit Bestätigung im Fluss. Das iframe bleibt dabei eingehängt.
   const widget = (

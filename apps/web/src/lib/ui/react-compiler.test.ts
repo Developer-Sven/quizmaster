@@ -119,6 +119,12 @@ const STRICT_ALLOWED: Record<string, Record<string, { max: number; reason: strin
       reason: "Mitgliedschaft beim Betreten aus localStorage – erst nach der Hydration lesbar",
     },
   },
+  "components/lobby/lobby-entry.tsx": {
+    EffectSetState: {
+      max: 1,
+      reason: "Mitgliedschaft aus localStorage erst nach der Hydration lesbar – entscheidet Lobby oder Beitreten-Seite",
+    },
+  },
   "components/ui/category-icon.tsx": {
     StaticComponents: { max: 3, reason: "Fehlalarm: Icon aus der statischen Kategorie-Map (lib/ui/category.ts)" },
   },

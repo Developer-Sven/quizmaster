@@ -369,6 +369,13 @@ export const gameActions = {
     useGameStore.setState((state) => ({ connection: { ...state.connection, lastError: code } }));
   },
 
+  /** Eine gemerkte Ablehnung gilt nicht mehr (z. B. neuer Versuch nach abgelehntem Turnstile-Token). */
+  clearRejection(code: ErrorCode): void {
+    useGameStore.setState((state) =>
+      state.connection.lastError === code ? { connection: { ...state.connection, lastError: null } } : {},
+    );
+  },
+
   /** Endgültiger Fehler – kein automatischer Neuversuch. */
   connectionFatal(code: ErrorCode): void {
     useGameStore.setState((state) => ({

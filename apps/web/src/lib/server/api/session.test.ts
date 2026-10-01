@@ -336,6 +336,18 @@ describe("POST /api/session – Turnstile (TURNSTILE_ENABLED=true)", () => {
     expect(h.fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("Siteverify lehnt das Secret ab (falsch/rotiert) → 503 SERVER_BUSY statt 403, kein Gast", async () => {
+    const wrongSecret = { ...turnstileEnv, TURNSTILE_SECRET_KEY: "0x4AAAAAAA-rotierter-alter-schluessel" };
+    const h = harness(wrongSecret, async () =>
+      Response.json({ success: false, "error-codes": ["invalid-input-secret"] }),
+    );
+    const before = await guestCount();
+    const response = await post(h, { ip: freshIp(), body: { turnstileToken: "token-d" } });
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("SERVER_BUSY");
+    expect(await guestCount()).toBe(before);
+  });
+
   it("prüft den Hostnamen bei echten Schlüsseln; Siteverify nicht erreichbar → 503", async () => {
     const realKeys = { ...turnstileEnv, TURNSTILE_SECRET_KEY: "0x4AAAAAAAtest-secret-key-for-hostname-check" };
     const foreignHost = harness(realKeys, async () => Response.json({ success: true, hostname: "evil.example.com" }));

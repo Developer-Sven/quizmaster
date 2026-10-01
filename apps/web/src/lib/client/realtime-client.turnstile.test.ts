@@ -6,9 +6,12 @@
  */
 import { PROTOCOL_VERSION } from "@quizmaster/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { de } from "../../i18n/de";
 import { gameActions, useGameStore } from "../../stores/game-store";
+import { turnstileFailureText } from "./errors";
 import { getRealtimeClient, type RealtimeClient, type TurnstilePurpose } from "./realtime-client";
 import { resetSessionForTests } from "./session";
+import { createTurnstileSolver, type TurnstileApi } from "./turnstile";
 
 type Handler = (...args: unknown[]) => void;
 type AckResponder = (event: string, payload: unknown) => unknown;
@@ -273,6 +276,34 @@ describe("Turnstile für neue Sessions", () => {
     await expect(pending).resolves.toEqual({ ok: true, data: { code: "ABC234" } });
   });
 
+  it("Lobby-Seite: Web lehnt beide gelösten Tokens ab → TURNSTILE_REQUIRED gemerkt (Panel); ein neuer Versuch vergisst es", async () => {
+    // Session-Cookie abgelaufen (kein Merker) und TURNSTILE_ENABLED: eine neue Session gibt es nur mit Token.
+    respond({
+      "/api/session": [
+        json(403, ERROR("TURNSTILE_REQUIRED")),
+        json(403, ERROR("TURNSTILE_REQUIRED")),
+        json(201, { created: true }),
+      ],
+      "/api/realtime/ticket": [json(200, { ticket: "t-neu" })],
+    });
+    const turnstile = provider(["tok-1", "tok-2", "tok-3"]);
+    const realtime = newClient();
+    realtime.setTurnstileProvider(turnstile.fn, { sessionRequiresToken: true });
+    realtime.enterLobby("ABC234");
+    await flush();
+    expect(turnstile.calls).toEqual(["session", "session"]);
+    expect(useGameStore.getState().connection.lastError).toBe("TURNSTILE_REQUIRED");
+    expect(useGameStore.getState().connection.fatal).toBeNull();
+
+    // „Erneut versuchen“ im Panel: neuer Verbindungsaufbau – die alte Ablehnung gilt nicht mehr (sonst stünde der
+    // Fehler schon während der neuen Prüfung wieder da).
+    realtime.connect();
+    expect(useGameStore.getState().connection.lastError).toBeNull();
+    await flush();
+    expect(turnstile.calls).toEqual(["session", "session", "session"]);
+    expect(socket().authData).toEqual({ ticket: "t-neu", protocolVersion: PROTOCOL_VERSION });
+  });
+
   it("ohne Anbieter (kein Site Key) bleibt TURNSTILE_REQUIRED endgültig", async () => {
     respond({ "/api/session": [json(403, ERROR("TURNSTILE_REQUIRED"))] });
     const pending = newClient().createLobby("Mia");
@@ -383,5 +414,100 @@ describe("Notfall-Schalter turnstileOnJoin", () => {
     expect(socket().count("lobby:resume")).toBe(1);
     expect(turnstile.calls).toEqual([]);
     expect(requests().every((request) => request.body.turnstileToken === undefined)).toBe(true);
+  });
+});
+
+describe("Rückmeldung der Seite, wenn der Server ein gelöstes Token ablehnt (Start, Beitreten)", () => {
+  /**
+   * Echte Prüfung (lib/client/turnstile.ts) mit einer Turnstile-Attrappe, deren Widgets immer bestehen – so wie
+   * Cloudflare bei falschem Secret, fremdem Hostnamen oder einem verbrauchten Token: Die Prüfung ist danach
+   * `idle`, nur der Server lehnt ab.
+   */
+  function solverThat(outcome: "passes" | "fails") {
+    let widgets = 0;
+    const api: TurnstileApi = {
+      render(_container, options) {
+        widgets += 1;
+        const token = `cf-${widgets}`;
+        void Promise.resolve().then(() =>
+          outcome === "passes" ? options.callback?.(token) : options["error-callback"]?.("300030"),
+        );
+        return `w${widgets}`;
+      },
+      remove: () => undefined,
+    };
+    const solver = createTurnstileSolver({ siteKey: "1x00000000000000000000AA", load: async () => api });
+    solver.attach({} as HTMLElement);
+    return solver;
+  }
+
+  it("TURNSTILE_ENABLED: beide gelösten Tokens abgelehnt → TURNSTILE_REQUIRED bei Prüfung idle → Hinweis", async () => {
+    respond({ "/api/session": [json(403, ERROR("TURNSTILE_REQUIRED"))] });
+    const solver = solverThat("passes");
+    const realtime = newClient();
+    realtime.setTurnstileProvider((purpose) => solver.solve(purpose), { sessionRequiresToken: true });
+    const pending = realtime.createLobby("Mia");
+    await flush();
+    await expect(pending).resolves.toEqual({ ok: false, code: "TURNSTILE_REQUIRED" });
+    expect(requests().map((request) => request.body.turnstileToken)).toEqual(["cf-1", "cf-2"]);
+    expect(solver.getStatus()).toBe("idle");
+    expect(turnstileFailureText(solver.getStatus())).toBe(de.turnstile.failed);
+  });
+
+  it("turnstileOnJoin: Web lehnt beide Tokens für das Ticket ab → Hinweis", async () => {
+    memory.set("qm.session", "1");
+    respond({ "/api/realtime/ticket": [json(200, { ticket: "t-a" }), json(403, ERROR("TURNSTILE_REQUIRED"))] });
+    const solver = solverThat("passes");
+    const realtime = newClient();
+    realtime.setTurnstileProvider((purpose) => solver.solve(purpose));
+    realtime.connect();
+    await flush();
+    socket().accept();
+    await flush();
+    socket().responder = (event) =>
+      event === "lobby:join"
+        ? { ok: false, error: { code: "TURNSTILE_REQUIRED", message: "x" } }
+        : { ok: true, data: { serverNow: 1 } };
+    const pending = realtime.joinLobby("ABC234", "Ben");
+    await flush();
+    await expect(pending).resolves.toEqual({ ok: false, code: "TURNSTILE_REQUIRED" });
+    expect(requests().map((request) => request.body.turnstileToken)).toEqual([undefined, "cf-1", "cf-2"]);
+    expect(turnstileFailureText(solver.getStatus())).toBe(de.turnstile.failed);
+  });
+
+  it("turnstileOnJoin: Realtime lehnt auch den zweiten Versuch ab → Hinweis", async () => {
+    memory.set("qm.session", "1");
+    respond({ "/api/realtime/ticket": [json(200, { ticket: "t-a" })] });
+    const solver = solverThat("passes");
+    const realtime = newClient();
+    realtime.setTurnstileProvider((purpose) => solver.solve(purpose));
+    realtime.connect();
+    await flush();
+    socket().accept();
+    await flush();
+    socket().responder = (event) =>
+      event === "lobby:create"
+        ? { ok: false, error: { code: "TURNSTILE_REQUIRED", message: "x" } }
+        : { ok: true, data: { serverNow: 1 } };
+    const pending = realtime.createLobby("Mia");
+    await flush();
+    socket().accept();
+    await expect(pending).resolves.toEqual({ ok: false, code: "TURNSTILE_REQUIRED" });
+    expect(socket().count("lobby:create")).toBe(2);
+    expect(turnstileFailureText(solver.getStatus())).toBe(de.turnstile.failed);
+  });
+
+  it("Prüfung selbst gescheitert (Status error) → kein zweiter Text, ohne Prüfung (kein Site Key) → Hinweis", async () => {
+    respond({ "/api/session": [json(201, { created: true })] });
+    const solver = solverThat("fails");
+    const realtime = newClient();
+    realtime.setTurnstileProvider((purpose) => solver.solve(purpose), { sessionRequiresToken: true });
+    const pending = realtime.createLobby("Mia");
+    await flush();
+    await expect(pending).resolves.toEqual({ ok: false, code: "TURNSTILE_REQUIRED" });
+    expect(solver.getStatus()).toBe("error");
+    // Den Fehler zeigt TurnstileSlot (Status error) – die Aktion fügt keinen zweiten hinzu.
+    expect(turnstileFailureText(solver.getStatus())).toBeNull();
+    expect(turnstileFailureText(null)).toBe(de.turnstile.failed);
   });
 });

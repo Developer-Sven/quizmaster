@@ -53,8 +53,12 @@ export async function setSessionCookie(
 
 /**
  * Prüft ein Turnstile-Token serverseitig. Ungültig/Replay/fremder Hostname → 403 TURNSTILE_REQUIRED
- * (Client löst Turnstile erneut aus), Siteverify nicht erreichbar oder nicht konfiguriert → 503.
- * Liefert den Prüfzeitpunkt (ms).
+ * (Client löst Turnstile erneut aus), Siteverify nicht erreichbar, lehnt die Konfiguration ab (turnstile.ts)
+ * oder nicht konfiguriert → 503. Liefert den Prüfzeitpunkt (ms).
+ *
+ * Log-Stufen: falsche oder verbrauchte Tokens sind bei Bot-Verkehr erwartbar (`info`, sonst überdeckte eine
+ * Bot-Welle echte Warnungen); ein fremder Hostname deutet auf eine Fehlkonfiguration (`APP_ORIGIN` passt nicht zu
+ * den Hostnamen des Widgets) und wird `warn`.
  */
 export async function verifyTurnstileToken(
   ctx: ServerContext,
@@ -68,6 +72,13 @@ export async function verifyTurnstileToken(
   const outcome = await ctx.turnstile.verify(token, remoteIp);
   if (outcome.ok) return outcome.verifiedAt;
   if (outcome.reason === "unavailable") throw new ApiError("SERVER_BUSY", "Turnstile nicht verfügbar");
-  ctx.logger.info({ reason: outcome.reason, errorCodes: outcome.errorCodes }, "Turnstile-Token abgelehnt");
+  if (outcome.reason === "hostname_mismatch") {
+    ctx.logger.warn(
+      { reason: outcome.reason },
+      "Turnstile-Token für fremden Hostnamen abgelehnt – APP_ORIGIN und Hostnamen des Widgets prüfen",
+    );
+  } else {
+    ctx.logger.info({ reason: outcome.reason, errorCodes: outcome.errorCodes }, "Turnstile-Token abgelehnt");
+  }
   throw new ApiError("TURNSTILE_REQUIRED", "Turnstile-Prüfung fehlgeschlagen");
 }

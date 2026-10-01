@@ -22,6 +22,34 @@ function errorText(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
+/**
+ * Bot-Schutz beim Start sichtbar machen (docs/06 §Bot-Schutz, Phase-4-Punkt „Turnstile in Prod aktiv“) – nur bei
+ * einer Produktions-Datenbank (Dev/Test laufen bewusst ohne). Nur Warnungen, kein Abbruch: Einschalten und
+ * Schlüssel gehören dem Betrieb (Cloudflare-Dashboard → Env-Datei). Ohne Site Key und Secret im Web-Prozess gäbe es
+ * weder Widget noch Siteverify – der Notfall-Schalter `appConfig.turnstileOnJoin` sperrte dann jeden Beitritt aus.
+ * Geloggt werden nur Schlüsselnamen, nie Werte.
+ */
+function warnAboutDisabledTurnstile(env: WebEnv, logger: Logger): void {
+  if (isDevOrTestDatabase(env.mongodbDb)) return;
+  if (!env.turnstile.enabled) {
+    logger.warn(
+      { db: env.mongodbDb },
+      "Turnstile aus: TURNSTILE_ENABLED ist nicht true – neue Sessions entstehen ohne Bot-Prüfung",
+    );
+  }
+  const missing = [
+    ...(env.turnstile.siteKey === undefined ? ["TURNSTILE_SITE_KEY"] : []),
+    ...(env.turnstile.secretKey === undefined ? ["TURNSTILE_SECRET_KEY"] : []),
+  ];
+  if (missing.length > 0) {
+    logger.warn(
+      { missing },
+      "Turnstile nicht konfiguriert: Der Notfall-Schalter appConfig.turnstileOnJoin würde jeden Beitritt sperren – " +
+        "erst Schlüssel eintragen",
+    );
+  }
+}
+
 /** Führt die Start-Checks aus; beendet bei einem Fehler den Prozess (`exit(1)`). */
 export async function runWebStartupChecks(options: StartupOptions = {}): Promise<StartCheckResult> {
   const logger = options.logger ?? getLogger();
@@ -55,6 +83,8 @@ export async function runWebStartupChecks(options: StartupOptions = {}): Promise
     );
     return exit(1);
   }
+
+  warnAboutDisabledTurnstile(env, logger);
 
   const dbLogger = toDbLogger(logger);
   try {

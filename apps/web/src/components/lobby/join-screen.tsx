@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { TextField } from "@/components/ui/text-field";
 import { de } from "@/i18n/de";
-import { type ClientErrorCode, errorText, joinErrorPlacement } from "@/lib/client/errors";
+import { type ClientErrorCode, errorText, joinErrorPlacement, turnstileFailureText } from "@/lib/client/errors";
 import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-realtime";
 import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
@@ -104,9 +104,9 @@ export function JoinScreen({ code, displayCode, realtimeUrl, turnstile, maintena
       return;
     }
     setBusy(false);
-    // Turnstile gescheitert: Den Fehler zeigt die Prüfung selbst (ohne Widget: allgemeiner Turnstile-Hinweis).
     if (result.code === "TURNSTILE_REQUIRED") {
-      if (solver === null) setFormError(de.turnstile.failed);
+      const text = turnstileFailureText(solver === null ? null : solver.getStatus());
+      if (text !== null) setFormError(text);
       return;
     }
     showError(result.code);
