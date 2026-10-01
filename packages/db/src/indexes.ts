@@ -54,6 +54,11 @@ export const INDEX_DEFINITIONS: readonly IndexDefinition[] = [
   { collection: "questionRatings", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
   { collection: "bans", name: "kind_value_unique", key: { kind: 1, value: 1 }, options: { unique: true } },
   { collection: "bans", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
+  // rateLimits (Mongo-Store von rate-limiter-flexible, docs/06): genau die Definitionen der Bibliothek
+  // (`RateLimiterMongo.createIndexes`) – mit ihren Standardnamen, damit die von Web/Realtime bereits angelegten
+  // Indizes ohne Konflikt als vorhanden gelten. TTL räumt abgelaufene Zähler weg, `key` ist je Schlüssel eindeutig.
+  { collection: "rateLimits", name: "expire_-1", key: { expire: -1 }, options: TTL },
+  { collection: "rateLimits", name: "key_1", key: { key: 1 }, options: { unique: true } },
   {
     collection: "socketioEvents",
     name: "createdAt_ttl",

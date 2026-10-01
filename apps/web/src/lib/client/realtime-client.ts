@@ -10,6 +10,13 @@
  * bevor sie in den Store gehen; passt ein Zustand nicht, synchronisiert der Client einmal neu und zeigt danach
  * „Neue Version verfügbar“ statt still einzufrieren.
  *
+ * Turnstile (docs/06 §Bot-Schutz) über einen Anbieter der Seite (`setTurnstileProvider`): vor einer neuen Session,
+ * wenn `TURNSTILE_ENABLED` gilt (sonst erst nach `TURNSTILE_REQUIRED` der Web-API); und beim Notfall-Schalter
+ * `turnstileOnJoin`: Antwortet Realtime auf `lobby:create`/`lobby:join` mit `TURNSTILE_REQUIRED`, löst der Client
+ * Turnstile, holt ein Ticket mit `{ turnstileToken }` (Claim `tsv`), verbindet neu und wiederholt die Aktion
+ * genau einmal. `lobby:resume` braucht nie Turnstile. Scheitert die Prüfung, versucht der Client es nicht von selbst
+ * erneut (jeder Versuch wäre eine neue Prüfung) – die nächste Aktion startet sie wieder.
+ *
  * Nur im Browser verwenden (Lobby-/Spielseiten; die Startseite lädt dieses Modul erst bei Bedarf).
  */
 import {
@@ -41,6 +48,7 @@ import {
   parseConnectErrorRetryAfterMs,
   resumeFailure,
 } from "./errors";
+import { preloadFlag } from "./flag-preload";
 import { ApiError, ensureSession, fetchTicket } from "./session";
 import { readSessionHint, readStoredCategories, writeMembership, writeStoredCategories } from "./storage";
 
@@ -54,8 +62,16 @@ export interface RealtimeClientConfig {
   realtimeUrl: string;
 }
 
-/** Liefert ein Turnstile-Token, wenn Session oder Ticket es verlangen (Widget: W4); `null` = abgebrochen. */
-export type TurnstileProvider = () => Promise<string | null>;
+/** Wofür ein Turnstile-Token gebraucht wird: neue Session oder Ticket für create/join (`turnstileOnJoin`). */
+export type TurnstilePurpose = "session" | "join";
+
+/** Liefert ein frisch gelöstes Turnstile-Token (`components/turnstile`); `null` = fehlgeschlagen oder abgebrochen. */
+export type TurnstileProvider = (purpose: TurnstilePurpose) => Promise<string | null>;
+
+export interface TurnstileProviderOptions {
+  /** `TURNSTILE_ENABLED`: neue Sessions brauchen ein Token → vor `POST /api/session` lösen (spart eine Ablehnung). */
+  sessionRequiresToken?: boolean;
+}
 
 export interface EmitOptions {
   /** Wartezeit auf das Ack in ms (Standard 8 s) */
@@ -88,8 +104,8 @@ export interface RealtimeClient {
   resync(): void;
   /** Uhrenabgleich jetzt. */
   syncClock(): void;
-  /** Turnstile-Anbieter setzen (W4). */
-  setTurnstileProvider(provider: TurnstileProvider | null): void;
+  /** Turnstile-Anbieter der aktuellen Seite setzen (`null` = keiner, `TURNSTILE_REQUIRED` wird dann zum Fehler). */
+  setTurnstileProvider(provider: TurnstileProvider | null, options?: TurnstileProviderOptions): void;
   /** Verbindung beenden (kein automatischer Neuversuch). */
   disconnect(): void;
   /** Singleton aufräumen (URL-Wechsel, Tests). */
@@ -176,6 +192,11 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
   let forceNewSession = false;
   let turnstileNeeded = false;
   let turnstileProvider: TurnstileProvider | null = null;
+  let turnstileForSession = false;
+  /** Frisch gelöstes Token für genau das nächste Ticket (Notfall-Schalter `turnstileOnJoin` → Claim `tsv`). */
+  let joinTurnstileToken: string | null = null;
+  /** Laufende Turnstile-Prüfungen: Solange eine läuft (ggf. mit Bestätigung durch die Person), wartet `whenConnected`. */
+  let turnstileSolving = 0;
   let retryAttempt = 0;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -187,15 +208,34 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
   const invalidStreak = { "lobby:state": 0, "lobby:self": 0 };
   const waiters = new Set<(result: ClientErrorCode | null) => void>();
 
-  /** `POST /api/session` (bei TURNSTILE_REQUIRED einmal mit Turnstile-Token). */
-  async function sessionReady(): Promise<void> {
+  /** Turnstile lösen (über den Anbieter der Seite); `null` = kein Anbieter, gescheitert oder abgebrochen. */
+  async function solveTurnstile(purpose: TurnstilePurpose): Promise<string | null> {
+    if (!turnstileProvider) return null;
+    turnstileSolving += 1;
     try {
-      await ensureSession();
+      return await turnstileProvider(purpose);
+    } finally {
+      turnstileSolving -= 1;
+    }
+  }
+
+  /**
+   * `POST /api/session`: mit `TURNSTILE_ENABLED` gleich mit Token (vorher gelöst), sonst ohne – verlangt der Server
+   * trotzdem eines (`TURNSTILE_REQUIRED`, auch bei ungültigem oder verbrauchtem Token), einmal frisch lösen.
+   */
+  async function sessionReady(): Promise<void> {
+    let token: string | null = null;
+    if (turnstileForSession && turnstileProvider) {
+      token = await solveTurnstile("session");
+      if (!token) throw new ApiError("TURNSTILE_REQUIRED", 403);
+    }
+    try {
+      await ensureSession(token ? { turnstileToken: token } : {});
     } catch (error) {
       if (!(error instanceof ApiError) || error.code !== "TURNSTILE_REQUIRED" || !turnstileProvider) throw error;
-      const token = await turnstileProvider();
-      if (!token) throw error;
-      await ensureSession({ turnstileToken: token });
+      const fresh = await solveTurnstile("session");
+      if (!fresh) throw error;
+      await ensureSession({ turnstileToken: fresh });
     }
   }
 
@@ -208,19 +248,24 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
       forceNewSession = false;
       await sessionReady();
     }
-    const token = turnstileNeeded && turnstileProvider ? await turnstileProvider() : null;
+    // Ein gelöstes Token gehört in genau ein Ticket (Cloudflare akzeptiert jedes Token nur einmal).
+    let token = joinTurnstileToken;
+    joinTurnstileToken = null;
+    if (token === null && turnstileNeeded && turnstileProvider) token = await solveTurnstile("join");
     try {
       return await fetchTicket(token);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (error.code === "UNAUTHORIZED" && !reauthAttempted) {
-        // Kein gültiges Session-Cookie (abgelaufen, gelöscht, Gast entfernt): einmal neu anlegen.
+        // Kein gültiges Session-Cookie (abgelaufen, gelöscht, Gast entfernt): einmal neu anlegen. Ein Token bleibt
+        // gültig – die Web-API prüft das Cookie vor dem Token.
         reauthAttempted = true;
         await sessionReady();
         return fetchTicket(token);
       }
-      if (error.code === "TURNSTILE_REQUIRED" && turnstileProvider && !token) {
-        const fresh = await turnstileProvider();
+      if (error.code === "TURNSTILE_REQUIRED" && turnstileProvider) {
+        // Token ungültig, abgelaufen oder schon verwendet: einmal frisch lösen.
+        const fresh = await solveTurnstile("join");
         if (fresh) return fetchTicket(fresh);
       }
       throw error;
@@ -298,6 +343,20 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     scheduleReconnect(rejectionRetryDelayMs(retryAfterMs));
   }
 
+  /**
+   * Turnstile nicht gelöst: Verbindungsaufbau beenden, ohne die Seite endgültig zu sperren – kein automatischer
+   * Neuversuch (jeder startete eine neue Prüfung); die nächste Aktion (`connect`) versucht es erneut.
+   */
+  function abortForTurnstile(): void {
+    wanted = false;
+    clearRetry();
+    clock.stop();
+    socket.disconnect();
+    lastRejection = "TURNSTILE_REQUIRED";
+    gameActions.connectionRejected("TURNSTILE_REQUIRED");
+    resolveWaiters("TURNSTILE_REQUIRED");
+  }
+
   /** Ticket/Session nicht erhältlich: endgültige Codes beenden, alles andere später erneut versuchen. */
   function onTicketFailure(error: unknown): void {
     const code: ClientErrorCode = error instanceof ApiError ? error.code : "INTERNAL";
@@ -308,6 +367,10 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
       (code === "TURNSTILE_REQUIRED" && !turnstileProvider)
     ) {
       fail(code);
+      return;
+    }
+    if (code === "TURNSTILE_REQUIRED") {
+      abortForTurnstile();
       return;
     }
     socket.disconnect();
@@ -459,7 +522,10 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
       return;
     }
     invalidStreak["lobby:state"] = 0;
-    if (inLobbyContext()) gameActions.applyPublicState(parsed.data);
+    if (!inLobbyContext()) return;
+    // Bildfrage: Flagge schon im Vorlauf laden, nicht erst beim Einhängen der Fragekarte (Fairness).
+    preloadFlag(parsed.data.question?.media);
+    gameActions.applyPublicState(parsed.data);
   });
 
   socket.on("lobby:self", (payload) => {
@@ -536,8 +602,17 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
         waiters.delete(finish);
         resolve(result);
       };
-      // Zeitablauf: die letzte vorübergehende Ablehnung (z. B. INTERNAL) ist aussagekräftiger als „NETWORK“.
-      const timer = setTimeout(() => finish(lastRejection ?? "NETWORK"), timeoutMs);
+      // Zeitablauf: die letzte vorübergehende Ablehnung (z. B. INTERNAL) ist aussagekräftiger als „NETWORK“. Eine
+      // laufende Turnstile-Prüfung (vielleicht mit Bestätigung durch die Person) zählt nicht als Zeitablauf; die
+      // Prüfung selbst ist begrenzt (lib/client/turnstile.ts).
+      const expire = () => {
+        if (turnstileSolving > 0) {
+          timer = setTimeout(expire, timeoutMs);
+          return;
+        }
+        finish(lastRejection ?? "NETWORK");
+      };
+      let timer = setTimeout(expire, timeoutMs);
       waiters.add(finish);
     });
   }
@@ -562,6 +637,33 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     const result = parseAck(event, response);
     if (!result.ok && result.code === "UNAUTHORIZED") reconnectWithNewSession();
     return result;
+  }
+
+  /** Neu verbinden (das nächste Ticket holt `obtainTicket`) und auf die Verbindung warten. */
+  function reconnectNow(): Promise<ClientErrorCode | null> {
+    clearRetry();
+    socket.disconnect();
+    wanted = true;
+    socket.connect();
+    return whenConnected();
+  }
+
+  /**
+   * Notfall-Schalter `turnstileOnJoin` (docs/06): Antwortet der Server mit `TURNSTILE_REQUIRED`, Turnstile lösen,
+   * mit `{ turnstileToken }` ein Ticket holen (Claim `tsv`), neu verbinden und die Aktion genau einmal wiederholen.
+   */
+  async function withJoinTurnstile<T>(action: () => Promise<EmitResult<T>>): Promise<EmitResult<T>> {
+    const first = await action();
+    // Nur die Antwort des Servers zählt – scheiterte schon die Verbindung (Session-Turnstile), ist nichts zu tun.
+    if (first.ok || first.code !== "TURNSTILE_REQUIRED" || !turnstileProvider || !socket.connected) return first;
+    const token = await solveTurnstile("join");
+    if (!token) return first;
+    joinTurnstileToken = token;
+    const failure = await reconnectNow();
+    // Kam das Token nicht zum Einsatz (Verbindung scheiterte vorher), verfällt es hier.
+    joinTurnstileToken = null;
+    if (failure !== null) return { ok: false, code: failure };
+    return action();
   }
 
   function disconnect(): void {
@@ -601,17 +703,23 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     },
     async createLobby(name) {
       entriesInFlight += 1;
-      const result = await emit("lobby:create", { name });
-      entriesInFlight -= 1;
-      if (result.ok) adoptLobby(result.data.code);
-      return result;
+      try {
+        const result = await withJoinTurnstile(() => emit("lobby:create", { name }));
+        if (result.ok) adoptLobby(result.data.code);
+        return result;
+      } finally {
+        entriesInFlight -= 1;
+      }
     },
     async joinLobby(code, name) {
       entriesInFlight += 1;
-      const result = await emit("lobby:join", { code, name });
-      entriesInFlight -= 1;
-      if (result.ok) adoptLobby(result.data.code);
-      return result;
+      try {
+        const result = await withJoinTurnstile(() => emit("lobby:join", { code, name }));
+        if (result.ok) adoptLobby(result.data.code);
+        return result;
+      } finally {
+        entriesInFlight -= 1;
+      }
     },
     async leaveLobby() {
       const result = await emit("lobby:leave", {}, { requireConnection: true });
@@ -626,8 +734,9 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     syncClock() {
       void clock.syncNow();
     },
-    setTurnstileProvider(provider) {
+    setTurnstileProvider(provider, options = {}) {
       turnstileProvider = provider;
+      turnstileForSession = provider !== null && options.sessionRequiresToken === true;
     },
     disconnect,
     dispose() {

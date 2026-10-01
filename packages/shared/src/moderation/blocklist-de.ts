@@ -163,6 +163,13 @@ const NAZI = [
   "nsdap",
   "gestapo",
   "waffenss",
+  // „SS“ nur als ganzes Wort („SS“, „S.S.“, „SS Mann“) bzw. als Wortanfang zusammengeschrieben („SS-Mann“) –
+  // nicht in „Jess“, „Ross“ oder „Assmann“.
+  "|ss|",
+  "|ssmann",
+  "|ssmaenner",
+  "|ssmanner",
+  "gaskammer",
   "auschwitz",
   "holocaust",
   "kristallnacht",

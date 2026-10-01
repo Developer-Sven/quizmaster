@@ -69,3 +69,42 @@ describe("Turnstile-Siteverify", () => {
     expect(await instance.verify("h2", null)).toEqual({ ok: false, reason: "hostname_mismatch" });
   });
 });
+
+describe("Cloudflare-Testschlüssel (nur *_dev/*_test, env.ts; Siteverify gemockt)", () => {
+  const testVerifier = (secretKey: string, responses: Array<() => Response>) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const next = responses.shift();
+      if (next === undefined) throw new Error("keine Antwort mehr vorbereitet");
+      return next();
+    });
+    const instance = createTurnstileVerifier({
+      secretKey,
+      allowedHostnames: ["quiz.example.com"],
+      fetch: fetchMock,
+      logger,
+      now: () => 1_000,
+    });
+    return { instance, fetchMock };
+  };
+  // Antworten wie die echte Siteverify-API mit Test-Secrets (Platzhalter-Hostname, gleiches Dummy-Token).
+  const testOk = () => Response.json({ success: true, hostname: "example.com", "error-codes": [] });
+
+  it("1x… (immer gültig): Hostname wird nicht geprüft; das immer gleiche Dummy-Token gilt je Prozess nur einmal", async () => {
+    const { instance, fetchMock } = testVerifier("1x0000000000000000000000000000000AA", [testOk, testOk]);
+    expect((await instance.verify("XXXX.DUMMY.TOKEN.XXXX", null)).ok).toBe(true);
+    // Lokaler Replay-Schutz greift auch hier (Test-Site-Keys liefern stets dasselbe Platzhalter-Token).
+    expect(await instance.verify("XXXX.DUMMY.TOKEN.XXXX", null)).toMatchObject({ ok: false, reason: "replayed" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("2x… (immer ungültig) → rejected; 3x… (bereits verwendet) → replayed", async () => {
+    const rejected = testVerifier("2x0000000000000000000000000000000AA", [
+      () => Response.json({ success: false, "error-codes": ["invalid-input-response"] }),
+    ]);
+    expect(await rejected.instance.verify("XXXX.DUMMY.TOKEN.XXXX", null)).toMatchObject({ reason: "rejected" });
+    const spent = testVerifier("3x0000000000000000000000000000000AA", [
+      () => Response.json({ success: false, "error-codes": ["timeout-or-duplicate"] }),
+    ]);
+    expect(await spent.instance.verify("XXXX.DUMMY.TOKEN.XXXX", null)).toMatchObject({ reason: "replayed" });
+  });
+});

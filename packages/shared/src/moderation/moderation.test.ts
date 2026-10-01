@@ -44,6 +44,11 @@ Yuki Georgy Kassandra Cassandra Thure
 
 /** Scunthorpe-Fälle: harmlose Wörter/Namen, die gesperrte Begriffe enthalten. */
 const SCUNTHORPE = [
+  "Jess",
+  "Ross",
+  "Hesse",
+  "Rossmann",
+  "Bossmann",
   "Marschall",
   "Barsch",
   "Harsch",
@@ -136,7 +141,23 @@ const BLOCKED = {
   insults: ["Hurensohn", "Wichser", "Fotze", "Arschloch", "Schlampe", "Missgeburt", "Spast", "Drecksau", "Hundesohn"],
   sexual: ["Pimmel", "Muschi", "Möse", "Titten", "Sperma", "Vergewaltiger", "Pädophil", "Kinderficker", "Nutte"],
   discrimination: ["Neger", "Kanake", "Zigeuner", "Schlitzauge", "Polacke", "Schwuchtel", "Untermensch", "Judensau"],
-  nazi: ["Hitler", "Adolf Hitler", "Sieg Heil", "Heil Hitler", "Nazi", "Neonazi", "NSDAP", "Hakenkreuz", "Zyklon B"],
+  nazi: [
+    "Hitler",
+    "Adolf Hitler",
+    "Sieg Heil",
+    "Heil Hitler",
+    "Nazi",
+    "Neonazi",
+    "NSDAP",
+    "Hakenkreuz",
+    "Zyklon B",
+    "SS",
+    "S.S.",
+    "SS Mann",
+    "SS-Mann",
+    "SS-Männer",
+    "Gaskammer",
+  ],
   numberCodes: [
     // „88“ bzw. „HH“ als ganzer Name (auch mit Trennzeichen)
     "88",

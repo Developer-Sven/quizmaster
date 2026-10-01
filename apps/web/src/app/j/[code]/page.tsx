@@ -4,6 +4,7 @@ import { JoinScreen } from "@/components/lobby/join-screen";
 import { de } from "@/i18n/de";
 import { displayLobbyCode, lobbyCodeFromParam } from "@/lib/client/lobby-code";
 import { joinPath } from "@/lib/client/paths";
+import { getMaintenanceNotice } from "@/lib/server/maintenance";
 import { getPublicRuntimeConfig } from "@/lib/server/runtime-config";
 
 export const metadata: Metadata = {
@@ -24,6 +25,14 @@ export default async function JoinPage({ params }: JoinPageProps) {
   const code = lobbyCodeFromParam(raw);
   if (!code) notFound();
   if (raw !== code) redirect(joinPath(code));
-  const config = await getPublicRuntimeConfig();
-  return <JoinScreen code={code} displayCode={displayLobbyCode(code)} realtimeUrl={config.realtimeUrl} />;
+  const [config, maintenance] = await Promise.all([getPublicRuntimeConfig(), getMaintenanceNotice()]);
+  return (
+    <JoinScreen
+      code={code}
+      displayCode={displayLobbyCode(code)}
+      realtimeUrl={config.realtimeUrl}
+      turnstile={config.turnstile}
+      maintenance={maintenance}
+    />
+  );
 }

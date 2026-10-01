@@ -3,14 +3,17 @@
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { LiveToasts } from "@/components/app/live-toasts";
+import { MaintenanceNoticeContext } from "@/components/app/status-banners";
 import { LiveGame } from "@/components/game/live-game";
 import { ConnectionOverlay } from "@/components/game/overlays/connection-overlay";
 import { preloadOverlays } from "@/components/game/overlays/preload";
+import { type TurnstileClientConfig, TurnstileSlot, useTurnstile } from "@/components/turnstile/turnstile-slot";
 import { loadCategoryCatalog } from "@/lib/client/categories";
 import { pageModalityTracker } from "@/lib/client/keyboard";
 import { joinPath } from "@/lib/client/paths";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
 import { readMembership, readStoredSoundOn } from "@/lib/client/storage";
+import type { MaintenanceNotice } from "@/lib/server/maintenance";
 import {
   gameActions,
   selectCategoriesMissing,
@@ -36,6 +39,10 @@ export interface LobbyScreenProps {
   realtimeUrl: string;
   /** Dev-Bots erlaubt (nur Entwicklung) */
   devBots: boolean;
+  /** Turnstile (docs/06): nötig, wenn beim Wiederverbinden eine neue Session entsteht */
+  turnstile: TurnstileClientConfig;
+  /** Serverseitig ermittelter Wartungshinweis vom Seitenaufruf; `null` = keiner */
+  maintenance: MaintenanceNotice | null;
 }
 
 /**
@@ -45,7 +52,7 @@ export interface LobbyScreenProps {
  * konkurrierten ihre neun Chunks mit Ticket und Handshake um die Bandbreite und verzögerten die Lobby.
  * Wer die Seite ohne Mitgliedschaft öffnet (geteilter Lobby-Link), landet auf der Beitreten-Seite.
  */
-export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbyScreenProps) {
+export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile, maintenance }: LobbyScreenProps) {
   const router = useRouter();
   const exit = useGameStore(selectExit);
   const phase = useGameStore(selectPhase);
@@ -59,6 +66,7 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   const [stalled, setStalled] = useState(false);
   const waitingForState = phase === null && exit === null && fatal === null && connected;
   const hasState = phase !== null;
+  const solver = useTurnstile(turnstile);
 
   useEffect(() => {
     setMemberAtEntry(readMembership() === code);
@@ -66,9 +74,16 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
     // Eingabeart früh verfolgen (Fokusring schon bei der ersten Kategoriewahl), unabhängig vom Vorladen.
     pageModalityTracker();
     const client = getRealtimeClient({ realtimeUrl });
+    // Läuft die Session beim Wiederverbinden ab, braucht die neue Session ggf. Turnstile (TURNSTILE_ENABLED).
+    client.setTurnstileProvider(solver === null ? null : (purpose) => solver.solve(purpose), {
+      sessionRequiresToken: turnstile.enabled,
+    });
     client.enterLobby(code);
-    return () => client.releaseLobby();
-  }, [code, realtimeUrl]);
+    return () => {
+      client.setTurnstileProvider(null);
+      client.releaseLobby();
+    };
+  }, [code, realtimeUrl, solver, turnstile.enabled]);
 
   useEffect(() => {
     if (hasState) preloadOverlays();
@@ -113,11 +128,13 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   } else content = <LiveGame realtimeUrl={realtimeUrl} />;
 
   return (
-    <>
+    <MaintenanceNoticeContext value={maintenance}>
       {content}
       <ConnectionOverlay />
       <LiveToasts />
       <LobbyAnnouncer />
-    </>
+      {/* Über dem Verbindungs-Overlay: Turnstile beim Wiederverbinden (nur sichtbar bei Bestätigung/Fehler). */}
+      <TurnstileSlot solver={solver} variant="panel" onRetry={() => getRealtimeClient({ realtimeUrl }).connect()} />
+    </MaintenanceNoticeContext>
   );
 }

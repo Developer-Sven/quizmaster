@@ -1,8 +1,9 @@
 /**
  * Sperren (docs/04 bans, docs/06): Prüfung beim Handshake (Gast ODER IP-Schlüssel), Sperren wegen
- * wiederholter Verstöße und Trennen betroffener Sockets. Der Change-Stream-Watcher auf `bans` ruft bei
- * neuen/geänderten Sperren `disconnectBanned()` auf (docs/04: „betroffene Sockets sofort trennen (`kicked`,
- * Grund `abuse`)“).
+ * wiederholter Verstöße und Trennen betroffener Sockets. Der Change-Stream-Watcher auf `bans`
+ * (`watchers/bans.ts`) ruft bei neuen/geänderten Sperren `disconnectBanned()` auf (docs/04: „betroffene Sockets
+ * sofort trennen (`kicked`, Grund `abuse`)“) und gleicht nach einem Neustart des Streams alle verbundenen Sockets
+ * mit der Datenbank ab (`sweepConnectedSockets`).
  *
  * Die Prüfung liest die Datenbank mit Frist; Fehler werden geworfen – der Aufrufer (Handshake) lehnt dann ab
  * (fail-closed).
@@ -71,16 +72,46 @@ export function createBansService(options: BansServiceOptions): BansService {
     async banGuest(guestId, ban) {
       const now = options.clock.now();
       const expiresAt = new Date(now + ban.durationSec * 1_000);
-      const existing = await options.repo.findActive("guest", guestId, new Date(now));
-      const keepExisting =
-        existing !== null && (existing.expiresAt === undefined || existing.expiresAt.getTime() >= expiresAt.getTime());
-      const doc = keepExisting
-        ? existing
-        : await options.repo.upsert({ kind: "guest", value: guestId, reason: ban.reason, expiresAt }, new Date(now));
+      // Atomarer Upsert im Repository: verlängert nur – eine längere oder dauerhafte Sperre bleibt (auch bei
+      // gleichzeitigen Sperren durch Admin-CLI oder einen zweiten Prozess).
+      const doc = await options.repo.upsert(
+        { kind: "guest", value: guestId, reason: ban.reason, expiresAt },
+        new Date(now),
+      );
       disconnectBanned(doc);
       return doc;
     },
 
     disconnectBanned,
   };
+}
+
+export interface BanSweepDeps {
+  repo: Pick<BansRepo, "findActiveAmong">;
+  connections: Pick<ConnectionsService, "all">;
+  bans: Pick<BansService, "disconnectBanned">;
+  clock: Clock;
+}
+
+/**
+ * Vollabgleich aller verbundenen Sockets mit den aktiven Sperren (eine Abfrage je 1.000 Gäste bzw.
+ * IP-Schlüssel): nach einem Neustart des bans-Change-Streams (Änderungen können gefehlt haben) und als
+ * Sicherheitsnetz in größeren Abständen. Liefert die Zahl getrennter Sockets; wirft bei Datenbankfehlern.
+ */
+export async function sweepConnectedSockets(deps: BanSweepDeps): Promise<number> {
+  const sockets = deps.connections.all();
+  if (sockets.length === 0) return 0;
+  const guestIds = new Set<string>();
+  const ipKeys = new Set<string>();
+  for (const socket of sockets) {
+    guestIds.add(socket.data.guestId);
+    if (socket.data.ipKey !== null) ipKeys.add(socket.data.ipKey);
+  }
+  const active = await deps.repo.findActiveAmong(
+    { guestIds: [...guestIds], ipKeys: [...ipKeys] },
+    new Date(deps.clock.now()),
+  );
+  let disconnected = 0;
+  for (const ban of active) disconnected += deps.bans.disconnectBanned(ban);
+  return disconnected;
 }

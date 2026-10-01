@@ -4,6 +4,7 @@ import { LobbyEntry } from "@/components/lobby/lobby-entry";
 import { de } from "@/i18n/de";
 import { displayLobbyCode, lobbyCodeFromParam } from "@/lib/client/lobby-code";
 import { lobbyPath } from "@/lib/client/paths";
+import { getMaintenanceNotice } from "@/lib/server/maintenance";
 import { getPublicRuntimeConfig } from "@/lib/server/runtime-config";
 
 export const metadata: Metadata = {
@@ -24,7 +25,7 @@ export default async function LobbyPage({ params }: LobbyPageProps) {
   const code = lobbyCodeFromParam(raw);
   if (!code) notFound();
   if (raw !== code) redirect(lobbyPath(code));
-  const config = await getPublicRuntimeConfig();
+  const [config, maintenance] = await Promise.all([getPublicRuntimeConfig(), getMaintenanceNotice()]);
   // Dev-Bots nur, wenn auch der Realtime-Server sie erlaubt (docs/05 §Dev-Bots; zod-validiert, nie in Produktion).
   return (
     <LobbyEntry
@@ -32,6 +33,8 @@ export default async function LobbyPage({ params }: LobbyPageProps) {
       displayCode={displayLobbyCode(code)}
       realtimeUrl={config.realtimeUrl}
       devBots={config.devBots}
+      turnstile={config.turnstile}
+      maintenance={maintenance}
     />
   );
 }

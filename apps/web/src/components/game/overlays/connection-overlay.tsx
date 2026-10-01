@@ -115,10 +115,24 @@ export function ConnectionOverlay() {
   );
 }
 
+/** Bleibt trotz Overlay bedienbar: die Turnstile-Bestätigung beim Wiederverbinden (docs/06 `turnstileOnJoin`). */
+const MODAL_EXEMPT = "[data-modal-exempt]";
+
+/** Setzt `inert` auf `element` – enthält es eine Ausnahme, stattdessen auf alle Kinder ohne Ausnahme (rekursiv). */
+function makeInert(element: Element, changed: Element[]): void {
+  if (element.hasAttribute("inert") || element instanceof HTMLScriptElement || element.matches(MODAL_EXEMPT)) return;
+  if (element.querySelector(MODAL_EXEMPT) === null) {
+    element.setAttribute("inert", "");
+    changed.push(element);
+    return;
+  }
+  for (const child of element.children) makeInert(child, changed);
+}
+
 /**
- * Während `active`: alles außerhalb von `layerRef` inert (die Geschwister auf jeder Ebene bis `<body>`) und den
- * Fokus von dort lösen; danach beides zurück (nur selbst gesetztes `inert` wird entfernt) und den Fokus an das
- * zuvor fokussierte Element geben, sofern es noch da und bedienbar ist.
+ * Während `active`: alles außerhalb von `layerRef` inert (die Geschwister auf jeder Ebene bis `<body>`, außer
+ * `data-modal-exempt`) und den Fokus von dort lösen; danach beides zurück (nur selbst gesetztes `inert` wird
+ * entfernt) und den Fokus an das zuvor fokussierte Element geben, sofern es noch da und bedienbar ist.
  */
 function useModalBackground(active: boolean, layerRef: RefObject<HTMLElement | null>): void {
   useEffect(() => {
@@ -128,9 +142,7 @@ function useModalBackground(active: boolean, layerRef: RefObject<HTMLElement | n
     const changed: Element[] = [];
     for (let node: Element = layer; node.parentElement && node !== document.body; node = node.parentElement) {
       for (const sibling of node.parentElement.children) {
-        if (sibling === node || sibling.hasAttribute("inert") || sibling instanceof HTMLScriptElement) continue;
-        sibling.setAttribute("inert", "");
-        changed.push(sibling);
+        if (sibling !== node) makeInert(sibling, changed);
       }
     }
     if (previous && !layer.contains(previous)) previous.blur();

@@ -232,6 +232,17 @@ export const de = {
     message: (text?: string | null) => text?.trim() || MAINTENANCE_FALLBACK,
   },
 
+  /**
+   * Cloudflare Turnstile (docs/06 §Bot-Schutz): Läuft die Prüfung unsichtbar, gibt es keinen Text (docs/09 §11
+   * TURNSTILE_REQUIRED); sichtbar wird nur die Überschrift, wenn Cloudflare eine Bestätigung verlangt, und der
+   * Fehlerfall.
+   */
+  turnstile: {
+    label: "Kurze Sicherheitsprüfung",
+    failed: "Sicherheitsprüfung fehlgeschlagen. Versuch es noch mal.",
+    retry: "Erneut versuchen",
+  },
+
   /** Hinweise per Toast (docs/09 §7.10) und Server-Notices (docs/05) */
   notices: {
     hostChanged: (name: string) => `${name} ist jetzt Host.`,

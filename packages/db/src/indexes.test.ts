@@ -69,6 +69,28 @@ describe("ensureIndexes()", () => {
     expect(events.find((index) => index.name === "createdAt_ttl")?.expireAfterSeconds).toBe(3_600);
   });
 
+  it("rateLimits: TTL auf expire und eindeutiger key – wie rate-limiter-flexible, ohne Konflikt mit dessen Indizes", async () => {
+    const limits = await t.collections.rateLimits.indexes();
+    expect(limits.find((index) => index.name === "expire_-1")).toMatchObject({
+      key: { expire: -1 },
+      expireAfterSeconds: 0,
+    });
+    expect(limits.find((index) => index.name === "key_1")).toMatchObject({ key: { key: 1 }, unique: true });
+
+    // Reihenfolge wie in Produktion möglich: Der Limiter (Web/Realtime) legt seine Indizes zuerst an.
+    const other = await createTestDatabase();
+    try {
+      await other.collections.rateLimits.createIndex({ expire: -1 }, { expireAfterSeconds: 0 });
+      await other.collections.rateLimits.createIndex({ key: 1 }, { unique: true });
+      await expect(ensureIndexes(other.db, { prefix: other.prefix })).resolves.toMatchObject({
+        indexes: INDEX_DEFINITIONS.length,
+      });
+      expect(await other.collections.rateLimits.indexes()).toHaveLength(3);
+    } finally {
+      await other.cleanup();
+    }
+  });
+
   it("legt appConfig mit Startwerten per $setOnInsert an und überschreibt nichts", async () => {
     const config = await t.collections.appConfig.findOne({ _id: APP_CONFIG_ID });
     expect(config).toMatchObject({

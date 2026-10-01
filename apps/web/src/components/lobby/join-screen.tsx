@@ -5,6 +5,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { AppHeader, HeaderTitle } from "@/components/app/app-header";
 import { AppShell } from "@/components/app/app-shell";
 import { FormError } from "@/components/app/form-error";
+import { type TurnstileClientConfig, TurnstileSlot, useTurnstile } from "@/components/turnstile/turnstile-slot";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -16,6 +17,7 @@ import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
 import { reloadPage } from "@/lib/client/reload";
 import { readStoredName, writeStoredName } from "@/lib/client/storage";
+import type { MaintenanceNotice } from "@/lib/server/maintenance";
 import { ChevronLeftIcon } from "@/lib/ui/icons";
 
 const NAME_MAX_LENGTH = 64;
@@ -27,13 +29,18 @@ export interface JoinScreenProps {
   /** Anzeige „ABC 234“ */
   displayCode: string;
   realtimeUrl: string;
+  /** Turnstile aus der Laufzeit-Konfiguration (docs/06 §Bot-Schutz) */
+  turnstile: TurnstileClientConfig;
+  /** Serverseitig ermittelter Wartungshinweis; `null` = keiner */
+  maintenance?: MaintenanceNotice | null;
 }
 
 /**
  * Beitreten per Link/QR (`/j/[code]`, docs/09 §6): Code steht fest, nur Name + „Beitreten“.
- * Lobby-Fehler (nicht gefunden, voll, läuft bereits, entfernt) erscheinen inline unter dem Code.
+ * Lobby-Fehler (nicht gefunden, voll, läuft bereits, entfernt) erscheinen inline unter dem Code. Banner: Update vor
+ * Wartung (docs/09 §5). Turnstile (docs/06) läuft beim Anlegen der Session bzw. nach `TURNSTILE_REQUIRED`.
  */
-export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) {
+export function JoinScreen({ code, displayCode, realtimeUrl, turnstile, maintenance = null }: JoinScreenProps) {
   const router = useRouter();
   const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState("");
@@ -43,6 +50,11 @@ export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) 
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [updateRequired, setUpdateRequired] = useState(false);
+  const solver = useTurnstile(turnstile);
+  const clientRef = useRef<RealtimeClient | null>(null);
+
+  // Den Turnstile-Anbieter dieser Seite beim Verlassen abmelden (der Realtime-Client lebt seitenübergreifend).
+  useEffect(() => () => clientRef.current?.setTurnstileProvider(null), []);
 
   useEffect(() => {
     const stored = readStoredName();
@@ -82,12 +94,21 @@ export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) 
       showError("NETWORK");
       return;
     }
+    clientRef.current = client;
+    client.setTurnstileProvider(solver === null ? null : (purpose) => solver.solve(purpose), {
+      sessionRequiresToken: turnstile.enabled,
+    });
     const result = await client.joinLobby(code, trimmed);
     if (result.ok) {
       router.replace(lobbyPath(result.data.code));
       return;
     }
     setBusy(false);
+    // Turnstile gescheitert: Den Fehler zeigt die Prüfung selbst (ohne Widget: allgemeiner Turnstile-Hinweis).
+    if (result.code === "TURNSTILE_REQUIRED") {
+      if (solver === null) setFormError(de.turnstile.failed);
+      return;
+    }
     showError(result.code);
   };
 
@@ -100,7 +121,15 @@ export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) 
           title={<HeaderTitle>{de.actions.join}</HeaderTitle>}
         />
       }
-      banner={updateRequired ? <Banner tone="update" onAction={reloadPage} /> : null}
+      banner={
+        updateRequired ? (
+          <Banner tone="update" onAction={reloadPage} />
+        ) : maintenance !== null ? (
+          <div data-testid="maintenance-banner">
+            <Banner tone="maintenance" message={de.maintenance.message(maintenance.message)} />
+          </div>
+        ) : null
+      }
       actions={
         <Button type="submit" form={FORM_ID} variant="primary" block loading={busy} data-testid="join-submit">
           {de.actions.join}
@@ -134,6 +163,7 @@ export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) 
             data-testid="join-name"
           />
           <FormError message={formError} testId="join-form-error" />
+          <TurnstileSlot solver={solver} />
         </form>
       </div>
     </AppShell>

@@ -5,7 +5,10 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { AppFooter } from "@/components/app/app-footer";
 import { FormError } from "@/components/app/form-error";
 import { InstallRow } from "@/components/pwa/install-row";
+import { useUpdateAvailable } from "@/components/pwa/service-worker";
 import { UpdateBanner } from "@/components/pwa/update-banner";
+import { type TurnstileClientConfig, TurnstileSlot, useTurnstile } from "@/components/turnstile/turnstile-slot";
+import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { CodeInput } from "@/components/ui/code-input";
 import { TextField } from "@/components/ui/text-field";
@@ -21,6 +24,7 @@ import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-real
 import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
 import { readStoredName, writeStoredName } from "@/lib/client/storage";
+import type { MaintenanceNotice } from "@/lib/server/maintenance";
 import { LOBBY_CODE_LENGTH } from "@/lib/ui/lobby-code";
 
 /** Obergrenze des Namensfelds (NAME_INPUT_MAX_LENGTH; die Namensregeln prüft der Server). */
@@ -31,6 +35,10 @@ export interface StartScreenProps {
   realtimeUrl: string;
   /** PWA-Kurzbefehle `?action=create|join` (docs/10): Fokus aufs passende Feld */
   focus?: "create" | "join" | null;
+  /** Turnstile aus der Laufzeit-Konfiguration (Widget erst bei Bedarf geladen, docs/06 §Bot-Schutz) */
+  turnstile: TurnstileClientConfig;
+  /** Serverseitig ermittelter Wartungshinweis (appConfig oder Datenbank nicht erreichbar); `null` = keiner */
+  maintenance?: MaintenanceNotice | null;
 }
 
 /**
@@ -38,9 +46,11 @@ export interface StartScreenProps {
  * „oder“, Lobby-Code mit Auto-Beitritt bei 6 Zeichen, „Beitreten“, Footer-Link „Regeln“.
  * Impressum/Datenschutz bleiben bis zum Umzug auf eine eigene Domain weg (ADR-030).
  * PWA (docs/10): oben das Update-Banner (neue Version oder `UPDATE_REQUIRED`), über dem Footer die Zeile
- * „Als App installieren“ (nur nach dem ersten beendeten Spiel und wenn installierbar).
+ * „Als App installieren“ (nur nach dem ersten beendeten Spiel und wenn installierbar). Ohne Update steht dort der
+ * Wartungshinweis (docs/09 §11). Turnstile (docs/06): Die Prüfung läuft beim Anlegen der Session bzw. nach
+ * `TURNSTILE_REQUIRED`; sichtbar wird das Widget nur, wenn Cloudflare eine Bestätigung verlangt.
  */
-export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
+export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance = null }: StartScreenProps) {
   const router = useRouter();
   const nameRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -52,6 +62,12 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   const [formError, setFormError] = useState<{ at: "create" | "join"; text: string } | null>(null);
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
   const [updateRequired, setUpdateRequired] = useState(false);
+  const updateAvailable = useUpdateAvailable();
+  const solver = useTurnstile(turnstile);
+  const clientRef = useRef<RealtimeClient | null>(null);
+
+  // Den Turnstile-Anbieter dieser Seite beim Verlassen abmelden (der Realtime-Client lebt seitenübergreifend).
+  useEffect(() => () => clientRef.current?.setTurnstileProvider(null), []);
 
   useEffect(() => {
     const stored = readStoredName();
@@ -104,6 +120,10 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
       showError("NETWORK", "toast", kind);
       return;
     }
+    clientRef.current = client;
+    client.setTurnstileProvider(solver === null ? null : (purpose) => solver.solve(purpose), {
+      sessionRequiresToken: turnstile.enabled,
+    });
     const result = await action(client);
     if (result.ok) {
       // Bleibt „busy“, bis die Lobby-Seite da ist (kein zweiter Klick).
@@ -111,6 +131,11 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
       return;
     }
     setBusy(null);
+    // Turnstile gescheitert: Den Fehler zeigt die Prüfung selbst (ohne Widget: allgemeiner Turnstile-Hinweis).
+    if (result.code === "TURNSTILE_REQUIRED") {
+      if (solver === null) setFormError({ at: kind, text: de.turnstile.failed });
+      return;
+    }
     showError(result.code, placement(result.code), kind);
   };
 
@@ -138,7 +163,13 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   return (
     // Safe Area oben am äußeren Rahmen: Das Update-Banner steht unter der (durchscheinenden) Statusleiste.
     <div className="flex min-h-dvh flex-col pt-safe">
-      <UpdateBanner required={updateRequired} />
+      {updateRequired || updateAvailable || maintenance === null ? (
+        <UpdateBanner required={updateRequired} />
+      ) : (
+        <div data-testid="maintenance-banner">
+          <Banner tone="maintenance" message={de.maintenance.message(maintenance.message)} />
+        </div>
+      )}
       <main className="mx-auto flex w-full max-w-column flex-1 flex-col px-gutter">
         <div className="flex flex-1 flex-col justify-center gap-8 py-10">
           <header className="flex flex-col gap-2">
@@ -205,6 +236,7 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
             </Button>
             <FormError message={formError?.at === "join" ? formError.text : null} testId="start-join-error" />
           </div>
+          <TurnstileSlot solver={solver} />
         </div>
 
         <InstallRow />
