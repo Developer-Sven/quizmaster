@@ -12,11 +12,12 @@
  *    → Ban (Gast + IP-Schlüssel) → `protocolVersion ≥ appConfig.minClientProtocol` → verbindliche
  *    Reservierung der Verbindung (Gast 5, IP 100, global) → `socket.data`.
  *
- * Fehler gehen als `connect_error` mit `data: { code, retryAfterMs? }` an den Client (UNAUTHORIZED,
- * UPDATE_REQUIRED, BANNED, TOO_MANY_CONNECTIONS, SERVER_BUSY, RATE_LIMITED); die Meldung enthält nur den Code.
+ * Fehler gehen als `connect_error` mit `data: { code, retryAfterMs? }` (Vertrag `connectErrorDataSchema` aus
+ * shared) an den Client (UNAUTHORIZED, UPDATE_REQUIRED, BANNED, TOO_MANY_CONNECTIONS, SERVER_BUSY, RATE_LIMITED);
+ * die Meldung enthält nur den Code.
  */
 import type { IncomingMessage } from "node:http";
-import { type ErrorCode, handshakeAuthSchema, isAllowedOrigin } from "@quizmaster/shared";
+import { type ConnectErrorData, type ErrorCode, handshakeAuthSchema, isAllowedOrigin } from "@quizmaster/shared";
 import { ipKey as hashIp, resolveClientIp } from "@quizmaster/shared/ip";
 import type { RealtimeEnv } from "../env.ts";
 import type { Logger, SecurityLog } from "../logger.ts";
@@ -38,17 +39,24 @@ export interface HandshakeRejection {
   retryAfterMs?: number;
 }
 
+/**
+ * `data` für `connect_error` nach dem Vertrag `connectErrorDataSchema` (shared): Code und – falls endlich – die
+ * Wartezeit als ganze Millisekunden ≥ 0.
+ */
+export function connectErrorData(rejection: Pick<HandshakeRejection, "code" | "retryAfterMs">): ConnectErrorData {
+  const { code, retryAfterMs } = rejection;
+  if (retryAfterMs === undefined || !Number.isFinite(retryAfterMs)) return { code };
+  return { code, retryAfterMs: Math.max(0, Math.ceil(retryAfterMs)) };
+}
+
 /** Fehlerobjekt für `next(err)` – Socket.IO sendet `message` und `data` an den Client. */
 export class HandshakeError extends Error {
-  readonly data: { code: ErrorCode; retryAfterMs?: number };
+  readonly data: ConnectErrorData;
 
   constructor(rejection: HandshakeRejection) {
     super(rejection.code);
     this.name = "HandshakeError";
-    this.data =
-      rejection.retryAfterMs === undefined
-        ? { code: rejection.code }
-        : { code: rejection.code, retryAfterMs: Math.max(0, Math.ceil(rejection.retryAfterMs)) };
+    this.data = connectErrorData(rejection);
   }
 }
 

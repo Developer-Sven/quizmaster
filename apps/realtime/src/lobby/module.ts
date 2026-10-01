@@ -8,6 +8,8 @@
  *   Lobby weg ist).
  * - `onShutdown` (nach `notice SERVER_RESTART`, vor dem Schließen der Sockets): alle Lobbys einfrieren und ihre
  *   Snapshots schreiben, laufende Spielabschlüsse befristet abwarten, Change Streams schließen.
+ * - Produktion (`databaseKind = production`): Start nur mit brauchbarem Fragenkatalog (sonst Exit 1), danach
+ *   meldet `/healthz` 503, solange der Katalog unbrauchbar ist (Health-Prüfung `catalog`).
  *
  * Zugriff für andere Module (z. B. Wiederaufnahme aus Snapshots in W4, Modul-Reihenfolge: danach eintragen)
  * und Tests: `gameRuntimeOf(context)` bzw. `gameRuntimeOf(app)` – ab `onStart` dieses Moduls verfügbar.
@@ -50,6 +52,7 @@ export interface GameRuntimeOptions {
 export function createGameRuntime(context: ModuleContext, options: GameRuntimeOptions = {}): GameRuntime {
   const { env, io, db, logger, clock, services } = context;
   const rng = options.rng ?? createCryptoRng();
+  const production = env.databaseKind === "production";
   const questions = createQuestionService({
     repos: db.repos,
     collections: db.collections,
@@ -59,6 +62,7 @@ export function createGameRuntime(context: ModuleContext, options: GameRuntimeOp
     clock,
     logger,
     metrics: services.metrics,
+    requireUsableCatalog: production,
     ...(options.catalogReloadIntervalMs === undefined ? {} : { reloadIntervalMs: options.catalogReloadIntervalMs }),
     ...(options.watchBackoff === undefined ? {} : { watchBackoff: options.watchBackoff }),
   });
@@ -81,7 +85,10 @@ export function createGameRuntime(context: ModuleContext, options: GameRuntimeOp
     questions,
     feedback,
     appConfig: services.appConfig,
-    start: () => questions.start(),
+    async start() {
+      await questions.start();
+      if (production) services.health.register("catalog", () => questions.catalog().usable);
+    },
     shutdown(reason) {
       stopping ??= (async () => {
         const results = await Promise.allSettled([lobbies.shutdown(), questions.stop()]);

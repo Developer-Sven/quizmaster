@@ -25,6 +25,16 @@ export const CONNECT_TIMEOUT_MS = 10_000;
 export const SOCKET_TIMEOUT_MS = 30_000;
 /** Serverseitige Frist für nutzernahe Lesezugriffe (Handshake, Profil, Kategorien) – lieber Fehler als Hänger. */
 export const USER_READ_MAX_TIME_MS = 5_000;
+/**
+ * Client-seitige Gesamtfrist (CSOT, Treiber-Option `timeoutMS`) für spielnahe Zugriffe: Lobby-Code prüfen,
+ * Lobby anlegen/sichern/schließen, Fragen eines Zuges laden (Realtime), Gast anlegen/erneuern (Web). Danach
+ * bricht der Treiber ab – er leitet daraus auch das Server-`maxTimeMS` ab und schließt bei Bedarf die
+ * Verbindung –, sodass eine hängende Operation den Pool nie bis `SOCKET_TIMEOUT_MS` belegt. Liegt unter den
+ * äußeren 5-s-Fristen der Apps (die bleiben als Absicherung).
+ */
+export const HOT_PATH_TIMEOUT_MS = 4_000;
+/** CSOT-Frist für das Laden des ganzen Fragenpools (Realtime-Start und Reload; äußere Frist dort 30 s). */
+export const POOL_LOAD_TIMEOUT_MS = 25_000;
 
 const MONGO_URI_REGEX = /^mongodb(\+srv)?:\/\/\S+$/;
 

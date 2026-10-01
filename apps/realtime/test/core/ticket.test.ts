@@ -1,5 +1,7 @@
 /** Ticket-Prüfung (jose HS256, Claims, Frist) und jti-Speicher (einmalig, TTL, Obergrenze). */
 import { randomUUID } from "node:crypto";
+import { hmacKeyFromSecret, REALTIME_TICKET } from "@quizmaster/shared";
+import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createJtiStore, createTicketVerifier, TICKET_CLOCK_TOLERANCE_SEC } from "../../src/auth/ticket.ts";
 import { mintTicket } from "../helpers/index.ts";
@@ -43,6 +45,30 @@ describe("Ticket-Prüfung", () => {
     ]) {
       expect(await verifier.verify(ticket, now)).toMatchObject({ ok: false, reason: "invalid" });
     }
+  });
+
+  it("Schlüssel-Vertrag mit apps/web: UTF-8-Bytes des Secrets, kein Base64-Decode", async () => {
+    // Ein typisches base64url-Secret: als Bytes interpretiert wäre es ein anderer Schlüssel.
+    const secret = "q3Jx9_Lw-ZbVtR8sKpN2mYcE4hGfA7uD1oXiWnQeTzS";
+    const verifier = createTicketVerifier(secret);
+    const now = Date.now();
+    const sign = (key: Uint8Array) => {
+      const iat = Math.floor(now / 1_000);
+      return new SignJWT({})
+        .setProtectedHeader({ alg: REALTIME_TICKET.algorithm, typ: "JWT" })
+        .setSubject(randomUUID())
+        .setAudience(REALTIME_TICKET.audience)
+        .setIssuer(REALTIME_TICKET.issuer)
+        .setIssuedAt(iat)
+        .setExpirationTime(iat + REALTIME_TICKET.ttlSec)
+        .setJti(randomUUID().replaceAll("-", ""))
+        .sign(key);
+    };
+    expect((await verifier.verify(await sign(hmacKeyFromSecret(secret)), now)).ok).toBe(true);
+    expect(await verifier.verify(await sign(Buffer.from(secret, "base64url")), now)).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
   });
 
   it("jti-Speicher: merkt IDs bis zum Ablauf (+ Toleranz), räumt auf und ist begrenzt", () => {

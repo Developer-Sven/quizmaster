@@ -4,9 +4,10 @@
  * Verbindungs- und Handshake-Limits, Lastabwurf.
  */
 import { randomUUID } from "node:crypto";
-import { PROTOCOL_VERSION } from "@quizmaster/shared";
+import { connectErrorDataSchema, PROTOCOL_VERSION } from "@quizmaster/shared";
 import { ipKey } from "@quizmaster/shared/ip";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { HandshakeError } from "../../src/auth/handshake.ts";
 import { roomForGuest } from "../../src/registry/rooms.ts";
 import {
   type ConnectFailure,
@@ -40,6 +41,30 @@ async function pollingHandshake(headers: Record<string, string>): Promise<{ stat
   const response = await server.request("/socket.io/?EIO=4&transport=polling", { headers });
   return { status: response.status, body: await response.text() };
 }
+
+describe("connect_error-Daten (Vertrag connectErrorDataSchema)", () => {
+  it("Code und ganze, nicht negative Wartezeit; unendliche/ungültige Wartezeiten fallen weg", () => {
+    const cases = [
+      [{ code: "UNAUTHORIZED", reason: "x" }, { code: "UNAUTHORIZED" }],
+      [
+        { code: "RATE_LIMITED", reason: "x", retryAfterMs: 1_234.2 },
+        { code: "RATE_LIMITED", retryAfterMs: 1_235 },
+      ],
+      [
+        { code: "RATE_LIMITED", reason: "x", retryAfterMs: -5 },
+        { code: "RATE_LIMITED", retryAfterMs: 0 },
+      ],
+      [{ code: "RATE_LIMITED", reason: "x", retryAfterMs: Number.POSITIVE_INFINITY }, { code: "RATE_LIMITED" }],
+      [{ code: "RATE_LIMITED", reason: "x", retryAfterMs: Number.NaN }, { code: "RATE_LIMITED" }],
+    ] as const;
+    for (const [rejection, expected] of cases) {
+      const error = new HandshakeError(rejection);
+      expect(error.data).toEqual(expected);
+      expect(connectErrorDataSchema.safeParse(error.data).success).toBe(true);
+      expect(error.message).toBe(rejection.code);
+    }
+  });
+});
 
 describe("Origin (allowRequest, ADR-028)", () => {
   it("lässt APP_ORIGIN zu (auch in anderer Schreibweise)", async () => {

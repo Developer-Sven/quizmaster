@@ -7,6 +7,7 @@
 import { randomUUID } from "node:crypto";
 import type { PublicLobbyState } from "@quizmaster/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { countsAsResumeFailure } from "../../src/handlers/lobby.ts";
 import { eventually, type TestServer } from "../helpers/index.ts";
 import {
   actorOf,
@@ -174,8 +175,7 @@ describe("Code-Raten", () => {
       ok: false,
       error: { code: "LOBBY_NOT_FOUND" },
     });
-    // Der Kern verbucht den Fehlversuch nach dem Ack; die 15-min-Sperre setzt der Mongo-Store kurz danach.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Der Kern verbucht den Fehlversuch VOR dem Ack: Der direkt folgende Versuch ist schon gesperrt.
     const blocked = await last.emit("lobby:join", { code, name: "Rater" });
     expect(blocked).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
     if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
@@ -183,6 +183,37 @@ describe("Code-Raten", () => {
     const other = await connectGuest(server);
     await joinLobby(other, code, "Ben");
     for (const client of [host, ...guessers, other]) client.close();
+  });
+
+  it("20 fehlgeschlagene Wiederaufnahmen je IP in 5 min → RATE_LIMITED (eigene Regel, Join bleibt frei)", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host);
+    const ip = server.nextIp();
+    const guessers = await Promise.all([0, 1, 2].map(() => connectGuest(server, { ip })));
+    const wrong = code === "ZZZZZZ" ? "ZZZZZY" : "ZZZZZZ";
+    for (let attempt = 0; attempt < 21; attempt++) {
+      const guesser = guessers[Math.floor(attempt / 9)];
+      if (guesser === undefined) throw new Error("Client fehlt");
+      expect(await guesser.emit("lobby:resume", { code: wrong })).toMatchObject({
+        ok: false,
+        error: { code: "LOBBY_NOT_FOUND" },
+      });
+    }
+    const last = guessers[2];
+    if (last === undefined) throw new Error("Client fehlt");
+    const blocked = await last.emit("lobby:resume", { code });
+    expect(blocked).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
+    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    // Beitreten zählt getrennt und ist von derselben IP weiter möglich.
+    await joinLobby(last, code, "Rater");
+    for (const client of [host, ...guessers]) client.close();
+  });
+
+  it("nur LOBBY_NOT_FOUND zählt bei lobby:resume als Fehlversuch", () => {
+    expect(countsAsResumeFailure("LOBBY_NOT_FOUND")).toBe(true);
+    for (const code of ["KICKED", "RESIGNED", "INTERNAL", "SERVER_BUSY", "RATE_LIMITED"] as const) {
+      expect(countsAsResumeFailure(code), code).toBe(false);
+    }
   });
 });
 
@@ -208,6 +239,35 @@ describe("Kontingente und Kill-Switches", () => {
     expect((await other.emit("lobby:create", { name: "Mia" })).ok).toBe(true);
     first.close();
     other.close();
+  });
+
+  it("lobby:create nur ohne aktive Lobby-Mitgliedschaft (docs/05): Mitglied woanders → RATE_LIMITED", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const guestId = randomUUID();
+    const member = await connectGuest(server, { guestId });
+    await joinLobby(member, code, "Ben");
+    // Zweites Gerät/Tab desselben Gasts ohne eigene Lobby-Zuordnung – und der Lobby-Socket selbst.
+    const otherDevice = await connectGuest(server, { guestId });
+    expect(await otherDevice.emit("lobby:create", { name: "Ben" })).toMatchObject({
+      ok: false,
+      error: { code: "RATE_LIMITED" },
+    });
+    expect(await member.emit("lobby:create", { name: "Ben" })).toMatchObject({
+      ok: false,
+      error: { code: "RATE_LIMITED" },
+    });
+    // Weiterhin genau EINE Mitgliedschaft – die Zuordnung „einzige Lobby des Gasts“ bleibt eindeutig.
+    expect(
+      runtimeOf(server)
+        .lobbies.membershipsOf(guestId)
+        .map((actor) => actor.code),
+    ).toEqual([code]);
+    expect(actorOf(server, code).hasSocket(serverSocketOf(server, member))).toBe(true);
+    // Nach dem Verlassen ist die Erstellung erlaubt.
+    expect(await member.emit("lobby:leave", {})).toEqual({ ok: true, data: null });
+    expect((await otherDevice.emit("lobby:create", { name: "Ben" })).ok).toBe(true);
+    for (const client of [host, member, otherDevice]) client.close();
   });
 
   it("lobbyCreationEnabled=false → LOBBY_CREATION_DISABLED; maxActiveLobbies erreicht → SERVER_BUSY", async () => {

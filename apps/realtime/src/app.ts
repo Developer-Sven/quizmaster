@@ -40,6 +40,7 @@ import {
   type AppServer,
   type AppSocket,
   type Clock,
+  type HealthService,
   type InterServerEvents,
   type Lifecycle,
   type ModuleContext,
@@ -226,6 +227,41 @@ async function listenOnFirstFree(server: HttpServer, host: string, ports: readon
   throw lastError;
 }
 
+/**
+ * Prüfungen für `/healthz` (siehe `HealthService`). Eine werfende Prüfung gilt als fehlgeschlagen (fail closed);
+ * jeder Wechsel gesund ↔ gestört einer Prüfung wird geloggt.
+ */
+export function createHealthService(logger: Logger): HealthService {
+  const checks = new Map<string, () => boolean>();
+  const lastFailing = new Set<string>();
+  return {
+    register(name, check) {
+      if (checks.has(name)) throw new Error(`Health-Prüfung „${name}“ ist bereits registriert`);
+      checks.set(name, check);
+    },
+    failing() {
+      const failing: string[] = [];
+      for (const [name, check] of checks) {
+        let ok: boolean;
+        try {
+          ok = check();
+        } catch (error) {
+          logger.error({ err: error, check: name }, "Health-Prüfung fehlgeschlagen");
+          ok = false;
+        }
+        if (!ok) failing.push(name);
+        if (!ok && !lastFailing.has(name)) {
+          lastFailing.add(name);
+          logger.error({ check: name }, "Health-Prüfung meldet Störung – /healthz antwortet 503");
+        } else if (ok && lastFailing.delete(name)) {
+          logger.info({ check: name }, "Health-Prüfung wieder in Ordnung");
+        }
+      }
+      return failing;
+    },
+  };
+}
+
 async function runWithDeadline(task: Promise<unknown>, ms: number): Promise<"done" | "timeout"> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"timeout">((resolve) => {
@@ -272,6 +308,7 @@ export async function createRealtimeApp(options: CreateRealtimeAppOptions): Prom
     onListenerError: (error) => logger.error({ err: error }, "appConfig-Listener fehlgeschlagen"),
   });
   const bans = createBansService({ repo: db.repos.bans, connections, clock });
+  const health = createHealthService(logger);
 
   const admission: AdmissionService = {
     lobbyCreation(activeLobbies): ErrorCode | null {
@@ -293,10 +330,11 @@ export async function createRealtimeApp(options: CreateRealtimeAppOptions): Prom
     admission,
     lifecycle,
     security,
+    health,
   };
 
   const tickets = createTicketVerifier(env.REALTIME_TICKET_SECRET);
-  const httpServer = createServer(createHttpHandler({ env, logger, metrics, security, rateLimit, lifecycle }));
+  const httpServer = createServer(createHttpHandler({ env, logger, metrics, security, rateLimit, lifecycle, health }));
   // Kurze Fristen gegen langsame Clients (Slowloris); Long-Polling-Antworten betrifft das nicht.
   httpServer.headersTimeout = 10_000;
   httpServer.requestTimeout = 15_000;

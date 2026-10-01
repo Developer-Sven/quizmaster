@@ -12,9 +12,16 @@
  *    Reload-Stand sie). Läuft schon ein Reload, folgt genau einer danach.
  * 3./4. `offerCategories` und `drawQuestions` sind die reinen Auswahlfunktionen der Engine (Kategorien mit genug
  *    ungesehenen Fragen zuerst, Schwierigkeit nach Katalog-Mix, verschiedene Themen …).
- * 5. `loadQuestions` zieht, lädt die Volldokumente (`findForPlay`, `$in`, Frist deutlich unter der Engine-Frist
+ * 5. `loadQuestions` zieht, lädt die Volldokumente (`findForPlay`, `$in`, Frist je Versuch, ein zweiter Versuch
+ *    nach DB-Fehler oder Zeitüberschreitung, Gesamtfrist deutlich unter der Engine-Frist
  *    `SHELL_REQUEST_TIMEOUT_MS`), prüft sie (spielbarer Status, Kategorie, Schema der Engine) und zieht einmal
  *    nach, falls eine Frage inzwischen fehlt oder nicht mehr spielbar ist (sie fliegt dann auch aus dem Pool).
+ *
+ * Katalog-Zustand (`catalog()`): brauchbar erst mit `MIN_USABLE_CATEGORIES` spielbaren Kategorien, die Fragen im
+ * Pool haben – sonst endet jedes Spiel sofort (LOAD_FAILED). Ein unbrauchbarer Reload ersetzt einen brauchbaren
+ * Stand nicht (Fehlerlog; z. B. Lesefehler mitten in einem Seed); jeder Wechsel brauchbar ↔ unbrauchbar wird
+ * geloggt, die Gauges `qm_catalog_*` zeigen den Stand. Mit `requireUsableCatalog` (Produktion) bricht `start()`
+ * bei unbrauchbarem Katalog ab.
  */
 import type { QuestionPool as QuestionPoolKind, Repositories } from "@quizmaster/db";
 import {
@@ -43,8 +50,22 @@ import type { AppConfigService } from "./app-config.ts";
 export const CATALOG_RELOAD_INTERVAL_MS = 30 * 60_000;
 /** Frist eines Vollreloads (Pool + Kategorien). */
 export const CATALOG_RELOAD_TIMEOUT_MS = 30_000;
-/** Frist für das Laden der Volldokumente eines Zuges (zwei Versuche bleiben weit unter 20 s Engine-Frist). */
+/** Frist je Versuch für das Laden der Volldokumente eines Zuges. */
 export const QUESTION_FETCH_TIMEOUT_MS = 5_000;
+/** Versuche je Abruf der Volldokumente (DB-Fehler oder Zeitüberschreitung → ein zweiter Versuch). */
+export const QUESTION_FETCH_ATTEMPTS = 2;
+/** Pause vor dem zweiten Versuch. */
+export const QUESTION_FETCH_RETRY_DELAY_MS = 250;
+/**
+ * Gesamtfrist von `loadQuestions` (alle Abrufe, Wiederholung und Nachziehen) – klar unter der Engine-Frist
+ * `SHELL_REQUEST_TIMEOUT_MS` (20 s), damit die Antwort vor deren Timer ankommt.
+ */
+export const LOAD_QUESTIONS_BUDGET_MS = 15_000;
+/**
+ * So viele spielbare Kategorien mit Fragen im Pool braucht ein Spiel mindestens: drei Angebote je Zug, und nie
+ * die Kategorie des letzten Zuges.
+ */
+export const MIN_USABLE_CATEGORIES = 4;
 /** So lange wartet der Start höchstens darauf, dass die Change Streams offen sind. */
 export const WATCH_READY_TIMEOUT_MS = 10_000;
 /** Ziehungen je Zug: die erste und höchstens eine Nachziehung für fehlende/nicht mehr spielbare Fragen. */
@@ -89,8 +110,21 @@ export interface QuestionServiceStats {
   categories: number;
   /** Angewendete Änderungen aus den Change Streams. */
   changesApplied: number;
+  /** Abgeschlossene Vollreloads (auch abgelehnte). */
   reloads: number;
+  /** Reloads, deren unbrauchbarer Stand den bisherigen brauchbaren NICHT ersetzt hat. */
+  rejectedReloads: number;
   lastReloadAt: number | null;
+}
+
+/** Reicht der Katalog für ein Spiel? (Gauges `qm_catalog_*`, Health-Prüfung in Produktion) */
+export interface CatalogHealth {
+  /** Spielbare Fragen im Pool. */
+  questions: number;
+  /** Spielbare Kategorien mit mindestens einer Frage im Pool. */
+  usableCategories: number;
+  /** `usableCategories ≥ MIN_USABLE_CATEGORIES`. */
+  usable: boolean;
 }
 
 export interface QuestionService extends CatalogChangeTarget {
@@ -108,6 +142,8 @@ export interface QuestionService extends CatalogChangeTarget {
   /** Anzahl spielbarer Fragen einer Kategorie im Pool. */
   poolSize(categoryId?: string): number;
   stats(): QuestionServiceStats;
+  /** Reicht der aktuelle Katalog für ein Spiel? */
+  catalog(): CatalogHealth;
 }
 
 export interface QuestionServiceDeps {
@@ -124,6 +160,10 @@ export interface QuestionServiceDeps {
   watch?: boolean;
   reloadIntervalMs?: number;
   fetchTimeoutMs?: number;
+  /** Gesamtfrist von `loadQuestions` (Standard `LOAD_QUESTIONS_BUDGET_MS`). */
+  loadBudgetMs?: number;
+  /** Produktion: `start()` bricht ab, wenn der Katalog danach unbrauchbar ist (Exit 1 statt grünem Start). */
+  requireUsableCatalog?: boolean;
   /** Nur Tests: kürzere Pausen der Watcher beim Neustart. */
   watchBackoff?: { initialMs?: number; maxMs?: number };
 }
@@ -141,6 +181,7 @@ const sleep = (ms: number) =>
 export function createQuestionService(deps: QuestionServiceDeps): QuestionService {
   const log = deps.logger.child({ component: "questions" });
   const fetchTimeoutMs = deps.fetchTimeoutMs ?? QUESTION_FETCH_TIMEOUT_MS;
+  const loadBudgetMs = deps.loadBudgetMs ?? LOAD_QUESTIONS_BUDGET_MS;
 
   // Pool: id → Eintrag und Kategorie → (id → Eintrag); Arrays je Kategorie für die Engine werden gecacht.
   let entries = new Map<string, PoolQuestion>();
@@ -151,7 +192,10 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
 
   let changesApplied = 0;
   let reloads = 0;
+  let rejectedReloads = 0;
   let lastReloadAt: number | null = null;
+  /** Zuletzt geloggter Zustand (brauchbar/unbrauchbar); `null` = noch keiner. */
+  let lastUsable: boolean | null = null;
   let buffering = false;
   let buffered: Array<() => void> = [];
   let running: Promise<void> | null = null;
@@ -219,6 +263,39 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
     return { id: doc._id, entry: { option: option.data, order: doc.order } };
   };
 
+  /** Kategorien aus `cats`, die im Pool `buckets` mindestens eine Frage haben. */
+  const countUsableCategories = (
+    cats: ReadonlyMap<string, CategoryEntry>,
+    buckets: ReadonlyMap<string, ReadonlyMap<string, PoolQuestion>>,
+  ): number => {
+    let count = 0;
+    for (const categoryId of cats.keys()) {
+      if ((buckets.get(categoryId)?.size ?? 0) > 0) count += 1;
+    }
+    return count;
+  };
+
+  const catalog = (): CatalogHealth => {
+    const usableCategories = countUsableCategories(categories, byCategory);
+    return { questions: entries.size, usableCategories, usable: usableCategories >= MIN_USABLE_CATEGORIES };
+  };
+
+  /** Loggt jeden Wechsel brauchbar ↔ unbrauchbar (unbrauchbar als Fehler: jedes neue Spiel endet sofort). */
+  const trackUsability = (context: string) => {
+    const health = catalog();
+    if (health.usable === lastUsable) return;
+    const known = lastUsable !== null;
+    lastUsable = health.usable;
+    if (!health.usable) {
+      log.error(
+        { ...health, required: MIN_USABLE_CATEGORIES, context },
+        "Fragenkatalog unbrauchbar – Spiele enden sofort (LOAD_FAILED)",
+      );
+    } else if (known) {
+      log.info({ ...health, context }, "Fragenkatalog wieder brauchbar");
+    }
+  };
+
   const playableCategories = (): CategoryOption[] => {
     categoryList ??= [...categories.values()]
       .sort((a, b) => a.order - b.order || a.option.id.localeCompare(b.option.id))
@@ -231,6 +308,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
     changesApplied += 1;
     apply();
     if (buffering) buffered.push(apply);
+    else trackUsability("change");
   };
 
   const syncQuestion = (questionId: string, doc: unknown) => {
@@ -325,6 +403,26 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         if (next === null) invalidCategories += 1;
         else if (next.entry !== null) nextCategories.set(next.id, next.entry);
       }
+      const nextUsableCategories = countUsableCategories(nextCategories, nextByCategory);
+      if (nextUsableCategories < MIN_USABLE_CATEGORIES && catalog().usable) {
+        // Ein unbrauchbarer Stand (z. B. gelesen mitten in einem Seed) ersetzt keinen brauchbaren. Änderungen aus
+        // den Streams sind im bisherigen Stand schon angewendet; gelöschte/gesperrte Fragen fallen beim Laden
+        // ohnehin heraus (`checkForPlay`).
+        reloads += 1;
+        rejectedReloads += 1;
+        lastReloadAt = deps.clock.now();
+        log.error(
+          {
+            reason,
+            questions: nextEntries.size,
+            usableCategories: nextUsableCategories,
+            required: MIN_USABLE_CATEGORIES,
+            kept: entries.size,
+          },
+          "Fragenkatalog beim Reload unbrauchbar – bisheriger Stand bleibt",
+        );
+        return;
+      }
       // Tausch und erneutes Anwenden der zwischenzeitlichen Änderungen ohne Unterbrechung (ein Tick).
       entries = nextEntries;
       byCategory = nextByCategory;
@@ -347,6 +445,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         },
         "Fragenkatalog geladen",
       );
+      trackUsability(`reload:${reason}`);
     } catch (error) {
       deps.metrics.recordMongoError("question_pool");
       log.error({ err: error, reason }, "Fragenkatalog nicht geladen – bisheriger Stand bleibt");
@@ -373,6 +472,31 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         return reload(reason);
       });
     return queued;
+  };
+
+  /**
+   * Volldokumente laden: Frist je Versuch (höchstens die Restzeit der Gesamtfrist), nach DB-Fehler oder
+   * Zeitüberschreitung genau ein weiterer Versuch – ein einzelner Aussetzer beendet so kein Spiel.
+   */
+  const fetchForPlay = async (ids: string[], deadline: number): Promise<unknown[]> => {
+    for (let attempt = 1; ; attempt++) {
+      const remaining = Math.floor(deadline - performance.now());
+      if (remaining <= 0) throw new Error("Fragen laden: Gesamtfrist abgelaufen");
+      try {
+        return await withTimeout(
+          deps.repos.questions.findForPlay(ids),
+          Math.min(fetchTimeoutMs, remaining),
+          "Fragen laden",
+        );
+      } catch (error) {
+        deps.metrics.recordMongoError("question_fetch");
+        const retry =
+          attempt < QUESTION_FETCH_ATTEMPTS && !stopped && deadline - performance.now() > QUESTION_FETCH_RETRY_DELAY_MS;
+        if (!retry) throw error;
+        log.warn({ err: error, attempt, questions: ids.length }, "Fragen laden fehlgeschlagen – neuer Versuch");
+        await sleep(QUESTION_FETCH_RETRY_DELAY_MS);
+      }
+    }
   };
 
   /** Prüft ein geladenes Volldokument für den Zug; `null` = nicht (mehr) spielbar. */
@@ -416,6 +540,14 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         }
       }
       await reload("start");
+      deps.metrics.setCatalogSource(catalog);
+      const health = catalog();
+      if (deps.requireUsableCatalog === true && !health.usable) {
+        await service.stop();
+        throw new Error(
+          `Fragenkatalog unbrauchbar: ${health.questions} Fragen, ${health.usableCategories} von mindestens ${MIN_USABLE_CATEGORIES} Kategorien mit Fragen`,
+        );
+      }
       const intervalMs = deps.reloadIntervalMs ?? CATALOG_RELOAD_INTERVAL_MS;
       interval = setInterval(() => {
         // Fehler hat `runReload` geloggt und gezählt; der bisherige Stand bleibt, der nächste Lauf versucht es neu.
@@ -439,6 +571,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
 
     async loadQuestions(request) {
       if (stopped) throw new Error("Fragen-Service ist gestoppt");
+      const deadline = performance.now() + loadBudgetMs;
       const exclude = new Set(request.excludeQuestionIds);
       const questions: QuestionInput[] = [];
       let refilledSeen = 0;
@@ -456,14 +589,15 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         for (const entry of drawn) exclude.add(entry.id);
         let docs: unknown[];
         try {
-          docs = await withTimeout(
-            deps.repos.questions.findForPlay(drawn.map((entry) => entry.id)),
-            fetchTimeoutMs,
-            "Fragen laden",
+          docs = await fetchForPlay(
+            drawn.map((entry) => entry.id),
+            deadline,
           );
         } catch (error) {
-          deps.metrics.recordMongoError("question_fetch");
-          throw error;
+          // Nachziehen gescheitert: mit den schon geladenen Fragen spielen (der Zug hat dann weniger Fragen).
+          if (questions.length === 0) throw error;
+          log.warn({ err: error, loaded: questions.length }, "Nachziehen fehlgeschlagen – Zug mit weniger Fragen");
+          break;
         }
         const byId = new Map<string, unknown>();
         for (const doc of docs) {
@@ -491,7 +625,15 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
       if (categoryId === undefined) return entries.size;
       return byCategory.get(categoryId)?.size ?? 0;
     },
-    stats: () => ({ questions: entries.size, categories: categories.size, changesApplied, reloads, lastReloadAt }),
+    stats: () => ({
+      questions: entries.size,
+      categories: categories.size,
+      changesApplied,
+      reloads,
+      rejectedReloads,
+      lastReloadAt,
+    }),
+    catalog,
   };
   return service;
 }

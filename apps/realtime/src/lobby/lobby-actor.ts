@@ -13,7 +13,7 @@
  * | `scheduleTimer` / `cancelTimer` | ein `setTimeout` je Token → `TIMEOUT { token }` in die Warteschlange |
  * | `offerCategories` | Fragen-Service → `OPTIONS_READY` (keine 3 Kategorien → `LOAD_FAILED`) |
  * | `loadQuestions` | ziehen + Volldokumente laden → `QUESTIONS_READY` (nichts → `LOAD_FAILED`) |
- * | `gameFinished` | finishGame-Transaktion im Hintergrund (Gast-/Fragen-Statistik, Bots ausgenommen) |
+ * | `gameFinished` | finishGame-Transaktion im Hintergrund über die Abschluss-Warteschlange (Gast-/Fragen-Statistik, Bots ausgenommen; technischer Abbruch zählt nicht als Spiel) |
  * | `persist` | Snapshot entprellt (`SNAPSHOT_DEBOUNCE_MS`) |
  * | `closeLobby` | Timer löschen, Snapshot sofort, Sockets lösen, aus der Registry entfernen |
  *
@@ -54,9 +54,9 @@ import type { RealtimeMetrics } from "../metrics.ts";
 import { roomForLobby } from "../registry/rooms.ts";
 import type { AppServer, AppSocket, Clock } from "../registry/types.ts";
 import type { QuestionService } from "../services/questions.ts";
-import { finishGameInput, playedQuestionIds, recordFinishedGame } from "./game-finish.ts";
+import { type FinishQueue, finishGameInput, isAbortedGame, playedQuestionIds } from "./game-finish.ts";
 import { appendHistory, loadSeenQuestions } from "./seen-questions.ts";
-import { createSnapshotWriter } from "./snapshots.ts";
+import { createSnapshotWriter, type SnapshotWriter } from "./snapshots.ts";
 import { createTimerSet } from "./timers.ts";
 
 /** Höchstens so lange wartet das Laden der gesehenen Fragen auf den Abschluss des Vorgängerspiels. */
@@ -76,6 +76,9 @@ export interface DispatchOptions {
   /** Nach erfolgreichem `reduce`, vor den Effects – hier senden Handler ihr Ack. */
   onAccepted?: (state: LobbyState) => void;
 }
+
+/** Ergebnis des letzten Snapshots (`null` = keiner, `failed` = Fehler) – z. B. nach `shutdown()`. */
+export type SnapshotResult = ReturnType<SnapshotWriter["lastResult"]>;
 
 export interface DispatchRejection {
   code: ErrorCode;
@@ -112,7 +115,9 @@ export interface LobbyActorDeps {
   logger: Logger;
   metrics: RealtimeMetrics;
   questions: Pick<QuestionService, "offerCategories" | "loadQuestions">;
-  repos: Pick<Repositories, "lobbies" | "guests" | "finishGame">;
+  repos: Pick<Repositories, "lobbies" | "guests">;
+  /** Prozessweite Abschluss-Warteschlange (Wiederholung im Hintergrund, Shutdown-Bilanz). */
+  finishes: Pick<FinishQueue, "record">;
   hooks: LobbyActorHooks;
   snapshotDebounceMs?: number;
 }
@@ -155,8 +160,11 @@ export interface LobbyActor {
   pendingFinish(): Promise<void>;
   /** Snapshot sofort schreiben (wirft nie). */
   flushSnapshot(): Promise<void>;
-  /** Shutdown: keine Commands mehr (SERVER_BUSY), Timer stoppen, laufende Commands abwarten, Snapshot schreiben. */
-  shutdown(): Promise<void>;
+  /**
+   * Shutdown: keine Commands mehr (SERVER_BUSY), Timer stoppen, laufende Commands abwarten, Snapshot schreiben.
+   * Liefert das Ergebnis dieses Snapshots (`saved`/`stale` = gesichert).
+   */
+  shutdown(): Promise<SnapshotResult>;
 }
 
 const EMPTY_SEEN: SeenQuestions = new Map();
@@ -354,11 +362,18 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
 
   const recordGame = (game: GameDoc, stats: GameStats) => {
     appendHistory(history, playedQuestionIds(game));
-    const input = finishGameInput(game, stats, toLobbySnapshot(state));
+    const endReason = state.game?.endReason ?? null;
+    const aborted = isAbortedGame(endReason);
+    if (aborted && endReason !== null) {
+      deps.metrics.gamesAborted.inc({ reason: endReason });
+      log.warn(
+        { game: game._id, reason: endReason },
+        "Spiel technisch abgebrochen – zählt nicht als Spiel in der Statistik",
+      );
+    }
+    const input = finishGameInput(game, stats, toLobbySnapshot(state), { aborted });
     const previous = finishing;
-    finishing = previous.then(() =>
-      recordFinishedGame({ repos: deps.repos, logger: log, metrics: deps.metrics }, input, () => deps.clock.now()),
-    );
+    finishing = previous.then(() => deps.finishes.record(input));
   };
 
   const close = (reason: string) => {
@@ -603,6 +618,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
       await waitAtMost(tail, QUEUE_DRAIN_TIMEOUT_MS);
       await snapshots.flush();
       snapshots.stop();
+      return snapshots.lastResult();
     },
   };
 

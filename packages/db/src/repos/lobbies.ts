@@ -15,7 +15,11 @@ import {
   RETENTION,
 } from "@quizmaster/shared/documents";
 import type { ClientSession, Collection, Filter } from "mongodb";
+import { HOT_PATH_TIMEOUT_MS } from "../client.ts";
 import { isDuplicateKeyError } from "../errors.ts";
+
+/** Hot Path (Realtime): jede Operation mit CSOT-Frist, damit sie den Pool nie bis zum Socket-Timeout belegt. */
+const HOT_PATH = { timeoutMS: HOT_PATH_TIMEOUT_MS } as const;
 
 export type LobbyInsertResult = { ok: true } | { ok: false; reason: "code_taken" };
 export type LobbySaveResult = "saved" | "stale" | "code_taken";
@@ -40,17 +44,19 @@ function snapshotFilter(doc: LobbyDoc): Filter<LobbyDoc> {
  * kein Upsert (dessen E11000 bei neuerem Stand würde die Transaktion abbrechen), sondern Ersetzen des
  * passenden Dokuments bzw. Anlegen, wenn es noch keins gibt. `stale`: in der DB steht ein neuerer oder
  * geschlossener Stand, es wurde nichts geschrieben. Fehler (auch E11000 beim Anlegen) werden weitergereicht.
+ * Ohne Session hat jede Teiloperation die Hot-Path-Frist; mit Session gilt die Frist der Transaktion.
  */
 export async function writeLobbySnapshot(
   lobbies: Collection<LobbyDoc>,
   doc: LobbyDoc,
   session?: ClientSession,
 ): Promise<"saved" | "stale"> {
-  const replaced = await lobbies.replaceOne(snapshotFilter(doc), doc, { session });
+  const options = session === undefined ? HOT_PATH : { session };
+  const replaced = await lobbies.replaceOne(snapshotFilter(doc), doc, options);
   if (replaced.matchedCount === 1) return "saved";
-  const existing = await lobbies.findOne({ _id: doc._id }, { projection: { _id: 1 }, session });
+  const existing = await lobbies.findOne({ _id: doc._id }, { ...options, projection: { _id: 1 } });
   if (existing !== null) return "stale";
-  await lobbies.insertOne(doc, { session });
+  await lobbies.insertOne(doc, options);
   return "saved";
 }
 
@@ -81,7 +87,7 @@ export function createLobbiesRepo(lobbies: Collection<LobbyDoc>): LobbiesRepo {
   return {
     async insert(lobby) {
       try {
-        await lobbies.insertOne(lobbyDocSchema.parse(lobby));
+        await lobbies.insertOne(lobbyDocSchema.parse(lobby), HOT_PATH);
         return { ok: true };
       } catch (error) {
         if (isDuplicateKeyError(error, "code")) return { ok: false, reason: "code_taken" };
@@ -104,13 +110,13 @@ export function createLobbiesRepo(lobbies: Collection<LobbyDoc>): LobbiesRepo {
     },
 
     async findActiveByCode(code) {
-      return lobbies.findOne({ code: lobbyCodeSchema.parse(code), active: true });
+      return lobbies.findOne({ code: lobbyCodeSchema.parse(code), active: true }, HOT_PATH);
     },
 
     async isCodeTaken(code) {
       const found = await lobbies.findOne(
         { code: lobbyCodeSchema.parse(code), active: true },
-        { projection: { _id: 1 } },
+        { ...HOT_PATH, projection: { _id: 1 } },
       );
       return found !== null;
     },
@@ -134,6 +140,7 @@ export function createLobbiesRepo(lobbies: Collection<LobbyDoc>): LobbiesRepo {
           $set: { active: false, updatedAt: endedAt, expiresAt: endedLobbyExpiresAt(endedAt) },
           $inc: { rev: 1 },
         },
+        HOT_PATH,
       );
       return result.matchedCount === 1;
     },

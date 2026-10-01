@@ -114,3 +114,22 @@ describe("Snapshots", () => {
     expect(actor.state.rev).toBe(rev);
   });
 });
+
+describe("Shutdown-Bilanz", () => {
+  it("nicht geschriebene Snapshots werden gemeldet statt pauschal „gesichert“", async () => {
+    const own = await startGameServer();
+    try {
+      const host = await connectGuest(own);
+      const code = await createLobbyVia(host, "Mia");
+      const runtime = runtimeOf(own);
+      const save = vi.spyOn(own.db.repos.lobbies, "save").mockRejectedValue(new Error("Datenbank weg"));
+      const report = await runtime.lobbies.shutdown();
+      expect(report).toEqual({ lobbies: 1, snapshotsFailed: [code], unfinishedGames: [] });
+      expect(save).toHaveBeenCalled();
+      save.mockRestore();
+      host.close();
+    } finally {
+      await own.cleanup();
+    }
+  });
+});

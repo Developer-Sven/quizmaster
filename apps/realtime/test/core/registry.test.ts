@@ -424,6 +424,97 @@ describe("Event-Pipeline", () => {
     expectError(await join(other), "LOBBY_NOT_FOUND");
   });
 
+  it("Fehlversuche werden VOR dem Ack verbucht – auch bei langsamem Store greift die Sperre sofort", async () => {
+    const inner = createRateLimitService({ mode: "normal" });
+    let booked = 0;
+    // Langsamer (Mongo-)Store: das Verbuchen eines Fehlversuchs dauert 40 ms.
+    const rateLimit: RateLimitService = {
+      ...inner,
+      async consume(rule, key, points) {
+        const decision = await inner.consume(rule, key, points);
+        if (rule.consume === "failure") {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          booked += 1;
+        }
+        return decision;
+      },
+    };
+    const { registry, attach } = createTestRegistry({ rateLimit });
+    const handler = vi.fn<EventHandler<"lobby:join">>(() => {
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    registry.register("lobby:join", handler);
+    const sockets = [0, 1, 2].map(() => attach(createFakeSocket({ ipKey: "ip-fast-guesser" })));
+    const join = (fake: FakeSocket) => fake.call("lobby:join", { code: "ABC234", name: "Mia" });
+
+    expectError(await join(sockets[0] as FakeSocket), "LOBBY_NOT_FOUND");
+    expect(booked).toBe(1);
+
+    for (let i = 1; i < 21; i++) expectError(await join(sockets[Math.floor(i / 10)] as FakeSocket), "LOBBY_NOT_FOUND");
+    expect(booked).toBe(21);
+    expect(handler).toHaveBeenCalledTimes(21);
+    // Direkt nach dem Ack des 21. Fehlversuchs: gesperrt, mit (fast) voller Sperrdauer.
+    const blocked = await join(sockets[2] as FakeSocket);
+    expectError(blocked, "RATE_LIMITED");
+    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    expect(handler).toHaveBeenCalledTimes(21);
+  });
+
+  it("ein Fehler beim Verbuchen ändert das Ack nicht (fachlicher Code statt INTERNAL)", async () => {
+    const inner = createRateLimitService({ mode: "normal" });
+    const rateLimit: RateLimitService = {
+      ...inner,
+      async consume(rule, key, points) {
+        if (rule.consume === "failure") throw new Error("Store kaputt");
+        return inner.consume(rule, key, points);
+      },
+    };
+    const { registry, attach } = createTestRegistry({ rateLimit });
+    registry.register("lobby:join", () => {
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    expectError(await attach().call("lobby:join", { code: "ABC234", name: "Mia" }), "LOBBY_NOT_FOUND");
+  });
+
+  it("ein fachlicher Fehler NACH einem Erfolgs-Ack zählt nicht als Fehlversuch", async () => {
+    const { registry, attach } = createTestRegistry();
+    const handler = vi.fn<EventHandler<"lobby:join">>((_payload, ctx) => {
+      ctx.ack({ code: "ABC234" });
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    registry.register("lobby:join", handler);
+    const sockets = [0, 1, 2].map(() => attach(createFakeSocket({ ipKey: "ip-after-ack" })));
+    const join = (index: number) =>
+      (sockets[Math.floor(index / 10)] as FakeSocket).call("lobby:join", { code: "ABC234", name: "Mia" });
+    for (let i = 0; i < 21; i++) expect((await join(i)).ok).toBe(true);
+    // Etwaige Verbuchungen nach dem Ack abwarten – danach darf trotzdem keine Sperre bestehen.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect((await join(21)).ok).toBe(true);
+    expect(handler).toHaveBeenCalledTimes(22);
+  });
+
+  it("lobby:resume hat eine eigene Fehlversuchs-Regel je IP (Code-Raten über resume)", async () => {
+    const { registry, attach } = createTestRegistry();
+    const handler = vi.fn<EventHandler<"lobby:resume">>(() => {
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    registry.register("lobby:resume", handler);
+    const sockets = [0, 1, 2].map(() => attach(createFakeSocket({ ipKey: "ip-resumer" })));
+    for (let i = 0; i < 21; i++) {
+      expectError(
+        await (sockets[Math.floor(i / 10)] as FakeSocket).call("lobby:resume", { code: "ABC234" }),
+        "LOBBY_NOT_FOUND",
+      );
+    }
+    const blocked = await (sockets[2] as FakeSocket).call("lobby:resume", { code: "ABC234" });
+    expectError(blocked, "RATE_LIMITED");
+    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    expect(handler).toHaveBeenCalledTimes(21);
+    // lobby:join zählt getrennt (eigene Regel).
+    registry.register("lobby:join", () => ({ code: "ABC234" }));
+    expect((await (sockets[2] as FakeSocket).call("lobby:join", { code: "ABC234", name: "Mia" })).ok).toBe(true);
+  });
+
   it("isFailedAttempt: fachliche Ablehnungen zählen, Server-Zustände nicht", () => {
     for (const code of ["LOBBY_NOT_FOUND", "LOBBY_FULL", "GAME_IN_PROGRESS", "KICKED", "NAME_REJECTED"] as const) {
       expect(isFailedAttempt(code)).toBe(true);

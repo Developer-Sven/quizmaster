@@ -86,6 +86,7 @@ const EXPECTED: Record<string, Expected> = {
   "event.lobby-create.ip.hour": ["lobby:create", "ip", 30, 3_600, 0, "mongo", ACK],
   "event.lobby-join.failed.ip": ["lobby:join", "ip", 20, 300, 900, "mongo", ACK],
   "event.lobby-join.socket": ["lobby:join", "socket", 10, 60, 0, "memory", ACK],
+  "event.lobby-resume.failed.ip": ["lobby:resume", "ip", 20, 300, 900, "mongo", ACK],
   "event.lobby-resume.socket": ["lobby:resume", "socket", 10, 60, 0, "memory", ACK],
   "event.lobby-leave.socket": ["lobby:leave", "socket", 10, 60, 0, "memory", ACK],
   "event.lobby-update-settings.socket": ["lobby:update-settings", "socket", 10, 10, 0, "memory", ACK],
@@ -142,10 +143,12 @@ describe("Werte (docs/06 §Rate-Limits & Kontingente)", () => {
     }
   });
 
-  it("zählt bei lobby:join nur Fehlversuche; die Antwort-Idempotenz setzt die Engine durch", () => {
-    const failed = RATE_LIMITS.find((entry) => entry.id === "event.lobby-join.failed.ip");
-    expect(failed?.consume).toBe("failure");
-    expect(RATE_LIMITS.filter((entry) => entry.consume === "failure")).toHaveLength(1);
+  it("zählt bei lobby:join und lobby:resume je IP nur Fehlversuche; die Antwort-Idempotenz setzt die Engine durch", () => {
+    const failureRules = RATE_LIMITS.filter((entry) => entry.consume === "failure");
+    expect(failureRules.map((entry) => [entry.id, entry.target, entry.scope])).toEqual([
+      ["event.lobby-join.failed.ip", "lobby:join", "ip"],
+      ["event.lobby-resume.failed.ip", "lobby:resume", "ip"],
+    ]);
     expect(RATE_LIMITS.filter((entry) => entry.kind === "once").map((entry) => entry.id)).toEqual([
       "event.game-answer.once",
     ]);

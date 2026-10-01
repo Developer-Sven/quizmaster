@@ -1,6 +1,7 @@
 /**
  * HTTP-Endpunkte des Realtime-Servers neben Socket.IO (docs/06 §Rate-Limits, docs/12 §Monitoring):
- * - `GET /healthz` → `{ ok: true }` (im Shutdown 503 `{ ok: false }`), 60/min je IP, `Cache-Control: no-store`.
+ * - `GET /healthz` → `{ ok: true }` (im Shutdown oder bei einer fehlschlagenden Prüfung aus `services.health`
+ *   503 `{ ok: false }`, ohne Details), 60/min je IP, `Cache-Control: no-store`.
  * - `GET /metrics` → Prometheus-Text; 30/min je IP, dann `Authorization: Bearer <METRICS_TOKEN>`
  *   (konstantzeitiger Vergleich) → sonst 401. Öffentlich nicht geroutet (Caddy: `/metrics` → 404).
  * - alles andere → 404. `/socket.io/*` fängt Socket.IO vorher ab.
@@ -19,7 +20,7 @@ import { ipKey as hashIp, resolveClientIp } from "@quizmaster/shared/ip";
 import type { RealtimeEnv } from "./env.ts";
 import type { Logger, SecurityLog } from "./logger.ts";
 import type { RealtimeMetrics } from "./metrics.ts";
-import type { Lifecycle } from "./registry/types.ts";
+import type { HealthService, Lifecycle } from "./registry/types.ts";
 import { UNKNOWN_IP_KEY } from "./services/connections.ts";
 import type { RateLimitService } from "./services/rate-limit.ts";
 
@@ -30,6 +31,7 @@ export interface HttpHandlerDeps {
   security: SecurityLog;
   rateLimit: RateLimitService;
   lifecycle: Lifecycle;
+  health: Pick<HealthService, "failing">;
 }
 
 const BASE_HEADERS = {
@@ -99,9 +101,9 @@ export function createHttpHandler(deps: HttpHandlerDeps): (req: IncomingMessage,
     }
     if (path === "/healthz") {
       if (!(await withinLimit(req, res, healthRule))) return;
-      const shuttingDown = deps.lifecycle.isShuttingDown();
-      const body: HealthResponse = { ok: !shuttingDown };
-      sendJson(res, shuttingDown ? 503 : 200, body);
+      const healthy = !deps.lifecycle.isShuttingDown() && deps.health.failing().length === 0;
+      const body: HealthResponse = { ok: healthy };
+      sendJson(res, healthy ? 200 : 503, body);
       return;
     }
     if (!(await withinLimit(req, res, metricsRule))) return;

@@ -7,7 +7,7 @@ import { guestIdSchema } from "@quizmaster/shared";
 import { type GuestDoc, RECENT_QUESTION_IDS_MAX, RETENTION } from "@quizmaster/shared/documents";
 import type { ClientSession, Collection, UpdateFilter } from "mongodb";
 import { z } from "zod";
-import { USER_READ_MAX_TIME_MS } from "../client.ts";
+import { HOT_PATH_TIMEOUT_MS, USER_READ_MAX_TIME_MS } from "../client.ts";
 import { questionIdListSchema } from "./ids.ts";
 
 /** Gast ohne die (große) Liste gesehener Fragen. */
@@ -76,7 +76,7 @@ export function createGuestsRepo(guests: Collection<GuestDoc>): GuestsRepo {
         stats: { games: 0, wins: 0, draws: 0, answers: 0, correct: 0 },
         recentQuestionIds: [],
       };
-      await guests.insertOne(doc);
+      await guests.insertOne(doc, { timeoutMS: HOT_PATH_TIMEOUT_MS });
       return doc;
     },
 
@@ -90,7 +90,11 @@ export function createGuestsRepo(guests: Collection<GuestDoc>): GuestsRepo {
     async touch(guestId, now, lastName) {
       const set: Partial<GuestDoc> = { lastSeenAt: now, expiresAt: guestExpiresAt(now) };
       if (lastName !== undefined) set.lastName = nameSchema.parse(lastName);
-      const result = await guests.updateOne({ _id: guestIdSchema.parse(guestId) }, { $set: set });
+      const result = await guests.updateOne(
+        { _id: guestIdSchema.parse(guestId) },
+        { $set: set },
+        { timeoutMS: HOT_PATH_TIMEOUT_MS },
+      );
       return result.matchedCount === 1;
     },
 

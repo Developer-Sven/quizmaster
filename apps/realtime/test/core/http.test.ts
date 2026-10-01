@@ -38,6 +38,28 @@ describe("GET /healthz", () => {
     expect(body.error.retryAfterMs).toBeGreaterThan(0);
     expect((await server.request("/healthz", { ip: server.nextIp() })).status).toBe(200);
   });
+
+  it("eine fehlschlagende Health-Prüfung (z. B. Katalog in Produktion) → 503 { ok: false } ohne Details", async () => {
+    let healthy = true;
+    let throws = false;
+    server.app.services.health.register("probe", () => {
+      if (throws) throw new Error("kaputt");
+      return healthy;
+    });
+    expect(() => server.app.services.health.register("probe", () => true)).toThrow(/bereits registriert/);
+    expect((await server.request("/healthz", { ip: server.nextIp() })).status).toBe(200);
+    healthy = false;
+    const failing = await server.request("/healthz", { ip: server.nextIp() });
+    expect(failing.status).toBe(503);
+    expect(await failing.json()).toEqual({ ok: false });
+    expect(server.app.services.health.failing()).toEqual(["probe"]);
+    // Eine werfende Prüfung gilt als Störung (fail closed).
+    healthy = true;
+    throws = true;
+    expect((await server.request("/healthz", { ip: server.nextIp() })).status).toBe(503);
+    throws = false;
+    expect((await server.request("/healthz", { ip: server.nextIp() })).status).toBe(200);
+  });
 });
 
 describe("GET /metrics", () => {
@@ -82,6 +104,11 @@ describe("GET /metrics", () => {
       'qm_mongo_errors_total{operation="test_operation"} 1',
       'qm_change_stream_restarts_total{stream="bans",reason="resume_failed"} 1',
       "qm_overloaded",
+      "qm_games_aborted_total",
+      "qm_games_lost_total",
+      "qm_catalog_questions",
+      "qm_catalog_usable_categories",
+      "qm_catalog_usable",
     ]) {
       expect(text, name).toContain(name);
     }

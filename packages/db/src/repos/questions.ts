@@ -1,6 +1,7 @@
 /**
  * questions (docs/04 §Fragenauswahl): Pool laden mit schmaler Projektion (Index
- * `status + category + difficulty`), Voll-Dokumente der gezogenen Fragen per `$in`, inkrementeller
+ * `status + category + difficulty`, CSOT-Frist `POOL_LOAD_TIMEOUT_MS`), Voll-Dokumente der gezogenen Fragen per
+ * `$in` (Hot Path, `HOT_PATH_TIMEOUT_MS`), inkrementeller
  * Reload über `updatedAt`, Statistik per `bulkWrite` (`ordered: false`) und die Schutzautomatik
  * (docs/08 §5: sofort `retired` + `autoRetired`).
  */
@@ -8,6 +9,7 @@ import type { QuestionDbStatus } from "@quizmaster/shared/content";
 import type { QuestionDoc } from "@quizmaster/shared/documents";
 import type { AnyBulkWriteOperation, ClientSession, Collection } from "mongodb";
 import { z } from "zod";
+import { HOT_PATH_TIMEOUT_MS, POOL_LOAD_TIMEOUT_MS } from "../client.ts";
 import { chunk, questionIdSchema, uniqueIds } from "./ids.ts";
 
 export type QuestionPool = "all" | "approved";
@@ -104,7 +106,10 @@ export function createQuestionsRepo(questions: Collection<QuestionDoc>): Questio
   return {
     async loadPool(pool) {
       return questions
-        .find<PoolEntry>({ status: { $in: playableStatuses(pool) } }, { projection: POOL_PROJECTION })
+        .find<PoolEntry>(
+          { status: { $in: playableStatuses(pool) } },
+          { projection: POOL_PROJECTION, timeoutMS: POOL_LOAD_TIMEOUT_MS },
+        )
         .toArray();
     },
 
@@ -113,7 +118,9 @@ export function createQuestionsRepo(questions: Collection<QuestionDoc>): Questio
       const found: PlayQuestion[] = [];
       for (const part of chunk(ids, QUESTION_BATCH_SIZE)) {
         found.push(
-          ...(await questions.find<PlayQuestion>({ _id: { $in: part } }, { projection: PLAY_PROJECTION }).toArray()),
+          ...(await questions
+            .find<PlayQuestion>({ _id: { $in: part } }, { projection: PLAY_PROJECTION, timeoutMS: HOT_PATH_TIMEOUT_MS })
+            .toArray()),
         );
       }
       return found;

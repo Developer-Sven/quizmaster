@@ -3,10 +3,12 @@
  * §Kontingente, docs/05 §Lobby-Codes).
  *
  * Erstellen (`create`):
- * 1. Kontingente: höchstens EINE aktive gehostete Lobby je Gast (erstellt und noch Mitglied; auch parallele
- *    Erstellungen zählen) → `RATE_LIMITED` (Festlegung `QUOTAS.maxActiveHostedLobbiesPerGuest` in shared);
- *    Zulassung (`admission.lobbyCreation`: Shutdown, `lobbyCreationEnabled` → LOBBY_CREATION_DISABLED,
- *    Lastabwurf, `maxActiveLobbies` → SERVER_BUSY).
+ * 1. Kontingente: nur OHNE aktive Lobby-Mitgliedschaft (docs/05 `lobby:create` „Erlaubt“; schließt „höchstens
+ *    EINE aktive gehostete Lobby je Gast“ ein, auch parallele Erstellungen zählen) → `RATE_LIMITED` (Festlegung
+ *    `QUOTAS.maxActiveHostedLobbiesPerGuest` in shared). Mitglied heißt: nicht verlassen/entfernt in einer offenen
+ *    Lobby – auch getrennt innerhalb der Reconnect-Frist. So bleibt die Zuordnung „einzige Lobby des Gasts“
+ *    (`lobbyOfSocket`) eindeutig. Zulassung (`admission.lobbyCreation`: Shutdown, `lobbyCreationEnabled` →
+ *    LOBBY_CREATION_DISABLED, Lastabwurf, `maxActiveLobbies` → SERVER_BUSY).
  * 2. Code: `generateLobbyCode(crypto.randomInt, isTaken, { isAcceptable: isCodeAcceptable })` – belegt, wenn ein
  *    Actor im Speicher ODER eine aktive Lobby in der Datenbank ihn hat; nach 5 Versuchen → SERVER_BUSY.
  * 3. `createLobby` (Engine) → `lobbies.insert` (partieller Unique-Index auf aktive Codes; Kollision → neuer
@@ -16,8 +18,10 @@
  * alte (dort DISCONNECT, falls es der letzte Socket der Person war). Beim Trennen meldet der Kern
  * `socketDisconnected` → der Actor sendet DISCONNECT, sobald die Person dort keinen Socket mehr hat.
  *
- * Die Metrik `qm_lobbies_active` folgt jeder Änderung. `shutdown` friert alle Actors ein und schreibt ihre
- * Snapshots; `adopt` nimmt einen wiederhergestellten Zustand auf (Wiederaufnahme nach Neustart, W4).
+ * Die Metrik `qm_lobbies_active` folgt jeder Änderung. `shutdown` friert alle Actors ein, schreibt ihre
+ * Snapshots, wartet befristet auf laufende Spielabschlüsse (Abschluss-Warteschlange, `game-finish.ts`) und
+ * meldet ehrlich, was nicht gesichert ist (Fehlerlog + Bericht statt pauschal „gesichert“); `adopt` nimmt einen
+ * wiederhergestellten Zustand auf (Wiederaufnahme nach Neustart, W4).
  */
 import { randomInt } from "node:crypto";
 import type { Repositories } from "@quizmaster/db";
@@ -29,7 +33,14 @@ import type { RealtimeMetrics } from "../metrics.ts";
 import type { AdmissionService, AppServer, AppSocket, Clock } from "../registry/types.ts";
 import { withTimeout } from "../registry/util.ts";
 import type { QuestionService } from "../services/questions.ts";
-import { createLobbyActor, type LobbyActor, type LobbyActorHooks, memberGuestIds } from "./lobby-actor.ts";
+import { createFinishQueue } from "./game-finish.ts";
+import {
+  createLobbyActor,
+  type LobbyActor,
+  type LobbyActorHooks,
+  memberGuestIds,
+  type SnapshotResult,
+} from "./lobby-actor.ts";
 
 /** Frist für Datenbank-Aufrufe beim Erstellen (Code-Prüfung, Einfügen). */
 export const LOBBY_DB_TIMEOUT_MS = 5_000;
@@ -46,6 +57,20 @@ export interface CreateLobbyRequest {
   name: string;
   /** Nach dem Anlegen, vor dem ersten Zustand – hier sendet der Handler sein Ack. */
   onCreated(code: string): void;
+}
+
+/** Bilanz von `LobbyRegistry.shutdown()`. */
+export interface LobbyShutdownReport {
+  lobbies: number;
+  /** Lobby-Codes, deren Abschluss-Snapshot nicht geschrieben wurde (Fehler, Code vergeben). */
+  snapshotsFailed: string[];
+  /** Spiel-IDs, deren Abschluss beim Shutdown nicht gespeichert ist (verloren oder noch unterwegs). */
+  unfinishedGames: string[];
+}
+
+/** Gesichert = geschrieben oder in der Datenbank steht bereits ein neuerer/geschlossener Stand. */
+function snapshotSecured(result: SnapshotResult): boolean {
+  return result === "saved" || result === "stale";
 }
 
 export interface LobbyRegistry {
@@ -67,8 +92,8 @@ export interface LobbyRegistry {
   adopt(state: LobbyState): Promise<LobbyActor>;
   /** Vom Kern beim Trennen eines Sockets (DISCONNECT, falls es sein letzter in der Lobby war). */
   socketDisconnected(socket: AppSocket): void;
-  /** Alle Lobbys einfrieren, Snapshots schreiben, laufende Spielabschlüsse (befristet) abwarten. */
-  shutdown(): Promise<void>;
+  /** Alle Lobbys einfrieren, Snapshots schreiben, laufende Spielabschlüsse (befristet) abwarten; mit Bilanz. */
+  shutdown(): Promise<LobbyShutdownReport>;
 }
 
 export interface LobbyRegistryDeps {
@@ -85,6 +110,8 @@ export interface LobbyRegistryDeps {
   randomInt?: (maxExclusive: number) => number;
   dbTimeoutMs?: number;
   snapshotDebounceMs?: number;
+  /** Abstand der Hintergrund-Wiederholungen fehlgeschlagener Spielabschlüsse (Standard 30 s). */
+  finishRetryIntervalMs?: number;
 }
 
 export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
@@ -97,6 +124,13 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
   const dbTimeoutMs = deps.dbTimeoutMs ?? LOBBY_DB_TIMEOUT_MS;
   const drawInt = deps.randomInt ?? ((maxExclusive: number) => randomInt(maxExclusive));
   const log = deps.logger.child({ component: "lobbies" });
+  const finishes = createFinishQueue({
+    repos: deps.repos,
+    logger: deps.logger.child({ component: "game-finish" }),
+    metrics: deps.metrics,
+    now: () => deps.clock.now(),
+    ...(deps.finishRetryIntervalMs === undefined ? {} : { retryIntervalMs: deps.finishRetryIntervalMs }),
+  });
   let shuttingDown = false;
 
   const updateMetric = () => deps.metrics.setActiveLobbies(actors.size);
@@ -164,6 +198,7 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
         metrics: deps.metrics,
         questions: deps.questions,
         repos: deps.repos,
+        finishes,
         hooks,
         ...(deps.snapshotDebounceMs === undefined ? {} : { snapshotDebounceMs: deps.snapshotDebounceMs }),
       },
@@ -200,6 +235,9 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
       if (shuttingDown) throw new ProtocolError("SERVER_BUSY", "Server startet neu");
       if (creating.has(guestId) || hostsActiveLobby(guestId)) {
         throw new ProtocolError("RATE_LIMITED", "Höchstens eine aktive gehostete Lobby je Gast");
+      }
+      if (indexedMemberships(guestId).length > 0) {
+        throw new ProtocolError("RATE_LIMITED", "Bereits Mitglied einer aktiven Lobby");
       }
       const admission = deps.admission.lobbyCreation(actors.size + creating.size);
       if (admission !== null) throw new ProtocolError(admission, "Keine neuen Lobbys möglich");
@@ -278,15 +316,29 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
     async shutdown() {
       shuttingDown = true;
       const all = [...actors.values()];
-      await Promise.all(all.map((actor) => actor.shutdown()));
-      const finishing = Promise.all(all.map((actor) => actor.pendingFinish()));
-      await Promise.race([
-        finishing,
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, SHUTDOWN_FINISH_WAIT_MS).unref();
-        }),
-      ]);
-      log.info({ lobbies: all.length }, "Lobbys gesichert");
+      const snapshots = await Promise.all(all.map((actor) => actor.shutdown()));
+      const snapshotsFailed = all.filter((_actor, index) => !snapshotSecured(snapshots[index] ?? null));
+      // Laufende Abschlüsse (auch geschlossener Lobbys) befristet abwarten; vorgemerkte gelten als verloren.
+      const unfinishedGames = await finishes.shutdown(SHUTDOWN_FINISH_WAIT_MS);
+      const report: LobbyShutdownReport = {
+        lobbies: all.length,
+        snapshotsFailed: snapshotsFailed.map((actor) => actor.code),
+        unfinishedGames,
+      };
+      if (report.snapshotsFailed.length > 0 || unfinishedGames.length > 0) {
+        log.error(
+          {
+            lobbies: report.lobbies,
+            snapshotsFailed: report.snapshotsFailed.length,
+            failedLobbies: report.snapshotsFailed,
+            unfinishedGames,
+          },
+          "Lobbys nur teilweise gesichert – Snapshots bzw. Spielabschlüsse fehlen",
+        );
+      } else {
+        log.info({ lobbies: report.lobbies }, "Lobbys gesichert");
+      }
+      return report;
     },
   };
 }

@@ -8,13 +8,19 @@
  *   Fragen werden beim Laden verworfen und nachgezogen; ohne drei Kategorien kein Angebot.
  */
 import { randomInt } from "node:crypto";
+import { Writable } from "node:stream";
 import type { Repositories } from "@quizmaster/db";
-import { createSeededRng, type TurnRef } from "@quizmaster/game-engine";
+import { createSeededRng, SHELL_REQUEST_TIMEOUT_MS, type TurnRef } from "@quizmaster/game-engine";
 import { defaultAppConfig, type QuestionDoc } from "@quizmaster/shared/documents";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { createSilentLogger } from "../../src/logger.ts";
+import { createLogger, createSilentLogger } from "../../src/logger.ts";
 import { createMetrics } from "../../src/metrics.ts";
-import { createQuestionService, type QuestionServiceDeps } from "../../src/services/questions.ts";
+import {
+  createQuestionService,
+  LOAD_QUESTIONS_BUDGET_MS,
+  QUESTION_FETCH_ATTEMPTS,
+  type QuestionServiceDeps,
+} from "../../src/services/questions.ts";
 import { eventually, metricValue, type TestServer } from "../helpers/index.ts";
 import {
   actorOf,
@@ -30,6 +36,20 @@ import {
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+/** Logger, der die JSON-Zeilen mitschreibt (Stufe 50 = error, 30 = info). */
+function captureLogger() {
+  const lines: Array<Record<string, unknown>> = [];
+  const destination = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      for (const line of chunk.toString("utf8").split("\n")) {
+        if (line.trim() !== "") lines.push(JSON.parse(line) as Record<string, unknown>);
+      }
+      callback();
+    },
+  });
+  return { logger: createLogger({ level: "debug", destination }), lines };
+}
 
 function newQuestionId(prefix: string): string {
   let id = `${prefix}-`;
@@ -113,9 +133,12 @@ describe("Change Streams (Test-DB)", () => {
     await categories.updateMany({ _id: { $nin: keep } }, { $set: { playable: false } });
     await eventually(() => service.playableCategories().length === 2);
     try {
-      const host = await connectGuest(server);
+      const aborted = await metricValue(server.app.services.metrics, "qm_games_aborted_total", {
+        reason: "load_failed",
+      });
+      const host = await connectGuest(server, { guestDoc: true });
       const code = await createLobby(host, "Mia");
-      const guest = await connectGuest(server);
+      const guest = await connectGuest(server, { guestDoc: true });
       await joinLobby(guest, code, "Ben");
       const over = waitForPhase(host, "game_over", 20_000);
       const started = Date.now();
@@ -127,6 +150,15 @@ describe("Change Streams (Test-DB)", () => {
       expect(final.results?.outcome).toBe("draw");
       expect(actorOf(server, code).state.game?.endReason).toBe("load_failed");
       await waitForGameDoc(server, actorOf(server, code).lobbyId);
+      // Technischer Abbruch: zählt nicht als Spiel/Unentschieden in der Gast-Statistik, aber in der Metrik.
+      expect(await metricValue(server.app.services.metrics, "qm_games_aborted_total", { reason: "load_failed" })).toBe(
+        aborted + 1,
+      );
+      // games-Dokument und Gast-Statistik entstehen in derselben Transaktion.
+      for (const client of [host, guest]) {
+        const profile = await server.db.repos.guests.findProfile(client.guestId);
+        expect(profile?.stats).toEqual({ games: 0, wins: 0, draws: 0, answers: 0, correct: 0 });
+      }
       host.close();
       guest.close();
     } finally {
@@ -135,13 +167,15 @@ describe("Change Streams (Test-DB)", () => {
     }
   });
 
-  it("invalidierter Stream (Collection gelöscht) → Vollreload + Neustart-Metrik", async () => {
+  it("invalidierter Stream (Collection gelöscht) → Vollreload + Neustart-Metrik; leerer Stand ersetzt den Pool nicht", async () => {
     const runtime = runtimeOf(server);
-    const reloads = runtime.questions.stats().reloads;
-    expect(runtime.questions.stats().questions).toBeGreaterThan(0);
+    const { reloads, questions } = runtime.questions.stats();
+    expect(questions).toBeGreaterThan(0);
     await server.db.collections.questions.drop();
     await eventually(() => runtime.questions.stats().reloads > reloads, 20_000);
-    expect(runtime.questions.stats().questions).toBe(0);
+    // Der unbrauchbare (leere) Stand wird abgelehnt und geloggt; gelöschte Fragen fallen beim Laden heraus.
+    expect(runtime.questions.stats().rejectedReloads).toBeGreaterThanOrEqual(1);
+    expect(runtime.questions.stats().questions).toBe(questions);
     expect(
       await metricValue(server.app.services.metrics, "qm_change_stream_restarts_total", {
         stream: "questions",
@@ -185,20 +219,37 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     };
   }
 
-  function setup(options: { pool: () => Promise<PoolRow[]>; docs?: Map<string, PlayDoc>; categories?: string[] }) {
-    const categoryIds = options.categories ?? ["comics", "im-labor", "kinofilme", "tv-serien"];
+  interface SetupOptions {
+    pool: () => Promise<PoolRow[]>;
+    docs?: Map<string, PlayDoc>;
+    categories?: string[] | (() => string[]);
+    /** Ersetzt das Laden der Volldokumente (Standard: aus `docs`). */
+    findForPlay?: (ids: readonly string[], fromDocs: () => PlayDoc[]) => Promise<PlayDoc[]>;
+    metrics?: ReturnType<typeof createMetrics>;
+    logger?: QuestionServiceDeps["logger"];
+    fetchTimeoutMs?: number;
+    requireUsableCatalog?: boolean;
+  }
+
+  function setup(options: SetupOptions) {
+    const categoryIds = () =>
+      typeof options.categories === "function"
+        ? options.categories()
+        : (options.categories ?? ["comics", "im-labor", "kinofilme", "tv-serien"]);
+    const fromDocs = (ids: readonly string[]) =>
+      ids.flatMap((id) => {
+        const doc = options.docs?.get(id);
+        return doc === undefined ? [] : [doc];
+      });
     const repos = {
       questions: {
         loadPool: () => options.pool(),
         findForPlay: async (ids: readonly string[]) =>
-          ids.flatMap((id) => {
-            const doc = options.docs?.get(id);
-            return doc === undefined ? [] : [doc];
-          }),
+          options.findForPlay === undefined ? fromDocs(ids) : options.findForPlay(ids, () => fromDocs(ids)),
       },
       categories: {
         listPlayable: async () =>
-          categoryIds.map((id, index) => ({
+          categoryIds().map((id, index) => ({
             _id: id,
             name: `Kategorie ${id}`,
             icon: "circle",
@@ -215,12 +266,35 @@ describe("Fragen-Service (ohne Change Streams)", () => {
       appConfig: { get: () => defaultAppConfig(new Date()) },
       rng: createSeededRng("fragen-service"),
       clock: { now: () => Date.now() },
-      logger: createSilentLogger(),
-      metrics: createMetrics({ socketCount: () => 0 }),
+      logger: options.logger ?? createSilentLogger(),
+      metrics: options.metrics ?? createMetrics({ socketCount: () => 0 }),
       watch: false,
+      ...(options.fetchTimeoutMs === undefined ? {} : { fetchTimeoutMs: options.fetchTimeoutMs }),
+      ...(options.requireUsableCatalog === undefined ? {} : { requireUsableCatalog: options.requireUsableCatalog }),
     };
     return createQuestionService(deps);
   }
+
+  /** ID-Kürzel der Test-Kategorien (QUESTION_ID_REGEX). */
+  const PREFIX: Record<string, string> = { comics: "co", "im-labor": "il", kinofilme: "kf", "tv-serien": "tv" };
+
+  /** Pool mit `perCategory` Fragen je Kategorie (IDs „<kürzel>-bbbbbbb<n>“). */
+  function poolRows(categories: readonly string[], perCategory = 3): PoolRow[] {
+    return categories.flatMap((category) =>
+      Array.from({ length: perCategory }, (_unused, index) => ({
+        _id: `${PREFIX[category] ?? "zz"}-bbbbbbb${index + 1}`,
+        category,
+        topic: "grundlagen",
+        difficulty: ((index % 5) + 1) as 1 | 2 | 3 | 4 | 5,
+      })),
+    );
+  }
+
+  function docsFor(rows: readonly PoolRow[]): Map<string, PlayDoc> {
+    return new Map(rows.map((row) => [row._id, questionDoc(row._id, row.category, row.difficulty)]));
+  }
+
+  const FOUR = ["comics", "im-labor", "kinofilme", "tv-serien"];
 
   const turn = (questionsPerTurn: number): TurnRef => ({
     gameId: "g1",
@@ -303,5 +377,151 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     const few = setup({ pool: async () => rows, categories: ["comics", "im-labor"] });
     await few.reload("test");
     expect(few.offerCategories(turn(2), new Map())).toBeNull();
+  });
+
+  it("loadQuestions: ein DB-Fehler beim Laden wird einmal wiederholt (Gesamtfrist unter der Engine-Frist)", async () => {
+    expect(LOAD_QUESTIONS_BUDGET_MS).toBeLessThan(SHELL_REQUEST_TIMEOUT_MS);
+    const rows = poolRows(FOUR);
+    const metrics = createMetrics({ socketCount: () => 0 });
+    let calls = 0;
+    const service = setup({
+      pool: async () => rows,
+      docs: docsFor(rows),
+      metrics,
+      findForPlay: async (_ids, fromDocs) => {
+        calls += 1;
+        if (calls === 1) throw new Error("connection pool cleared");
+        return fromDocs();
+      },
+    });
+    await service.reload("test");
+    const loaded = await service.loadQuestions({
+      categoryId: "comics",
+      count: 2,
+      excludeQuestionIds: [],
+      seen: new Map(),
+    });
+    expect(loaded.questions).toHaveLength(2);
+    expect(calls).toBe(2);
+    expect(await metricValue(metrics, "qm_mongo_errors_total", { operation: "question_fetch" })).toBe(1);
+  });
+
+  it("loadQuestions: hängender erster Abruf → Zeitüberschreitung, zweiter Versuch lädt", async () => {
+    const rows = poolRows(FOUR);
+    let calls = 0;
+    const service = setup({
+      pool: async () => rows,
+      docs: docsFor(rows),
+      fetchTimeoutMs: 50,
+      findForPlay: (_ids, fromDocs) => {
+        calls += 1;
+        return calls === 1 ? new Promise<PlayDoc[]>(() => undefined) : Promise.resolve(fromDocs());
+      },
+    });
+    await service.reload("test");
+    const started = Date.now();
+    const loaded = await service.loadQuestions({
+      categoryId: "comics",
+      count: 3,
+      excludeQuestionIds: [],
+      seen: new Map(),
+    });
+    expect(loaded.questions).toHaveLength(3);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("loadQuestions: zwei Fehler in Folge → Fehler (das Spiel endet dann über LOAD_FAILED)", async () => {
+    const rows = poolRows(FOUR);
+    let calls = 0;
+    const service = setup({
+      pool: async () => rows,
+      docs: docsFor(rows),
+      findForPlay: async () => {
+        calls += 1;
+        throw new Error("Datenbank weg");
+      },
+    });
+    await service.reload("test");
+    await expect(
+      service.loadQuestions({ categoryId: "comics", count: 2, excludeQuestionIds: [], seen: new Map() }),
+    ).rejects.toThrow("Datenbank weg");
+    expect(calls).toBe(QUESTION_FETCH_ATTEMPTS);
+  });
+
+  it("Katalog-Zustand: brauchbar erst ab vier Kategorien mit Fragen; Gauges zeigen den Stand", async () => {
+    const metrics = createMetrics({ socketCount: () => 0 });
+    const usable = setup({ pool: async () => poolRows(FOUR), metrics });
+    await usable.start();
+    expect(usable.catalog()).toEqual({ questions: 12, usableCategories: 4, usable: true });
+    expect(await metricValue(metrics, "qm_catalog_questions")).toBe(12);
+    expect(await metricValue(metrics, "qm_catalog_usable_categories")).toBe(4);
+    expect(await metricValue(metrics, "qm_catalog_usable")).toBe(1);
+    await usable.stop();
+    // Drei Kategorien reichen nicht: im zweiten Zug ist die zuletzt gespielte ausgeschlossen.
+    const three = setup({ pool: async () => poolRows(FOUR.slice(0, 3)) });
+    await three.reload("test");
+    expect(three.catalog()).toMatchObject({ usableCategories: 3, usable: false });
+    // Kategorie ohne Fragen im Pool zählt nicht.
+    const empty = setup({ pool: async () => [] });
+    await empty.reload("test");
+    expect(empty.catalog()).toEqual({ questions: 0, usableCategories: 0, usable: false });
+  });
+
+  it("unbrauchbarer Reload ersetzt einen brauchbaren Stand nicht (Fehlerlog), ein brauchbarer schon", async () => {
+    let rows = poolRows(FOUR);
+    const { logger, lines } = captureLogger();
+    const service = setup({ pool: async () => rows, logger });
+    await service.reload("start");
+    expect(service.catalog().usable).toBe(true);
+    rows = [];
+    await service.reload("interval");
+    expect(service.catalog()).toMatchObject({ questions: 12, usable: true });
+    expect(service.stats()).toMatchObject({ reloads: 2, rejectedReloads: 1 });
+    expect(lines.some((line) => line.level === 50 && String(line.msg).includes("unbrauchbar"))).toBe(true);
+    rows = poolRows(FOUR, 2);
+    await service.reload("interval");
+    expect(service.catalog()).toMatchObject({ questions: 8, usable: true });
+    expect(service.stats()).toMatchObject({ reloads: 3, rejectedReloads: 1 });
+  });
+
+  it("Start: unbrauchbarer Katalog wirft nur, wenn er verlangt ist (Produktion); sonst Fehlerlog", async () => {
+    const strict = setup({ pool: async () => [], requireUsableCatalog: true });
+    await expect(strict.start()).rejects.toThrow(/Fragenkatalog unbrauchbar/);
+    const { logger, lines } = captureLogger();
+    const lenient = setup({ pool: async () => [], logger });
+    await lenient.start();
+    expect(lenient.catalog().usable).toBe(false);
+    expect(lines.some((line) => line.level === 50 && String(line.msg).includes("unbrauchbar"))).toBe(true);
+    await lenient.stop();
+  });
+
+  it("Live-Änderungen, die den Katalog unbrauchbar machen, werden als Fehler geloggt (einmal je Wechsel)", async () => {
+    const { logger, lines } = captureLogger();
+    const service = setup({ pool: async () => poolRows(FOUR), logger });
+    await service.reload("start");
+    const errors = () => lines.filter((line) => line.level === 50 && String(line.msg).includes("unbrauchbar")).length;
+    expect(errors()).toBe(0);
+    service.removeCategory("comics");
+    expect(service.catalog().usable).toBe(false);
+    service.removeCategory("im-labor");
+    expect(errors()).toBe(1);
+    service.syncCategory("im-labor", {
+      _id: "im-labor",
+      name: "Im Labor",
+      icon: "circle",
+      color: "#3F9FF3",
+      order: 2,
+      playable: true,
+    });
+    service.syncCategory("comics", {
+      _id: "comics",
+      name: "Comics",
+      icon: "circle",
+      color: "#3F9FF3",
+      order: 1,
+      playable: true,
+    });
+    expect(service.catalog().usable).toBe(true);
+    expect(lines.some((line) => line.level === 30 && String(line.msg).includes("wieder brauchbar"))).toBe(true);
   });
 });

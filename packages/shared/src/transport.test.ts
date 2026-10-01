@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { handshakeAuthSchema, REALTIME_TICKET, realtimeTicketClaimsSchema, SESSION_COOKIE } from "./auth.ts";
-import { sessionRequestSchema, ticketRequestSchema } from "./http.ts";
+import {
+  connectErrorDataSchema,
+  handshakeAuthSchema,
+  hmacKeyFromSecret,
+  REALTIME_TICKET,
+  realtimeTicketClaimsSchema,
+  realtimeTicketVerifyOptions,
+  SESSION_COOKIE,
+} from "./auth.ts";
+import {
+  categoriesResponseSchema,
+  publicCategorySchema,
+  sessionRequestSchema,
+  sessionResponseSchema,
+  ticketRequestSchema,
+} from "./http.ts";
 import { PROTOCOL_VERSION } from "./index.ts";
 import { CLOCK_SYNC, clockOffsetSample, medianOffset, socketClientOptions, socketServerOptions } from "./transport.ts";
 
@@ -61,5 +75,55 @@ describe("Session und Tickets (docs/05, docs/06)", () => {
       expect(schema.safeParse({ turnstileToken: "x".repeat(2_049) }).success).toBe(false);
       expect(schema.safeParse({ guestId: "x" }).success).toBe(false);
     }
+  });
+});
+
+describe("Ticket-Schlüssel und Prüfoptionen (Vertrag Web ↔ Realtime)", () => {
+  it("HMAC-Schlüssel = UTF-8-Bytes des Secret-Strings (kein Base64-Decode)", () => {
+    expect([...hmacKeyFromSecret("aB3=")]).toEqual([0x61, 0x42, 0x33, 0x3d]);
+    expect([...hmacKeyFromSecret("ä€")]).toEqual([0xc3, 0xa4, 0xe2, 0x82, 0xac]);
+    expect(() => hmacKeyFromSecret("")).toThrow();
+  });
+
+  it("Prüfoptionen: nur HS256, aud realtime, iss web, Pflicht-Claims – je Aufruf frisch", () => {
+    const options = realtimeTicketVerifyOptions();
+    expect(options).toEqual({
+      algorithms: ["HS256"],
+      audience: "realtime",
+      issuer: "web",
+      requiredClaims: ["sub", "exp", "jti"],
+    });
+    options.algorithms.push("none");
+    expect(realtimeTicketVerifyOptions().algorithms).toEqual(["HS256"]);
+  });
+});
+
+describe("connect_error-Daten (docs/05 §Verbindung 3)", () => {
+  it("akzeptiert nur { code, retryAfterMs? } mit bekanntem Code und ganzer Wartezeit ≥ 0", () => {
+    expect(connectErrorDataSchema.safeParse({ code: "UNAUTHORIZED" }).success).toBe(true);
+    expect(connectErrorDataSchema.safeParse({ code: "RATE_LIMITED", retryAfterMs: 1_500 }).success).toBe(true);
+    expect(connectErrorDataSchema.safeParse({ code: "RATE_LIMITED", retryAfterMs: -1 }).success).toBe(false);
+    expect(connectErrorDataSchema.safeParse({ code: "RATE_LIMITED", retryAfterMs: 1.5 }).success).toBe(false);
+    expect(connectErrorDataSchema.safeParse({ code: "NOPE" }).success).toBe(false);
+    expect(connectErrorDataSchema.safeParse({ code: "BANNED", message: "x" }).success).toBe(false);
+  });
+});
+
+describe("Antwort-Verträge der Web-API", () => {
+  it("POST /api/session → { created }", () => {
+    expect(sessionResponseSchema.safeParse({ created: true }).success).toBe(true);
+    expect(sessionResponseSchema.safeParse({ created: false }).success).toBe(true);
+    expect(sessionResponseSchema.safeParse({}).success).toBe(false);
+    expect(sessionResponseSchema.safeParse({ created: true, guestId: "x" }).success).toBe(false);
+  });
+
+  it("GET /api/categories → { categories: [{ id, name, icon, color, order }] } ohne private Felder", () => {
+    const category = { id: "rund-um-die-welt", name: "Rund um die Welt", icon: "globe", color: "#1E6FD9", order: 1 };
+    expect(publicCategorySchema.safeParse(category).success).toBe(true);
+    expect(categoriesResponseSchema.safeParse({ categories: [category] }).success).toBe(true);
+    expect(categoriesResponseSchema.safeParse({ categories: [] }).success).toBe(true);
+    expect(publicCategorySchema.safeParse({ ...category, scope: "geheim" }).success).toBe(false);
+    expect(publicCategorySchema.safeParse({ ...category, color: "blue" }).success).toBe(false);
+    expect(publicCategorySchema.safeParse({ ...category, order: 0 }).success).toBe(false);
   });
 });

@@ -4,6 +4,7 @@
  * Die guestId ist GEHEIM – sie steht nur in Cookie/Ticket (`sub`) und in Server-Daten, nie in Payloads.
  */
 import { z } from "zod";
+import { errorCodeSchema } from "./errors.ts";
 
 /** guestId = `crypto.randomUUID()`. */
 export const guestIdSchema = z.uuid();
@@ -30,6 +31,38 @@ export const REALTIME_TICKET = {
 
 /** Obergrenze für Ticket-Strings (JWT) in Payloads. */
 export const TICKET_MAX_LENGTH = 2_048;
+
+/**
+ * HMAC-Schlüssel aus einem Secret-String: die UTF-8-Bytes des Strings (`TextEncoder`), KEIN Base64-Decode.
+ * Schlüssel-Vertrag zwischen Web (signiert Ticket und Session-Cookie) und Realtime (prüft das Ticket mit
+ * `REALTIME_TICKET_SECRET`) – beide Seiten bilden den Schlüssel nur hierüber. Ein leeres Secret wirft
+ * (fail closed; die Env-Prüfung verlangt ohnehin ≥ 32 Zeichen).
+ */
+export function hmacKeyFromSecret(secret: string): Uint8Array<ArrayBuffer> {
+  if (secret.length === 0) throw new Error("HMAC-Secret ist leer");
+  return new TextEncoder().encode(secret);
+}
+
+/** Prüfoptionen für das Realtime-Ticket (Form von jose `JWTVerifyOptions`, ohne Abhängigkeit von jose). */
+export interface RealtimeTicketVerifyOptions {
+  algorithms: string[];
+  audience: string;
+  issuer: string;
+  requiredClaims: string[];
+}
+
+/**
+ * Prüfoptionen des Realtime-Tickets (docs/05 §Verbindung 3): nur `HS256`, `aud = realtime`, `iss = web`,
+ * Pflicht-Claims `sub`, `exp`, `jti`. Fabrik – jeder Aufruf liefert frische, veränderbare Arrays.
+ */
+export function realtimeTicketVerifyOptions(): RealtimeTicketVerifyOptions {
+  return {
+    algorithms: [REALTIME_TICKET.algorithm],
+    audience: REALTIME_TICKET.audience,
+    issuer: REALTIME_TICKET.issuer,
+    requiredClaims: ["sub", "exp", "jti"],
+  };
+}
 
 /** Claims des Session-JWT im Cookie `kd_sid` (zusätzliche Standard-Claims werden ignoriert). */
 export const sessionClaimsSchema = z.object({
@@ -60,3 +93,14 @@ export const handshakeAuthSchema = z.strictObject({
   protocolVersion: z.int().min(0).max(1_000_000),
 });
 export type HandshakeAuth = z.output<typeof handshakeAuthSchema>;
+
+/**
+ * `data` eines abgelehnten Handshakes (`connect_error`, docs/05 §Verbindung 3): `{ code, retryAfterMs? }` –
+ * UNAUTHORIZED, UPDATE_REQUIRED, BANNED, TOO_MANY_CONNECTIONS, SERVER_BUSY, RATE_LIMITED (mit `retryAfterMs`).
+ * Eine Ablehnung ohne `data` (fremde Origin, Flut) ist ein Transportfehler ohne Code.
+ */
+export const connectErrorDataSchema = z.strictObject({
+  code: errorCodeSchema,
+  retryAfterMs: z.int().min(0).optional(),
+});
+export type ConnectErrorData = z.output<typeof connectErrorDataSchema>;

@@ -115,6 +115,17 @@ export interface AdmissionService {
   lobbyCreation(activeLobbies: number): ErrorCode | null;
 }
 
+/**
+ * Zusätzliche Bedingungen für `GET /healthz` (neben „nicht im Shutdown“), z. B. „Fragenkatalog brauchbar“ in
+ * Produktion. Die Antwort bleibt ohne Details (`{ ok }`); die Namen erscheinen nur im Log.
+ */
+export interface HealthService {
+  /** Registriert eine Prüfung; `false` (oder ein Fehler) → `/healthz` antwortet 503 `{ ok: false }`. */
+  register(name: string, check: () => boolean): void;
+  /** Namen der gerade fehlschlagenden Prüfungen (leer = gesund). */
+  failing(): string[];
+}
+
 export interface RealtimeServices {
   appConfig: AppConfigService;
   bans: BansService;
@@ -124,6 +135,7 @@ export interface RealtimeServices {
   admission: AdmissionService;
   lifecycle: Lifecycle;
   security: SecurityLog;
+  health: HealthService;
 }
 
 /** Was ein Modul (Lobby/Spiel, Watcher …) beim Aufbau der App bekommt. */

@@ -11,6 +11,7 @@
  *    Fehlschlag verbrauchen) → `RATE_LIMITED` mit `retryAfterMs` (+ Verstoß, wenn die Regel es verlangt).
  * 7. Handler mit Kontext; Ack genau einmal: Rückgabewert → `{ ok: true, data }` (gegen das Ack-Schema geprüft),
  *    `ProtocolError` → Code, alles andere → `INTERNAL` + Log mit `requestId`; Frist 15 s → `INTERNAL`.
+ *    Zählt der `ProtocolError` als Fehlversuch, wird er VOR dem Ack verbucht (die Sperre greift so sofort).
  * 8. Metriken: Events je Ergebnis, Ack-Latenz, Validierungsfehler, Limit-Treffer.
  */
 import {
@@ -174,6 +175,23 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
 
     const violation = (reason: Parameters<ViolationTracker["record"]>[1]) => deps.violations.record(socket, reason);
 
+    /**
+     * Verbucht einen Fehlversuch in allen `consume: "failure"`-Regeln des Events. Ein Fehler dabei (der Store hat
+     * schon eine Memory-Versicherung) wird geloggt und ändert das fachliche Ack nicht.
+     */
+    const bookFailure = async (rules: readonly RateLimitRule[]) => {
+      await Promise.all(
+        rules.map(async (rule) => {
+          try {
+            const decision = await deps.rateLimit.consume(rule, limitKey(rule, socket));
+            if (!decision.allowed) limitHit(rule);
+          } catch (error) {
+            log.error({ err: error, rule: rule.id }, "Fehlversuch nicht verbucht");
+          }
+        }),
+      );
+    };
+
     const rejectLimited = async (hits: readonly { rule: RateLimitRule; retryAfterMs: number }[]) => {
       for (const hit of hits) limitHit(hit.rule);
       const retryAfterMs = Math.max(...hits.map((hit) => hit.retryAfterMs));
@@ -314,15 +332,13 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
 
       const error = result.error;
       if (isProtocolError(error)) {
-        if (!respond(ackFromError(error))) log.warn({ code: error.code }, "Fachlicher Fehler nach dem Ack – ignoriert");
-        if (registration.failureRules.length > 0 && registration.countsAsFailure(error.code)) {
-          await Promise.all(
-            registration.failureRules.map(async (rule) => {
-              const decision = await deps.rateLimit.consume(rule, limitKey(rule, socket));
-              if (!decision.allowed) limitHit(rule);
-            }),
-          );
+        // Fehlversuch VOR dem Ack verbuchen: Sieht der Client die Ablehnung, steht der Zähler (und ggf. die volle
+        // Sperre) bereits – ein sofort folgender Versuch kann sich nicht mehr am langsamen Store vorbeischieben.
+        // Ging schon ein Erfolgs-Ack hinaus, war der Versuch kein Fehlversuch.
+        if (!acked && registration.failureRules.length > 0 && registration.countsAsFailure(error.code)) {
+          await bookFailure(registration.failureRules);
         }
+        if (!respond(ackFromError(error))) log.warn({ code: error.code }, "Fachlicher Fehler nach dem Ack – ignoriert");
         return;
       }
       log.error({ err: error }, "Unerwarteter Fehler im Handler");

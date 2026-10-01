@@ -13,8 +13,8 @@ import {
   type ClientEventName,
   type ClientEventPayloadInput,
   type ClientToServerEvents,
+  connectErrorDataSchema,
   type ErrorCode,
-  errorCodeSchema,
   findKeysDeep,
   PROTOCOL_VERSION,
   SERVER_EVENTS,
@@ -24,7 +24,7 @@ import {
   SOCKET_PATH,
 } from "@quizmaster/shared";
 import { io, type Socket } from "socket.io-client";
-import { z } from "zod";
+import type { z } from "zod";
 
 export type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -167,8 +167,7 @@ export interface ConnectFailure {
 
 export type ConnectResult = { ok: true; socket: TestSocket } | { ok: false; failure: ConnectFailure };
 
-const connectErrorDataSchema = z.object({ code: errorCodeSchema, retryAfterMs: z.number().optional() });
-
+/** `data` wird gegen den Vertrag aus shared geprüft – jede Abweichung des Servers wird hier zu `code: null`. */
 function toFailure(error: Error & { data?: unknown }): ConnectFailure {
   const data = connectErrorDataSchema.safeParse(error.data);
   return {

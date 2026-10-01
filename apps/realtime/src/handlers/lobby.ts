@@ -3,7 +3,7 @@
  *
  * | Event | Command | Fehlercodes (neben VALIDATION_FAILED/RATE_LIMITED aus der Pipeline) |
  * |---|---|---|
- * | `lobby:create` | `createLobby` | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (schon eine gehostete Lobby), LOBBY_CREATION_DISABLED, SERVER_BUSY |
+ * | `lobby:create` | `createLobby` | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (schon Mitglied einer aktiven Lobby), LOBBY_CREATION_DISABLED, SERVER_BUSY |
  * | `lobby:join` | JOIN (Mitglied → wie RECONNECT) | LOBBY_NOT_FOUND, TURNSTILE_REQUIRED, NAME_REJECTED, KICKED, GAME_IN_PROGRESS, LOBBY_FULL |
  * | `lobby:resume` | RECONNECT | LOBBY_NOT_FOUND, KICKED, RESIGNED |
  * | `lobby:leave` | LEAVE (im Spiel = Aufgeben) | LOBBY_NOT_FOUND, KICKED, RESIGNED |
@@ -12,13 +12,15 @@
  * | `lobby:start` | START | NOT_HOST, INVALID_PHASE, NOT_ENOUGH_PLAYERS |
  *
  * Fehlgeschlagene `lobby:join` zählen als Fehlversuch je IP (Code-Raten, Regel `event.lobby-join.failed.ip`
- * aus shared) – das erledigt die Event-Registry des Kerns für jede fachliche Ablehnung.
+ * aus shared) – das erledigt die Event-Registry des Kerns für jede fachliche Ablehnung. `lobby:resume` hat eine
+ * eigene Regel (`event.lobby-resume.failed.ip`); dort zählt nur LOBBY_NOT_FOUND (KICKED/RESIGNED setzen eine
+ * frühere Mitgliedschaft voraus und helfen beim Raten nicht).
  *
  * Sockets: create/join/resume nehmen den Socket VOR dem Command in den Lobby-Raum auf (Ablehnung → wieder
  * heraus); nach einem erfolgreichen LEAVE verlassen alle Sockets der Person den Raum.
  */
 import { type Command, findPlayerByGuestId, type LobbyState } from "@quizmaster/game-engine";
-import { isProtocolError } from "@quizmaster/shared";
+import { type ErrorCode, isProtocolError } from "@quizmaster/shared";
 import type { AckSent } from "../registry/types.ts";
 import {
   lobbyByCode,
@@ -32,6 +34,11 @@ import {
 
 /** Fehlercodes, nach denen die Person sicher kein Mitglied (mehr) ist – ihre Sockets verlassen den Raum. */
 const NOT_A_MEMBER = new Set(["LOBBY_NOT_FOUND", "KICKED", "RESIGNED"]);
+
+/** Fehlversuch für `event.lobby-resume.failed.ip`: nur ein unbekannter bzw. fremder Code (Code-Raten). */
+export function countsAsResumeFailure(code: ErrorCode): boolean {
+  return code === "LOBBY_NOT_FOUND";
+}
 
 export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: RuntimeAccess): void {
   registerEvent("lobby:create", async (payload, ctx) => {
@@ -72,16 +79,20 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
     return runCommand(ctx, actor, join, { code: actor.code }, { attach: ctx.socket });
   });
 
-  registerEvent("lobby:resume", (payload, ctx) => {
-    const actor = lobbyByCode(runtime(), payload.code);
-    return runCommand(
-      ctx,
-      actor,
-      { type: "RECONNECT", guestId: ctx.guestId },
-      { code: actor.code },
-      { attach: ctx.socket },
-    );
-  });
+  registerEvent(
+    "lobby:resume",
+    (payload, ctx) => {
+      const actor = lobbyByCode(runtime(), payload.code);
+      return runCommand(
+        ctx,
+        actor,
+        { type: "RECONNECT", guestId: ctx.guestId },
+        { code: actor.code },
+        { attach: ctx.socket },
+      );
+    },
+    { countsAsFailure: countsAsResumeFailure },
+  );
 
   registerEvent("lobby:leave", async (_payload, ctx) => {
     const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);

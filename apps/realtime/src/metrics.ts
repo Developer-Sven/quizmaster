@@ -30,6 +30,13 @@ export interface EventLoopMonitor {
   sample(): void;
 }
 
+/** Stand des Fragenkatalogs für die Gauges `qm_catalog_*` (liefert der Fragen-Service). */
+export interface CatalogGaugeSource {
+  questions: number;
+  usableCategories: number;
+  usable: boolean;
+}
+
 export interface RealtimeMetrics {
   readonly registry: Registry;
   /** Content-Type für die Antwort von `/metrics`. */
@@ -50,6 +57,10 @@ export interface RealtimeMetrics {
   readonly bans: Counter<"source">;
   readonly mongoErrors: Counter<"operation">;
   readonly changeStreamRestarts: Counter<"stream" | "reason">;
+  /** Spiele, die vorzeitig aus technischen Gründen endeten (`load_failed`). */
+  readonly gamesAborted: Counter<"reason">;
+  /** Spielabschlüsse, die endgültig nicht gespeichert wurden (`invalid`, `overflow`, `shutdown`). */
+  readonly gamesLost: Counter<"reason">;
 
   /** Anzahl aktiver Lobbys (setzt die Lobby-Registry). */
   setActiveLobbies(count: number): void;
@@ -57,6 +68,8 @@ export interface RealtimeMetrics {
   recordMongoError(operation: string): void;
   /** Neustart eines Change Streams (Watcher, `onReset`/`onError` von `watchWithResume`). */
   recordChangeStreamRestart(stream: string, reason: string): void;
+  /** Quelle der Katalog-Gauges (beim Abruf gelesen); `null` = keine Werte. */
+  setCatalogSource(source: (() => CatalogGaugeSource) | null): void;
 
   readonly eventLoop: EventLoopMonitor;
   start(): void;
@@ -146,6 +159,55 @@ export function createMetrics(options: CreateMetricsOptions): RealtimeMetrics {
     registers,
   });
 
+  const gamesAborted = new Counter({
+    name: "qm_games_aborted_total",
+    help: "Vorzeitig aus technischen Gründen beendete Spiele je Grund",
+    labelNames: ["reason"] as const,
+    registers,
+  });
+  const gamesLost = new Counter({
+    name: "qm_games_lost_total",
+    help: "Endgültig nicht gespeicherte Spielabschlüsse je Grund (Statistik fehlt)",
+    labelNames: ["reason"] as const,
+    registers,
+  });
+
+  let catalogSource: (() => CatalogGaugeSource) | null = null;
+  const readCatalog = (): CatalogGaugeSource | null => {
+    try {
+      return catalogSource?.() ?? null;
+    } catch {
+      return null;
+    }
+  };
+  new Gauge({
+    name: "qm_catalog_questions",
+    help: "Spielbare Fragen im Pool des Realtime-Servers",
+    registers,
+    collect() {
+      const catalog = readCatalog();
+      if (catalog !== null) this.set(catalog.questions);
+    },
+  });
+  new Gauge({
+    name: "qm_catalog_usable_categories",
+    help: "Spielbare Kategorien mit mindestens einer Frage im Pool",
+    registers,
+    collect() {
+      const catalog = readCatalog();
+      if (catalog !== null) this.set(catalog.usableCategories);
+    },
+  });
+  new Gauge({
+    name: "qm_catalog_usable",
+    help: "1 = der Fragenkatalog reicht für ein Spiel (sonst endet jedes Spiel sofort)",
+    registers,
+    collect() {
+      const catalog = readCatalog();
+      if (catalog !== null) this.set(catalog.usable ? 1 : 0);
+    },
+  });
+
   new Gauge({
     name: "qm_process_memory_bytes",
     help: "Speicher des Prozesses (heap_used, heap_total, rss, external)",
@@ -214,6 +276,8 @@ export function createMetrics(options: CreateMetricsOptions): RealtimeMetrics {
     bans,
     mongoErrors,
     changeStreamRestarts,
+    gamesAborted,
+    gamesLost,
     setActiveLobbies(count) {
       lobbies.set(count);
     },
@@ -222,6 +286,9 @@ export function createMetrics(options: CreateMetricsOptions): RealtimeMetrics {
     },
     recordChangeStreamRestart(stream, reason) {
       changeStreamRestarts.inc({ stream, reason });
+    },
+    setCatalogSource(source) {
+      catalogSource = source;
     },
     eventLoop: {
       p99Ms: () => lastP99Ms,

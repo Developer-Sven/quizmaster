@@ -38,7 +38,8 @@ export type RegisterEvent = ModuleContext["registerEvent"];
 
 /**
  * Einheitliche Meldung für LOBBY_NOT_FOUND – egal ob der Code unbekannt ist oder die Person dort kein Mitglied
- * ist. Sonst würde z. B. `lobby:resume` (ohne Fehlversuchs-Limit je IP) verraten, welche Codes existieren.
+ * ist. Sonst würde z. B. `lobby:resume` verraten, welche Codes existieren (zusätzlich zählen fehlgeschlagene
+ * Wiederaufnahmen je IP, Regel `event.lobby-resume.failed.ip`).
  */
 export const LOBBY_NOT_FOUND_MESSAGE = "Lobby nicht gefunden";
 
@@ -55,7 +56,10 @@ export function lobbyByCode(runtime: HandlerRuntime, code: string): LobbyActor {
 
 /**
  * Lobby des Sockets; hat der Socket (noch) keine – etwa direkt nach einem Reconnect vor `lobby:resume` –,
- * die einzige Lobby, in der der Gast Mitglied ist. Sonst LOBBY_NOT_FOUND.
+ * die einzige Lobby, in der der Gast Mitglied ist. Sonst LOBBY_NOT_FOUND – auch wenn die Zuordnung mehrdeutig
+ * ist (fail closed: nie eine Aktion in der falschen Lobby). Mehrere Mitgliedschaften entstehen höchstens kurz
+ * (Beitritt woanders, die alte läuft in der Reconnect-Frist aus); `lobby:create` setzt keine voraus. Der Client
+ * synchronisiert nach jedem Reconnect per `lobby:resume`, danach gilt die Lobby des Sockets.
  */
 export function lobbyOfSocket(runtime: HandlerRuntime, socket: AppSocket, guestId: string): LobbyActor {
   const attached = runtime.lobbies.actorOfSocket(socket);

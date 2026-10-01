@@ -2,8 +2,9 @@
  * Prüfung des Realtime-Tickets (docs/05 §Verbindung 3, docs/06 §Identität, ADR-006): JWT HS256 mit
  * `aud = realtime`, `iss = web`, `exp` (60 s) und `jti`, das nur EINMAL akzeptiert wird.
  *
- * Schlüssel-Vertrag mit apps/web: HMAC-Schlüssel = UTF-8-Bytes des Strings `REALTIME_TICKET_SECRET`
- * (`new TextEncoder().encode(secret)`), kein Base64-Decode.
+ * Schlüssel-Vertrag mit apps/web: HMAC-Schlüssel = UTF-8-Bytes des Strings `REALTIME_TICKET_SECRET`, kein
+ * Base64-Decode – beide Seiten nutzen dafür `hmacKeyFromSecret` und die Prüfoptionen
+ * `realtimeTicketVerifyOptions()` aus `@quizmaster/shared`.
  *
  * Der jti-Speicher merkt sich jede verbrauchte Ticket-ID bis zum Ablauf des Tickets (+ Uhren-Toleranz) –
  * also mindestens so lange, wie das Ticket überhaupt gültig sein kann. Er ist nach oben begrenzt; ist er
@@ -12,9 +13,11 @@
 
 import type { webcrypto } from "node:crypto";
 import {
+  hmacKeyFromSecret,
   REALTIME_TICKET,
   type RealtimeTicketClaims,
   realtimeTicketClaimsSchema,
+  realtimeTicketVerifyOptions,
   TICKET_MAX_LENGTH,
 } from "@quizmaster/shared";
 import { errors, jwtVerify } from "jose";
@@ -69,7 +72,7 @@ export interface TicketVerifier {
 }
 
 export function createTicketVerifier(secret: string, store: JtiStore = createJtiStore()): TicketVerifier {
-  const keyBytes = new TextEncoder().encode(secret);
+  const keyBytes = hmacKeyFromSecret(secret);
   let key: Promise<webcrypto.CryptoKey> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   // Einmal importierter Schlüssel statt Import je Handshake.
@@ -84,12 +87,9 @@ export function createTicketVerifier(secret: string, store: JtiStore = createJti
       let payload: unknown;
       try {
         ({ payload } = await jwtVerify(ticket, await getKey(), {
-          algorithms: [REALTIME_TICKET.algorithm],
-          audience: REALTIME_TICKET.audience,
-          issuer: REALTIME_TICKET.issuer,
+          ...realtimeTicketVerifyOptions(),
           currentDate: new Date(now),
           clockTolerance: TICKET_CLOCK_TOLERANCE_SEC,
-          requiredClaims: ["sub", "exp", "jti"],
         }));
       } catch (error) {
         if (error instanceof errors.JWTExpired) return { ok: false, reason: "expired" };

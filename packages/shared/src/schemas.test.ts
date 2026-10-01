@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { ackResponseSchema } from "./ack.ts";
+import { connectErrorDataSchema } from "./auth.ts";
 import { lobbyDocSchema } from "./documents/lobby.ts";
 import { CLIENT_EVENT_NAMES, CLIENT_EVENTS, SERVER_EVENT_NAMES, SERVER_EVENTS } from "./events.ts";
-import { healthResponseSchema, httpErrorBodySchema, ticketResponseSchema } from "./http.ts";
+import {
+  categoriesResponseSchema,
+  healthResponseSchema,
+  httpErrorBodySchema,
+  sessionResponseSchema,
+  ticketResponseSchema,
+} from "./http.ts";
 import { CLIENT_FORBIDDEN_KEYS, findKeysDeep, PRE_REVEAL_FORBIDDEN_KEYS } from "./invariants.ts";
 import {
   type PublicLobbyState,
@@ -235,9 +242,12 @@ describe("Invariante 4: keine guestId in Server→Client-Payloads (docs/06)", ()
       `${event} (Ack)`,
       ackResponseSchema(CLIENT_EVENTS[event].ack),
     ]),
+    ["POST /api/session", sessionResponseSchema],
     ["POST /api/realtime/ticket", ticketResponseSchema],
+    ["GET /api/categories", categoriesResponseSchema],
     ["GET /api/health", healthResponseSchema],
     ["HTTP-Fehler", httpErrorBodySchema],
+    ["connect_error (data)", connectErrorDataSchema],
   ];
 
   it.each(serverToClient)("%s enthält rekursiv kein Feld guestId", (_name, schema) => {
