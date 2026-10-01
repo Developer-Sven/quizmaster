@@ -19,6 +19,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return rootMetadata(getWebEnv());
 }
 
+/** Web Vitals nur in Entwicklung (ADR-027): im Produktions-Build entfällt der Import samt `next/web-vitals`. */
+const devWebVitals = process.env.NODE_ENV === "development" ? import("@/components/app/web-vitals") : null;
+
 /** Viewport und Theme-Color (docs/10): `viewport-fit=cover` für die Safe Areas im Standalone-Modus. */
 export const viewport: Viewport = {
   width: "device-width",
@@ -37,11 +40,13 @@ export const viewport: Viewport = {
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
+  const DevWebVitals = devWebVitals === null ? null : (await devWebVitals).WebVitals;
   return (
     <html lang="de" className={rubik.variable}>
       <body className="min-h-dvh bg-bg text-body text-text antialiased">
         {children}
         <PwaRegistrar />
+        {DevWebVitals === null ? null : <DevWebVitals />}
       </body>
     </html>
   );

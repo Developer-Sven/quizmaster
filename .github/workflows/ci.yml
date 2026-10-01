@@ -86,10 +86,62 @@ jobs:
           test -d apps/web/.next/static
           test -f apps/realtime/dist/index.mjs
 
-      # ── EINFÜGEPUNKT W4 ─────────────────────────────────────────────────────────────────────
-      # Bundle-Budgets (docs/07, docs/11 Schritt 4) als weitere Schritte direkt hier (nach dem Build),
-      # Lighthouse auf dem Prod-Build (docs/11 Schritt 7) als eigener Job mit `needs: build` darunter.
-      # ────────────────────────────────────────────────────────────────────────────────────────
+      # Initiales JS (gzip) je Route aus der Build-Ausgabe (Framework + Layout + Fehlergrenze + Seite); Abbruch bei
+      # Überschreitung: „/“ ≤ 165 KB (ADR-037), /lobby/[code] ≤ 180 KB (docs/07) – Werte in scripts/perf/lib/bundle.ts.
+      - name: Bundle-Budgets (docs/07, ADR-037)
+        run: node scripts/perf/bundle-budget.ts --dist apps/web/.next
+
+  # docs/11 Schritt 7: Lighthouse mobil (Performance ≥ 90, A11y ≥ 95, Best Practices ≥ 95; LCP/CLS/TBT, ADR-027) für
+  # Start- und Lobby-Seite auf einem eigenen Prod-Build mit Test-Stack (MongoMemoryReplSet, Fixtures). Zunächst nur
+  # Warnungen (--warn-only, GitHub-Annotationen): Lighthouse auf geteilten Runnern schwankt – Abbruch erst mit
+  # stabilem Schwellwert. Berichte als Artefakt.
+  lighthouse:
+    name: Lighthouse (mobil)
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: MongoDB-Binary für MongoMemoryReplSet cachen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.MONGOMS_DOWNLOAD_DIR }}
+          key: mongodb-binaries-${{ runner.os }}-${{ env.MONGOMS_VERSION }}
+
+      - name: Playwright-Version bestimmen
+        id: playwright
+        working-directory: e2e
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Playwright-Browser cachen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Chromium + Systemabhängigkeiten
+        working-directory: e2e
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build (web + realtime)
+        run: pnpm build
+
+      - name: Lighthouse (Start + Lobby, Median aus 3 Läufen)
+        run: node scripts/perf/lighthouse.ts --runs 3 --warn-only
+
+      - name: Lighthouse-Berichte hochladen
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-${{ github.run_id }}-${{ github.run_attempt }}
+          path: reports/lighthouse/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # docs/11 Schritt 5: E2E mit Playwright (Stack-Skript nutzt in CI automatisch MongoMemoryReplSet)
   e2e:
