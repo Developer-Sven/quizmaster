@@ -19,12 +19,14 @@ import {
   createLobbyState,
   isTimingMode,
   onAddBot,
+  onContinue,
   onDisconnect,
   onJoin,
   onKick,
   onLeave,
   onReconnect,
   onRematch,
+  onRename,
   onStart,
   onUpdateSettings,
 } from "./lobby.ts";
@@ -132,6 +134,10 @@ function dispatch(state: LobbyState, command: Command, tx: Tx, timer: PendingTim
       return onLeave(state, command, tx);
     case "UPDATE_SETTINGS":
       return onUpdateSettings(state, command, tx);
+    case "RENAME":
+      return onRename(state, command, tx);
+    case "CONTINUE":
+      return onContinue(state, command, tx);
     case "KICK":
       return onKick(state, command, tx);
     case "START":

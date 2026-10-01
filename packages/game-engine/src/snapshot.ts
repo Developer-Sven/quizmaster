@@ -48,7 +48,7 @@ import { z } from "zod";
 import { createTx, type Tx } from "./context.ts";
 import { presentQuestion } from "./flow.ts";
 import { normalize } from "./lifecycle.ts";
-import { enterPhase } from "./phases.ts";
+import { advancePhaseEnd, enterPhase } from "./phases.ts";
 import type { Rng } from "./rng.ts";
 import { computeScores } from "./scoring.ts";
 import { activePlayers, currentTurn, updateCurrentTurn, updateGame } from "./state.ts";
@@ -310,16 +310,24 @@ function restartPhase(state: LobbyState, from: Phase, tx: Tx, graceMs: number): 
       return [enterPhase(clearPending(state), "intro", tx, { endsAt: now + timings.introMs }), "phase_restarted"];
     case "turn_summary":
       return [
-        enterPhase(clearPending(state), "turn_summary", tx, { endsAt: now + timings.turnSummaryMs }),
+        enterPhase(clearPending(state), "turn_summary", tx, {
+          endsAt: advancePhaseEnd(state, "turn_summary", now, timings),
+        }),
         "phase_restarted",
       ];
     case "round_board":
       return [
-        enterPhase(clearPending(state), "round_board", tx, { endsAt: now + timings.roundBoardMs }),
+        enterPhase(clearPending(state), "round_board", tx, {
+          endsAt: advancePhaseEnd(state, "round_board", now, timings),
+        }),
         "phase_restarted",
       ];
     case "reveal":
-      return [enterPhase(state, "reveal", tx, { endsAt: now + timings.revealMs }), "phase_restarted"];
+      // „Host tippt Weiter“ (ADR-045): auch nach dem Neustart ohne Timer, der Host geht weiter.
+      return [
+        enterPhase(state, "reveal", tx, { endsAt: advancePhaseEnd(state, "reveal", now, timings) }),
+        "phase_restarted",
+      ];
     case "category_pick": {
       const turn = currentTurn(state.game);
       if (turn === undefined) return fail("Kategoriewahl ohne Zug");

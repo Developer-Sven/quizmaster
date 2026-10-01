@@ -15,6 +15,7 @@
  * | Fragen ansehen / Melden                 | ListChecksIcon / FlagIcon |
  * | Bewertung                               | ThumbsUpIcon / ThumbsDownIcon |
  * | Entfernen                               | UserRoundXIcon     |
+ * | Eigenen Namen ändern (Lobby, ADR-041)   | PencilIcon         |
  * | Ton an / aus                            | Volume2Icon / VolumeXIcon |
  * | Offline                                 | WifiOffIcon        |
  * | Richtig / Falsch                        | CircleCheckIcon / CircleXIcon |
@@ -51,6 +52,7 @@ export {
   LogOutIcon,
   type LucideIcon,
   MinusIcon,
+  PencilIcon,
   PlayIcon,
   PlusIcon,
   QrCodeIcon,

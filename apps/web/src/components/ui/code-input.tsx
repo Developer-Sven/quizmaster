@@ -51,7 +51,12 @@ type CodeInputCompletionProps =
       hint: string;
     };
 
-export type CodeInputProps = CodeInputBaseProps & CodeInputCompletionProps;
+interface CodeInputHintProps {
+  /** Hinweis nur für Screenreader (per aria-describedby), nicht sichtbar – Startseite (ADR-043) */
+  hintHidden?: boolean;
+}
+
+export type CodeInputProps = CodeInputBaseProps & CodeInputCompletionProps & CodeInputHintProps;
 
 /**
  * CodeInput (docs/09 §5): 6 Zellen à 48 × 56, Lücke nach Zelle 3, Zeichen im Stil `code`.
@@ -66,6 +71,7 @@ export function CodeInput({
   onChange,
   onComplete,
   hint,
+  hintHidden = false,
   error,
   disabled = false,
   name,
@@ -168,7 +174,7 @@ export function CodeInput({
         })}
       </div>
       {hint ? (
-        <p id={hintId} className={cx("text-caption text-text-2", disabled && "opacity-40")}>
+        <p id={hintId} className={cx(hintHidden ? "sr-only" : "text-caption text-text-2", disabled && "opacity-40")}>
           {hint}
         </p>
       ) : null}

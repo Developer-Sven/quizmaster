@@ -368,7 +368,7 @@ describe("ResultSquare und Board", () => {
   it("staffelt die Füllung neuer Zeilen", () => {
     expect(fillDelayMs(0, 0, 0)).toBe(0);
     expect(fillDelayMs(0, 1, 0)).toBe(40);
-    expect(fillDelayMs(0, 0, 2)).toBe(160);
-    expect(fillDelayMs(1, 2, 1)).toBe(200);
+    expect(fillDelayMs(0, 0, 2)).toBe(320);
+    expect(fillDelayMs(1, 2, 1)).toBe(280);
   });
 });

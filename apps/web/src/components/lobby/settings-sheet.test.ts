@@ -13,7 +13,7 @@ describe("Einstellungen: Zusammenfassungszeile", () => {
       "3 Runden",
       "3 Fragen je Kat.",
       "27 Fragen",
-      "ca. 9 Min.",
+      "ca. 10 Min.",
     ]);
     expect(settingsSummaryParts({ rounds: 1, questionsPerCategory: 1 }, 1)).toEqual([
       "1 Runde",
@@ -28,7 +28,7 @@ describe("Einstellungen: Zusammenfassungszeile", () => {
       h(SettingsSummary, { settings: { rounds: 2, questionsPerCategory: 3 }, players: 3 }),
     );
     const parts = [...html.matchAll(/<span class="whitespace-nowrap">([^<]*)<\/span>/g)].map((match) => match[1]);
-    expect(parts).toEqual(["2 Runden", "3 Fragen je Kat.", "18 Fragen", "ca. 6 Min."]);
+    expect(parts).toEqual(["2 Runden", "3 Fragen je Kat.", "18 Fragen", "ca. 7 Min."]);
     // Außerhalb der Teile nur „ ·“ mit geschütztem Leerzeichen davor: Der Punkt landet nie am Zeilenanfang.
     const between = html
       .replace(/^<p[^>]*>|<\/p>$/g, "")

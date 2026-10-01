@@ -1,7 +1,9 @@
 /**
  * Nur für Tests: gültige Beispiel-Zustände (docs/05 §Zustände) mit wenigen Zeilen erzeugen.
  */
+
 import type { BoardRow, PrivatePlayerState, PublicLobbyState, PublicPlayer, PublicQuestion } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 
 export function testPlayer(id: string, patch: Partial<PublicPlayer> = {}): PublicPlayer {
   return {
@@ -25,7 +27,7 @@ export function testLobby(patch: Partial<PublicLobbyState> = {}): PublicLobbySta
     phase: "lobby",
     phaseStartedAt: 1_000,
     phaseEndsAt: null,
-    settings: { rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS },
     players: [testPlayer("p1", { isHost: true, name: "Mia" }), testPlayer("p2", { name: "Ben", color: "sky" })],
     order: null,
     progress: null,

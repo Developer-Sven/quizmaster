@@ -1,7 +1,7 @@
 import { type PublicQuestion, TIMINGS } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import {
-  ANSWER_REVEAL_EXIT_AT_MS,
+  ANSWER_REVEAL_EXIT_BEFORE_END_MS,
   CATEGORY_REVEAL_EXIT_BEFORE_START_MS,
   elapsedMs,
   formatCountdown,
@@ -80,18 +80,18 @@ describe("stageAt", () => {
 });
 
 describe("Choreografie-Zeitpunkte (docs/09 §7)", () => {
-  it("Intro: Avatare, ab 3.200 ms Titelkarte, ab 3.700 ms Ausblenden", () => {
-    expect(INTRO_TIMELINE).toEqual({ scrimMs: 480, titleAtMs: 3_200, exitAtMs: 3_700 });
+  it("Intro: Avatare, ab 3.500 ms Titelkarte, ab 4.600 ms Ausblenden", () => {
+    expect(INTRO_TIMELINE).toEqual({ scrimMs: 480, titleAtMs: 3_500, exitAtMs: 4_600 });
     expect(introStage(0)).toBe("people");
-    expect(introStage(3_199)).toBe("people");
-    expect(introStage(3_200)).toBe("title");
-    expect(introStage(3_699)).toBe("title");
-    expect(introStage(3_700)).toBe("done");
+    expect(introStage(3_499)).toBe("people");
+    expect(introStage(3_500)).toBe("title");
+    expect(introStage(4_599)).toBe("title");
+    expect(introStage(4_600)).toBe("done");
   });
 
-  it("Reveal blendet bei 1.600 von 2.000 ms aus, Auflösung bei 3.000 ms", () => {
-    expect(TIMINGS.normal.leadInFirstQuestionMs - CATEGORY_REVEAL_EXIT_BEFORE_START_MS).toBe(1_600);
-    expect(ANSWER_REVEAL_EXIT_AT_MS).toBe(3_000);
+  it("Kategorie-Einblendung endet bei 2.400 von 3.000 ms, die Auflösung 500 ms vor ihrem Ende (ADR-044/045)", () => {
+    expect(TIMINGS.normal.leadInFirstQuestionMs - CATEGORY_REVEAL_EXIT_BEFORE_START_MS).toBe(2_400);
+    expect(ANSWER_REVEAL_EXIT_BEFORE_END_MS).toBe(500);
   });
 
   it("der wandernde Rahmen springt im 1,2-s-Takt über die drei Kacheln", () => {
@@ -112,13 +112,14 @@ describe("inferTimingMode", () => {
   });
 
   it("erkennt normal und fast an Phasen mit fester Dauer", () => {
-    expect(inferTimingMode(phaseState("intro", 4_000))).toBe("normal");
+    expect(inferTimingMode(phaseState("intro", 5_000))).toBe("normal");
     expect(inferTimingMode(phaseState("intro", 300))).toBe("fast");
     expect(inferTimingMode(phaseState("category_pick", 15_000))).toBe("normal");
     expect(inferTimingMode(phaseState("category_pick", 1_500))).toBe("fast");
-    expect(inferTimingMode(phaseState("reveal", 3_500))).toBe("normal");
-    expect(inferTimingMode(phaseState("turn_summary", 4_000))).toBe("normal");
-    expect(inferTimingMode(phaseState("round_board", 300))).toBe("fast");
+    // Weiter-Phasen sind einstellbar (ADR-045) – ihre Dauer sagt nichts über den Modus.
+    expect(inferTimingMode(phaseState("reveal", 5_000))).toBeNull();
+    expect(inferTimingMode(phaseState("turn_summary", 300))).toBeNull();
+    expect(inferTimingMode(phaseState("round_board", 7_000))).toBeNull();
   });
 
   it("erkennt die Frage an der Antwortzeit (auch nach früher Auflösung)", () => {

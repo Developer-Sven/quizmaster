@@ -32,6 +32,11 @@ export function registerGameHandlers(registerEvent: RegisterEvent, runtime: Runt
     );
   });
 
+  registerEvent("game:continue", (payload, ctx) => {
+    const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
+    return runCommand(ctx, actor, { type: "CONTINUE", guestId: ctx.guestId, phase: payload.phase }, null);
+  });
+
   registerEvent("game:rematch", (_payload, ctx) => {
     const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
     return runCommand(ctx, actor, { type: "REMATCH", guestId: ctx.guestId }, null);

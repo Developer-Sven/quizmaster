@@ -3,6 +3,7 @@
  * und Overlay mit 2 bzw. 6 Personen, Zeitpunkte relativ zu `now` (die Vorschau friert die Uhr ein).
  * Die Kategorien entsprechen docs/09 §2 – im Produkt kommen sie immer aus den Daten.
  */
+
 import type {
   AnswerIndex,
   BoardRow,
@@ -14,6 +15,7 @@ import type {
   PublicQuestion,
   ReviewItem,
 } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import { placesFor } from "../../../lib/client/game-view";
 import type { LobbyExit, PendingAnswer } from "../../../stores/game-store";
 import { LONGEST_ANSWER, LONGEST_QUESTION } from "../ui/sample-data";
@@ -153,7 +155,7 @@ function base(ctx: PreviewContext, patch: Partial<PublicLobbyState>): PublicLobb
     phase: "lobby",
     phaseStartedAt: ctx.now - 1_000,
     phaseEndsAt: null,
-    settings: { rounds: ROUNDS, questionsPerCategory: K, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: ROUNDS, questionsPerCategory: K },
     players: players(ctx.count),
     order: null,
     progress: null,

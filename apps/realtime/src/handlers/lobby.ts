@@ -3,11 +3,12 @@
  *
  * | Event | Command | Fehlercodes (neben VALIDATION_FAILED/RATE_LIMITED aus der Pipeline) |
  * |---|---|---|
- * | `lobby:create` | `createLobby` | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (schon Mitglied einer aktiven Lobby), LOBBY_CREATION_DISABLED, SERVER_BUSY |
+ * | `lobby:create` | LEAVE in bisherigen Lobbys (ADR-042), dann `createLobby` | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (paralleles Erstellen), LOBBY_CREATION_DISABLED, SERVER_BUSY |
  * | `lobby:join` | JOIN (Mitglied → wie RECONNECT) | LOBBY_NOT_FOUND, TURNSTILE_REQUIRED, NAME_REJECTED, KICKED, GAME_IN_PROGRESS, LOBBY_FULL |
  * | `lobby:resume` | RECONNECT | LOBBY_NOT_FOUND, KICKED, RESIGNED |
  * | `lobby:leave` | LEAVE (im Spiel = Aufgeben) | LOBBY_NOT_FOUND, KICKED, RESIGNED |
  * | `lobby:update-settings` | UPDATE_SETTINGS | NOT_HOST, INVALID_PHASE, INVALID_OPTION |
+ * | `lobby:rename` | RENAME (ADR-041) | NAME_REJECTED, INVALID_PHASE, LOBBY_NOT_FOUND |
  * | `lobby:kick` | KICK (+ Lobby-Sperre) | NOT_HOST, INVALID_OPTION |
  * | `lobby:start` | START | NOT_HOST, INVALID_PHASE, NOT_ENOUGH_PLAYERS |
  *
@@ -22,9 +23,11 @@
  * heraus); nach einem erfolgreichen LEAVE verlassen alle Sockets der Person den Raum.
  */
 import { type Command, findPlayerByGuestId, type LobbyState } from "@quizmaster/game-engine";
-import { type ErrorCode, isProtocolError } from "@quizmaster/shared";
+import { type ErrorCode, isProtocolError, ProtocolError } from "@quizmaster/shared";
+import type { LobbyActor } from "../lobby/lobby-actor.ts";
 import type { AckSent } from "../registry/types.ts";
 import {
+  type HandlerRuntime,
   lobbyByCode,
   lobbyOfSocket,
   moderateName,
@@ -51,12 +54,32 @@ function isMemberOfRequestedLobby(runtime: RuntimeAccess) {
     runtime().lobbies.get(payload.code)?.isMember(guestId) === true;
 }
 
+/** LEAVE in einer Lobby ohne Ack (wie `lobby:leave`); danach verlassen die Sockets der Person den Raum. */
+async function leaveLobby(actor: LobbyActor, guestId: string): Promise<void> {
+  const result = await actor.dispatch({ type: "LEAVE", guestId });
+  if (result.ok || NOT_A_MEMBER.has(result.error.code)) {
+    actor.detachGuest(guestId);
+    return;
+  }
+  throw new ProtocolError(result.error.code, result.error.message);
+}
+
+/**
+ * Wer eine neue Lobby erstellt, verlässt vorher alle bisherigen (ADR-042): Eine liegen gebliebene Mitgliedschaft
+ * (Tab geschlossen, Fehler beim Wechsel) sperrte sonst mit „Zu viele Versuche“, bis die alte Lobby schließt. Im
+ * laufenden Spiel heißt Verlassen Aufgeben – wie beim Tippen auf „Lobby verlassen“.
+ */
+async function leaveAllLobbies(rt: HandlerRuntime, guestId: string): Promise<void> {
+  for (const actor of rt.lobbies.membershipsOf(guestId)) await leaveLobby(actor, guestId);
+}
+
 export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: RuntimeAccess): void {
   registerEvent("lobby:create", async (payload, ctx) => {
     const rt = runtime();
     const config = rt.appConfig.get();
     requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
     const name = moderateName(payload.name, config.blockedTerms);
+    await leaveAllLobbies(rt, ctx.guestId);
     let sent: AckSent | undefined;
     await rt.lobbies.create({
       socket: ctx.socket,
@@ -126,6 +149,13 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
   registerEvent("lobby:update-settings", (payload, ctx) => {
     const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
     return runCommand(ctx, actor, { type: "UPDATE_SETTINGS", guestId: ctx.guestId, update: payload }, null);
+  });
+
+  registerEvent("lobby:rename", (payload, ctx) => {
+    const rt = runtime();
+    const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
+    const name = moderateName(payload.name, rt.appConfig.get().blockedTerms);
+    return runCommand(ctx, actor, { type: "RENAME", guestId: ctx.guestId, name }, null);
   });
 
   registerEvent("lobby:kick", (payload, ctx) => {

@@ -14,7 +14,7 @@ import {
 
 describe("Vollständigkeit (docs/06 Invariante 6)", () => {
   it("jedes Client→Server-Event der Registry hat mindestens ein Limit", () => {
-    expect(CLIENT_EVENT_NAMES).toHaveLength(15);
+    expect(CLIENT_EVENT_NAMES).toHaveLength(17);
     for (const event of CLIENT_EVENT_NAMES) expect(rateLimitsFor(event).length, event).toBeGreaterThan(0);
   });
 
@@ -64,7 +64,7 @@ const HTTP = { action: "http_error", status: 429, retryAfterHeader: true } as co
 
 /** Die Tabelle aus docs/06 Zeile für Zeile. */
 const EXPECTED: Record<string, Expected> = {
-  "http.session.ip": ["POST /api/session", "ip", 10, 600, 0, "mongo", HTTP],
+  "http.session.ip": ["POST /api/session", "ip", 30, 600, 0, "mongo", HTTP],
   "http.ticket.guest": ["POST /api/realtime/ticket", "guest", 30, 60, 0, "memory", HTTP],
   "http.ticket.ip": ["POST /api/realtime/ticket", "ip", 300, 60, 0, "memory", HTTP],
   "http.categories.ip": ["GET /api/categories", "ip", 60, 60, 0, "memory", HTTP],
@@ -81,18 +81,20 @@ const EXPECTED: Record<string, Expected> = {
     { action: "reject_handshake", code: "RATE_LIMITED" },
   ],
   "event.time-sync.socket": ["time:sync", "socket", 10, 10, 0, "memory", ACK],
-  "event.lobby-create.guest.minute": ["lobby:create", "guest", 3, 60, 0, "mongo", ACK],
-  "event.lobby-create.guest.day": ["lobby:create", "guest", 30, 86_400, 0, "mongo", ACK],
-  "event.lobby-create.ip.hour": ["lobby:create", "ip", 30, 3_600, 0, "mongo", ACK],
-  "event.lobby-join.failed.ip": ["lobby:join", "ip", 20, 300, 900, "mongo", ACK],
-  "event.lobby-join.socket": ["lobby:join", "socket", 10, 60, 0, "memory", ACK],
-  "event.lobby-resume.failed.ip": ["lobby:resume", "ip", 20, 300, 900, "mongo", ACK],
+  "event.lobby-create.guest.minute": ["lobby:create", "guest", 5, 60, 0, "mongo", ACK],
+  "event.lobby-create.guest.day": ["lobby:create", "guest", 60, 86_400, 0, "mongo", ACK],
+  "event.lobby-create.ip.hour": ["lobby:create", "ip", 60, 3_600, 0, "mongo", ACK],
+  "event.lobby-join.failed.ip": ["lobby:join", "ip", 20, 300, 300, "mongo", ACK],
+  "event.lobby-join.socket": ["lobby:join", "socket", 20, 60, 0, "memory", ACK],
+  "event.lobby-resume.failed.ip": ["lobby:resume", "ip", 20, 300, 300, "mongo", ACK],
   "event.lobby-resume.socket": ["lobby:resume", "socket", 10, 60, 0, "memory", ACK],
   "event.lobby-leave.socket": ["lobby:leave", "socket", 10, 60, 0, "memory", ACK],
-  "event.lobby-update-settings.socket": ["lobby:update-settings", "socket", 10, 10, 0, "memory", ACK],
+  "event.lobby-update-settings.socket": ["lobby:update-settings", "socket", 40, 10, 0, "memory", ACK],
+  "event.lobby-rename.socket": ["lobby:rename", "socket", 5, 60, 0, "memory", ACK],
   "event.lobby-kick.socket": ["lobby:kick", "socket", 10, 60, 0, "memory", ACK],
-  "event.lobby-start.socket": ["lobby:start", "socket", 5, 60, 0, "memory", ACK],
+  "event.lobby-start.socket": ["lobby:start", "socket", 10, 60, 0, "memory", ACK],
   "event.game-rematch.socket": ["game:rematch", "socket", 5, 60, 0, "memory", ACK],
+  "event.game-continue.socket": ["game:continue", "socket", 10, 10, 0, "memory", ACK],
   "event.dev-add-bot.socket": ["dev:add-bot", "socket", 10, 60, 0, "memory", ACK],
   "event.game-answer.once": [
     "game:answer",
@@ -105,9 +107,9 @@ const EXPECTED: Record<string, Expected> = {
   ],
   "event.game-answer.socket": ["game:answer", "socket", 5, 1, 0, "memory", ACK],
   "event.game-pick.socket": ["game:pick", "socket", 5, 5, 0, "memory", ACK],
-  "event.game-review.socket": ["game:review", "socket", 5, 60, 0, "memory", ACK],
+  "event.game-review.socket": ["game:review", "socket", 20, 60, 0, "memory", ACK],
   "event.question-rate.guest": ["question:rate", "guest", 60, 600, 0, "memory", ACK],
-  "event.question-report.guest": ["question:report", "guest", 5, 600, 0, "memory", ACK],
+  "event.question-report.guest": ["question:report", "guest", 10, 600, 0, "memory", ACK],
   "socket.any-event": ["socket:any-event", "socket", 30, 1, 0, "memory", ACK],
   "socket.violations": ["socket:violation", "socket", 10, 60, 0, "memory", { action: "disconnect" }],
   "guest.violation-disconnects": [
@@ -167,7 +169,7 @@ describe("Werte (docs/06 §Rate-Limits & Kontingente)", () => {
     if (!first) throw new Error("Regel fehlt");
     expect(toRateLimiterOptions(first)).toEqual({
       keyPrefix: "qm:http.session.ip",
-      points: 10,
+      points: 30,
       duration: 600,
       blockDuration: 0,
     });

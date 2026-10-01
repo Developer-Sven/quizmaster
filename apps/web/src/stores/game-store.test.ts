@@ -1,3 +1,4 @@
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import { beforeEach, describe, expect, it } from "vitest";
 import { myChoiceFor } from "../lib/client/game-view";
 import { testLobby, testPlayer, testQuestion, testSelf } from "../lib/client/test-support";
@@ -288,7 +289,7 @@ describe("Hinweise und Kategorien", () => {
     expect(state().toasts).toEqual([]);
 
     // Ein Zustand ohne Änderung der Liste lässt die letzte Ansage stehen; das Verlassen der Lobby löscht sie.
-    const settings = { rounds: 4, questionsPerCategory: 3, maxPlayers: 8 };
+    const settings = { ...DEFAULT_LOBBY_SETTINGS, rounds: 4 };
     gameActions.applyPublicState(testLobby({ rev: 7, players: [mia], settings }));
     expect(selectAnnouncement(state())).toBe("Bot hat die Lobby verlassen. Bot hat die Lobby verlassen.");
     gameActions.resetLobby();

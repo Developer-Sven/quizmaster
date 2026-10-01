@@ -173,6 +173,7 @@ function StageOverlay({
           players={lobby.players}
           selfId={selfId}
           phaseStartedAt={lobby.phaseStartedAt}
+          phaseEndsAt={lobby.phaseEndsAt}
         />
       );
     case "turn_summary": {

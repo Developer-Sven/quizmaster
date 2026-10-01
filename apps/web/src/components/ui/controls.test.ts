@@ -7,7 +7,7 @@ import { CodeInput } from "./code-input";
 import { IconButton } from "./icon-button";
 import { ListRow } from "./list-row";
 import { renderHtml } from "./ssr-render";
-import { Stepper } from "./stepper";
+import { Stepper, stepOption } from "./stepper";
 import { TextField } from "./text-field";
 
 const noop = () => {};
@@ -154,6 +154,14 @@ describe("CodeInput", () => {
     for (const id of describedBy) expect(withError).toContain(`id="${id}"`);
   });
 
+  it("kann den Hinweis nur für Screenreader zeigen – weiter verknüpft, aber nicht sichtbar (ADR-043)", () => {
+    const html = renderToStaticMarkup(h(CodeInput, { onComplete: noop, hint: "Hinweis", hintHidden: true }));
+    const hint = /<p id="([^"]+)" class="([^"]*)"[^>]*>Hinweis<\/p>/.exec(html);
+    expect(hint?.[2]).toContain("sr-only");
+    expect(hint?.[2]).not.toContain("text-caption");
+    expect(html).toContain(`aria-describedby="${hint?.[1]}"`);
+  });
+
   it("verlangt mit Auto-Beitritt einen Hinweis (Typfehler ohne) und bleibt ohne onComplete schlicht", () => {
     // @ts-expect-error hint ist Pflicht, sobald onComplete gesetzt ist (Kontextwechsel, WCAG 3.2.2)
     const withoutHint = renderToStaticMarkup(h(CodeInput, { onComplete: noop }));
@@ -186,6 +194,33 @@ describe("Stepper", () => {
     expect(html).not.toContain(
       'aria-label="Personen maximal verringern" title="Personen maximal verringern" aria-disabled',
     );
+  });
+
+  it("feste Stufen mit eigener Anzeige (Weiter nach …, ADR-045): „Host“ bei 0, sonst Sekunden", () => {
+    const options = [0, 3, 5, 7, 10, 15, 20, 30] as const;
+    const format = (value: number) => (value === 0 ? "Host" : `${value} s`);
+    const manual = renderToStaticMarkup(
+      h(Stepper, { label: "Nach jeder Frage", value: 0, options, format, onChange: noop }),
+    );
+    expect(manual).toMatch(/<output[^>]*>Host<\/output>/);
+    expect(manual).toContain(
+      'aria-label="Nach jeder Frage verringern" title="Nach jeder Frage verringern" aria-disabled="true"',
+    );
+    const top = renderToStaticMarkup(
+      h(Stepper, { label: "Nach jeder Frage", value: 30, options, format, onChange: noop }),
+    );
+    expect(top).toMatch(/<output[^>]*>30 s<\/output>/);
+    expect(top).toContain(
+      'aria-label="Nach jeder Frage erhöhen" title="Nach jeder Frage erhöhen" aria-disabled="true"',
+    );
+    expect(stepOption(options, 5, 1)).toBe(7);
+    expect(stepOption(options, 5, -1)).toBe(3);
+    expect(stepOption(options, 3, -1)).toBe(0);
+    expect(stepOption(options, 30, 1)).toBeNull();
+    expect(stepOption(options, 0, -1)).toBeNull();
+    // Ein Wert zwischen den Stufen springt zur nächsten passenden.
+    expect(stepOption(options, 4, 1)).toBe(5);
+    expect(stepOption(options, 4, -1)).toBe(3);
   });
 });
 

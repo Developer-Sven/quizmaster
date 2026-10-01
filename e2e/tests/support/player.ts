@@ -19,7 +19,20 @@ export function sloppyCode(code: string): string {
   return `${code.slice(0, 3)} ${code.slice(3)}`.toLowerCase();
 }
 
-export type SettingLabel = "Runden" | "Fragen pro Kategorie" | "Personen maximal";
+export type SettingLabel =
+  | "Runden"
+  | "Fragen pro Kategorie"
+  | "Personen maximal"
+  // Weiter nach … (ADR-045): Sekunden, 0 = „Host“ (der Host tippt „Weiter“)
+  | "Nach jeder Frage"
+  | "Nach jeder Kategorie"
+  | "Nach dem Zwischenstand";
+
+/** Angezeigter Stepper-Wert als Zahl: „7“ → 7, „5 s“ → 5, „Host“ → 0. */
+function stepperValue(text: string | null): number {
+  const value = (text ?? "").trim();
+  return value === "Host" ? 0 : Number(value.replace(/\s*s$/, ""));
+}
 
 export class Player {
   readonly page: Page;
@@ -139,13 +152,14 @@ export class Player {
       const stepper = sheet.getByRole("group", { name: label });
       const output = stepper.locator("output");
       for (let guard = 0; guard < 10; guard++) {
-        const current = Number(await output.textContent());
+        const shown = await output.textContent();
+        const current = stepperValue(shown);
         if (current === target) break;
         const button = current > target ? `${label} verringern` : `${label} erhöhen`;
         await stepper.getByRole("button", { name: button }).click();
-        await expect(output).not.toHaveText(String(current));
+        await expect(output).not.toHaveText(shown ?? "");
       }
-      await expect(output).toHaveText(String(target));
+      await expect.poll(async () => stepperValue(await output.textContent())).toBe(target);
     }
     await sheet.getByRole("button", { name: "Fertig" }).click();
     await expect(sheet).toBeHidden();

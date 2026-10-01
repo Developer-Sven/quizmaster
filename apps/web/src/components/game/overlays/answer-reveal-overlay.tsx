@@ -21,6 +21,8 @@ export interface AnswerRevealOverlayProps {
   selfId: string | null;
   /** Serverzeit des Phasenbeginns – Anker der Choreografie */
   phaseStartedAt: number;
+  /** Serverzeit des Phasenendes; `null` = wartet auf „Weiter“ des Hosts (ADR-045) */
+  phaseEndsAt: number | null;
 }
 
 const REVEAL = CHOREOGRAPHY.answerReveal;
@@ -32,20 +34,27 @@ const SHAKE_LATE_MS = 120;
  * Auflösung (Phase `reveal`, 3,5 s, docs/09 §7.6) – die Karte der Frage bleibt stehen (Übergang „cut“):
  * 0 ms richtige Antwort `correct`, eigene falsche `wrong` mit Seitwärtsruck (2 × 4 px, 160 ms – nur bei
  * eigener falscher Antwort, nicht bei reduzierter Bewegung); ab 200 ms gleiten die Avatare 24 px gestaffelt
- * (50 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 400 ms der Spielerstreifen
- * (ScorePill), Ton und Haptik kommen als Cues der Bühne. Ausblenden bei 3.000 ms. Wer erst mitten in der
+ * (150 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 1.200 ms der Spielerstreifen
+ * (ScorePill), Ton und Haptik kommen als Cues der Bühne. Ausblenden 500 ms vor dem Phasenende (wartet die
+ * Auflösung auf den Host, bleibt sie stehen – ADR-045). Wer erst mitten in der
  * Auflösung einsteigt, sieht den Endzustand ohne Wiederholung.
  *
  * Gleiche Lage wie die Frage (ADR-034): derselbe Aufbau – Karte, Statuszeile unter der Karte, Antwortgruppe mit
  * dem Fragetext als Namen. Ohne eigene Antwort steht „Zeit abgelaufen“ (`timer`-Icon) in genau dieser Statuszeile
  * (dort, wo in der Frage „Warte auf …“ stand), sonst bleibt sie leer. Karte und Antworten stehen beim „cut“ still.
  */
-export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt }: AnswerRevealOverlayProps) {
+export function AnswerRevealOverlay({
+  question,
+  players,
+  selfId,
+  phaseStartedAt,
+  phaseEndsAt,
+}: AnswerRevealOverlayProps) {
   const reduce = useReducedMotion() ?? false;
   const promptId = useId();
   const headingId = useId();
-  const leaveAt = overlayLeaveAt("answer_reveal", { phaseStartedAt, question }) ?? phaseStartedAt;
-  const { now, enteredAt } = useOverlayClock(phaseStartedAt, [leaveAt]);
+  const leaveAt = overlayLeaveAt("answer_reveal", { phaseStartedAt, phaseEndsAt, question });
+  const { now, enteredAt } = useOverlayClock(phaseStartedAt, leaveAt === null ? [] : [leaveAt]);
   const picks = question.picks;
   const myPick = selfId !== null && picks ? (picks[selfId] ?? null) : null;
   const states = revealAnswerStates(question.correct, myPick);
@@ -57,7 +66,7 @@ export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt 
   const hint = enterMotion({ at: 0, duration: REVEAL.pickersAtMs, from: { opacity: 0 } }, enteredAt, reduce);
 
   return (
-    <OverlayFrame testId="overlay-answer-reveal" leaving={now >= leaveAt}>
+    <OverlayFrame testId="overlay-answer-reveal" leaving={leaveAt !== null && now >= leaveAt}>
       <h2 id={headingId} className="sr-only">
         {de.game.questionHeading(question.index, question.total)}
       </h2>

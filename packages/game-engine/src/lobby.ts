@@ -19,6 +19,7 @@ import {
 } from "@quizmaster/shared";
 import type {
   AddBotCommand,
+  ContinueCommand,
   CreateLobbyInput,
   DisconnectCommand,
   JoinCommand,
@@ -26,11 +27,12 @@ import type {
   LeaveCommand,
   ReconnectCommand,
   RematchCommand,
+  RenameCommand,
   StartCommand,
   UpdateSettingsCommand,
 } from "./commands.ts";
 import { reject, requestPersist, type Tx } from "./context.ts";
-import { resignPlayer, startGame } from "./flow.ts";
+import { onPhaseTimeout, resignPlayer, startGame } from "./flow.ts";
 import { randomId, uniqueRandomId } from "./rng.ts";
 import {
   connectedMembers,
@@ -193,6 +195,35 @@ export function onUpdateSettings(state: LobbyState, command: UpdateSettingsComma
   }
   requestPersist(tx, "settings");
   return { ...state, settings };
+}
+
+/**
+ * Eigenen Namen ändern (ADR-041): nur in der Lobby, Format wie beim Beitritt, eindeutig gegenüber den anderen
+ * Personen (der eigene bisherige Name zählt nicht als belegt). Gleicher Name → keine Änderung.
+ */
+export function onRename(state: LobbyState, command: RenameCommand, tx: Tx): LobbyState {
+  const player = requireMember(state, command.guestId);
+  if (state.phase !== "lobby") reject("INVALID_PHASE", "Namen nur vor Spielbeginn ändern");
+  const format = validateNameFormat(command.name);
+  if (!format.ok) return reject("NAME_REJECTED", `Name: ${format.reason}`);
+  const name = makeUniqueName(
+    format.name,
+    state.players.filter((entry) => entry.playerId !== player.playerId).map((entry) => entry.name),
+  );
+  if (name === player.name) return state;
+  requestPersist(tx, "players");
+  return updatePlayer(state, player.playerId, { name });
+}
+
+/**
+ * „Weiter“ des Hosts (ADR-045): nur in der genannten Weiter-Phase und nur, wenn sie auf den Host wartet (kein
+ * Phasenende). Danach geht es weiter wie nach einem abgelaufenen Timer.
+ */
+export function onContinue(state: LobbyState, command: ContinueCommand, tx: Tx): LobbyState {
+  requireHost(state, command.guestId);
+  if (state.game === null || state.phase !== command.phase) reject("INVALID_PHASE", "Diese Phase läuft nicht");
+  if (state.phaseEndsAt !== null) reject("INVALID_PHASE", "Diese Phase geht automatisch weiter");
+  return onPhaseTimeout(state, tx);
 }
 
 export function onKick(state: LobbyState, command: KickCommand, tx: Tx): LobbyState {

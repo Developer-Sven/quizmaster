@@ -1,10 +1,11 @@
 "use client";
 
-import type { SettingsUpdate } from "@quizmaster/shared";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
+import { errorText } from "@/lib/client/errors";
 import { inviteLink } from "@/lib/client/paths";
+import { writeStoredName } from "@/lib/client/storage";
 import { useOrigin } from "@/lib/client/use-origin";
 import {
   gameActions,
@@ -18,6 +19,7 @@ import {
 import { LastGameCard } from "./last-game-card";
 import { LobbyView } from "./lobby-view";
 import { useLobbyActions } from "./use-lobby-actions";
+import { useSettingsSync } from "./use-settings-sync";
 
 export interface LiveLobbyProps {
   code: string;
@@ -42,12 +44,23 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
   useEffect(() => {
     gameActions.restoreLastGame(code);
   }, [code]);
+  const settingsSync = useSettingsSync(
+    lobby?.settings ?? null,
+    (update) => actions.client().emit("lobby:update-settings", update),
+    (rejected) => {
+      // Abgelehnt (z. B. „Personen maximal“ unter der Personenzahl): Server-Stand neu holen, Wert springt zurück.
+      if (rejected === "INVALID_OPTION" || rejected === "VALIDATION_FAILED") actions.client().resync();
+      else actions.fail(rejected);
+    },
+  );
   if (!lobby) return null;
   const inviteUrl = origin ? inviteLink(origin, code) : "";
 
   const start = async () => {
     if (starting) return;
     setStarting(true);
+    // Gerade getippte Einstellungen zuerst zum Server – sonst kämen sie erst nach dem Start an (ADR-042).
+    await settingsSync.flush();
     const result = await actions.client().emit("lobby:start", {});
     setStarting(false);
     if (!result.ok) actions.fail(result.code);
@@ -65,13 +78,14 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
     if (!result.ok) actions.fail(result.code);
   };
 
-  const changeSettings = async (update: SettingsUpdate) => {
-    const result = await actions.client().emit("lobby:update-settings", update);
-    if (!result.ok) {
-      // Abgelehnt (z. B. „Personen maximal“ unter der Personenzahl): Server-Stand neu holen, Wert springt zurück.
-      if (result.code === "INVALID_OPTION" || result.code === "VALIDATION_FAILED") actions.client().resync();
-      else actions.fail(result.code);
+  const rename = async (name: string): Promise<string | null> => {
+    const result = await actions.client().emit("lobby:rename", { name });
+    if (result.ok) {
+      // Gemerkt wie auf der Startseite: der nächste Beitritt nutzt den neuen Namen.
+      writeStoredName(name);
+      return null;
     }
+    return errorText(result.code);
   };
 
   const addBot = async () => {
@@ -98,7 +112,10 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
       onStart={() => void start()}
       onLeave={() => void leave()}
       onKick={(playerId) => void kick(playerId)}
-      onChangeSettings={(update) => void changeSettings(update)}
+      settings={settingsSync.shown ?? lobby.settings}
+      onChangeSettings={settingsSync.change}
+      onSettingsClosed={() => void settingsSync.flush()}
+      onRename={rename}
       onCopyCode={() => void actions.copyCode(code)}
       onShare={() => void actions.shareInvite(displayCode, inviteUrl || inviteLink(window.location.origin, code))}
       onAddBot={() => void addBot()}

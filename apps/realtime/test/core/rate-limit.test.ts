@@ -72,13 +72,14 @@ describe("Rate-Limits im Mongo-Store", () => {
     collection: database.collections.rateLimits,
   });
 
-  it("zählt in der Collection rateLimits (TTL-Index) und sperrt nach 3 Lobby-Erstellungen je Minute", async () => {
+  it("zählt in der Collection rateLimits (TTL-Index) und sperrt nach 5 Lobby-Erstellungen je Minute", async () => {
     const onStoreError = vi.fn();
     const limits = createRateLimitService({ mode: "normal", store: storeOf(database.client), onStoreError });
     await limits.ensureStore();
     await limits.ensureStore();
     const rule = limits.rule("event.lobby-create.guest.minute");
-    for (let i = 0; i < 3; i++)
+    expect(rule.points).toBe(5);
+    for (let i = 0; i < rule.points; i++)
       expect(await limits.consume(rule, "guest-1")).toMatchObject({ allowed: true, degraded: false });
     const blocked = await limits.consume(rule, "guest-1");
     expect(blocked).toMatchObject({ allowed: false, degraded: false });
@@ -86,7 +87,7 @@ describe("Rate-Limits im Mongo-Store", () => {
     expect(onStoreError).not.toHaveBeenCalled();
 
     const doc = await database.collections.rateLimits.findOne({ key: "qm:event.lobby-create.guest.minute:guest-1" });
-    expect(doc?.points).toBe(4);
+    expect(doc?.points).toBe(rule.points + 1);
     const indexes = await database.collections.rateLimits.indexes();
     expect(indexes.some((index) => index.key.expire === -1 && index.expireAfterSeconds === 0)).toBe(true);
     expect(indexes.some((index) => index.key.key === 1 && index.unique === true)).toBe(true);
@@ -106,7 +107,7 @@ describe("Rate-Limits im Mongo-Store", () => {
       const onStoreError = vi.fn();
       const limits = createRateLimitService({ mode: "normal", store: storeOf(broken), onStoreError });
       const rule = limits.rule("event.lobby-create.guest.minute");
-      for (let i = 0; i < 3; i++)
+      for (let i = 0; i < rule.points; i++)
         expect(await limits.consume(rule, "g")).toMatchObject({ allowed: true, degraded: true });
       expect(await limits.consume(rule, "g")).toMatchObject({ allowed: false, degraded: true });
       expect((await limits.peek(rule, "g")).degraded).toBe(true);

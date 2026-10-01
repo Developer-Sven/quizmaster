@@ -182,11 +182,11 @@ describe("POST /api/session – Schutz", () => {
     }
   });
 
-  it("begrenzt das Anlegen neuer Sessions auf 10 / 10 min je IP (Mongo-Store) → 429 mit Retry-After", async () => {
+  it("begrenzt das Anlegen neuer Sessions auf 30 / 10 min je IP (Mongo-Store, ADR-042) → 429 mit Retry-After", async () => {
     const h = harness();
     const ip = freshIp();
     const before = await guestCount();
-    for (let i = 0; i < 10; i++) expect((await post(h, { ip })).status).toBe(201);
+    for (let i = 0; i < 30; i++) expect((await post(h, { ip })).status).toBe(201);
     const limited = await post(h, { ip });
     expect(limited.status).toBe(429);
     const body = (await limited.json()) as { error: { code: string; retryAfterMs: number } };
@@ -194,7 +194,7 @@ describe("POST /api/session – Schutz", () => {
     expect(body.error.retryAfterMs).toBeGreaterThan(0);
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(Number(limited.headers.get("retry-after"))).toBeLessThanOrEqual(600);
-    expect(await guestCount()).toBe(before + 10);
+    expect(await guestCount()).toBe(before + 30);
     // Andere IP ist nicht betroffen; der Zähler liegt in der Collection rateLimits (mit Test-Präfix).
     expect((await post(h, { ip: freshIp() })).status).toBe(201);
     expect(await t.db.collection(`${t.prefix}rateLimits`).countDocuments()).toBeGreaterThan(0);
@@ -211,8 +211,8 @@ describe("POST /api/session – Schutz", () => {
     const renewed = await post(h, { ip, cookie: `kd_sid=${token}` });
     expect(renewed.status).toBe(200);
     expect(sessionCookieOf(renewed)).toBeDefined();
-    // … lassen das Anlege-Kontingent unberührt: 9 weitere neue Gäste gehen noch, der 11. nicht.
-    for (let i = 0; i < 9; i++) expect((await post(h, { ip })).status).toBe(201);
+    // … lassen das Anlege-Kontingent unberührt: 29 weitere neue Gäste gehen noch, der 31. nicht.
+    for (let i = 0; i < 29; i++) expect((await post(h, { ip })).status).toBe(201);
     expect((await post(h, { ip })).status).toBe(429);
     // Wer schon eine gültige Session hat, ist vom ausgeschöpften Anlege-Limit nicht betroffen.
     expect((await post(h, { ip, cookie: `kd_sid=${token}` })).status).toBe(200);

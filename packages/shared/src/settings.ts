@@ -2,6 +2,7 @@
  * Lobby-Einstellungen (docs/01 §Einstellungen, ADR-017): nur Host, nur vor Spielbeginn. Alles andere
  * ist fest wie beim Vorbild (`GAME_RULES`).
  */
+import type { Phase } from "./constants.ts";
 import * as z from "./zod.ts";
 
 /** Einstellbare Werte mit Grenzen und Standard. */
@@ -31,11 +32,36 @@ export const GAME_RULES = {
 
 const bounded = (bounds: { readonly min: number; readonly max: number }) => z.int().min(bounds.min).max(bounds.max);
 
-/** Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). */
+/**
+ * Weiter nach jeder Frage (Auflösung), jeder Kategorie (Zug-Ergebnis) und jedem Zwischenstand (Rundentafel),
+ * ADR-045: Sekunden bis es automatisch weitergeht – oder 0 = der Host tippt „Weiter“.
+ */
+export const ADVANCE_SECONDS = [0, 3, 5, 7, 10, 15, 20, 30] as const;
+/** „Host tippt Weiter“ statt automatisch. */
+export const MANUAL_ADVANCE = 0;
+/** Standard: das Spieltempo aus ADR-044. */
+export const ADVANCE_DEFAULTS = { afterQuestionSec: 5, afterTurnSec: 5, afterRoundSec: 7 } as const;
+/** Phasen, nach denen es automatisch oder per Host weitergeht. */
+export const ADVANCE_PHASES = ["reveal", "turn_summary", "round_board"] as const satisfies readonly Phase[];
+export type AdvancePhase = (typeof ADVANCE_PHASES)[number];
+
+const advanceSeconds = z
+  .int()
+  .min(0)
+  .max(30)
+  .refine((value) => (ADVANCE_SECONDS as readonly number[]).includes(value), { message: "keine erlaubte Stufe" });
+
+/**
+ * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Die Weiter-Felder haben
+ * Standardwerte: Snapshots und Zustände von vor ADR-045 bleiben lesbar.
+ */
 export const lobbySettingsSchema = z.strictObject({
   rounds: bounded(SETTINGS_BOUNDS.rounds),
   questionsPerCategory: bounded(SETTINGS_BOUNDS.questionsPerCategory),
   maxPlayers: bounded(SETTINGS_BOUNDS.maxPlayers),
+  afterQuestionSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterQuestionSec),
+  afterTurnSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterTurnSec),
+  afterRoundSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterRoundSec),
 });
 export type LobbySettings = z.output<typeof lobbySettingsSchema>;
 
@@ -43,7 +69,33 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = Object.freeze({
   rounds: SETTINGS_BOUNDS.rounds.default,
   questionsPerCategory: SETTINGS_BOUNDS.questionsPerCategory.default,
   maxPlayers: SETTINGS_BOUNDS.maxPlayers.default,
+  ...ADVANCE_DEFAULTS,
 });
+
+export type AdvanceSettings = Pick<LobbySettings, "afterQuestionSec" | "afterTurnSec" | "afterRoundSec">;
+
+/** Eingestellte Sekunden für eine Weiter-Phase (0 = Host tippt „Weiter“). */
+export function advanceSecondsFor(settings: AdvanceSettings, phase: AdvancePhase): number {
+  switch (phase) {
+    case "reveal":
+      return settings.afterQuestionSec;
+    case "turn_summary":
+      return settings.afterTurnSec;
+    case "round_board":
+      return settings.afterRoundSec;
+  }
+}
+
+/** Dauer der Phase in ms – `null`, wenn der Host „Weiter“ tippt (kein Timer). */
+export function advanceDurationMs(settings: AdvanceSettings, phase: AdvancePhase): number | null {
+  const seconds = advanceSecondsFor(settings, phase);
+  return seconds === MANUAL_ADVANCE ? null : seconds * 1_000;
+}
+
+/** Ist `phase` eine Weiter-Phase? */
+export function isAdvancePhase(phase: Phase): phase is AdvancePhase {
+  return (ADVANCE_PHASES as readonly Phase[]).includes(phase);
+}
 
 /**
  * Payload von `lobby:update-settings`: nur geänderte Felder, mindestens eines. Ob `maxPlayers` unter
@@ -54,6 +106,9 @@ export const updateSettingsPayloadSchema = z
     rounds: bounded(SETTINGS_BOUNDS.rounds).optional(),
     questionsPerCategory: bounded(SETTINGS_BOUNDS.questionsPerCategory).optional(),
     maxPlayers: bounded(SETTINGS_BOUNDS.maxPlayers).optional(),
+    afterQuestionSec: advanceSeconds.optional(),
+    afterTurnSec: advanceSeconds.optional(),
+    afterRoundSec: advanceSeconds.optional(),
   })
   .refine((update) => Object.values(update).some((value) => value !== undefined), {
     message: "mindestens eine Einstellung angeben",
@@ -66,5 +121,8 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
     rounds: update.rounds ?? current.rounds,
     questionsPerCategory: update.questionsPerCategory ?? current.questionsPerCategory,
     maxPlayers: update.maxPlayers ?? current.maxPlayers,
+    afterQuestionSec: update.afterQuestionSec ?? current.afterQuestionSec,
+    afterTurnSec: update.afterTurnSec ?? current.afterTurnSec,
+    afterRoundSec: update.afterRoundSec ?? current.afterRoundSec,
   };
 }

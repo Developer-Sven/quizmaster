@@ -53,13 +53,13 @@ describe("Event-Flut", () => {
 });
 
 describe("Code-Brute-Force", () => {
-  it("mehr als 20 falsche Codes je IP in 5 min → 15 min gesperrt – auch für gültige Codes, über alle Sockets der IP", async () => {
+  it("mehr als 20 falsche Codes je IP in 5 min → 5 min gesperrt (ADR-042) – auch für gültige Codes, über alle Sockets der IP", async () => {
     const host = await server.connectClient();
     const code = await createLobby(host, "Mia");
     const ip = server.nextIp();
     const guessers: TestClient[] = [];
     let failures = 0;
-    // 20 Fehlversuche sind frei, der 21. löst die Sperre aus (Socket-Limit 10/min → mehrere Sockets der IP).
+    // 20 Fehlversuche sind frei, der 21. löst die Sperre aus (über mehrere Sockets der IP verteilt).
     for (let socket = 0; socket < 3 && failures < 21; socket++) {
       const guesser = await server.connectClient({ ip });
       guessers.push(guesser);
@@ -75,7 +75,10 @@ describe("Code-Brute-Force", () => {
     const fresh = await server.connectClient({ ip });
     const blocked = await fresh.emit("lobby:join", { code, name: "Rater" });
     expect(blocked).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
-    if (!blocked.ok) expect(blocked.error.retryAfterMs ?? 0).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs ?? 0).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs ?? 0).toBeLessThanOrEqual(5 * 60_000);
+    }
     // Die Sperre liegt im Mongo-Store: ein zweiter Prozess sieht sie ebenso (verteilte Zähler).
     const store = createRateLimitService({
       mode: "normal",

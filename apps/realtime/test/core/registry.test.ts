@@ -43,11 +43,13 @@ const SAMPLE_ACK: { [E in ClientEventName]: ClientEventAckData<E> } = {
   "lobby:leave": null,
   "lobby:update-settings": null,
   "lobby:kick": null,
+  "lobby:rename": null,
   "lobby:start": null,
   "game:pick": null,
   "game:answer": { accepted: true },
   "game:review": [],
   "game:rematch": null,
+  "game:continue": null,
   "question:rate": null,
   "question:report": null,
   "dev:add-bot": null,
@@ -375,15 +377,15 @@ describe("Event-Pipeline", () => {
     expect(await metricValue(metrics, "qm_violations_total", { reason: "rate_limit" })).toBe(1);
   });
 
-  it("mehrere Regeln je Event: lobby:create 3/min je Gast", async () => {
+  it("mehrere Regeln je Event: lobby:create 5/min je Gast (ADR-042)", async () => {
     const { registry, attach } = createTestRegistry();
     registry.register("lobby:create", () => ({ code: "ABC234" }));
     const guestId = randomUUID();
     const first = attach(createFakeSocket({ guestId }));
     const second = attach(createFakeSocket({ guestId }));
-    expect((await first.call("lobby:create", { name: "Mia" })).ok).toBe(true);
-    expect((await second.call("lobby:create", { name: "Mia" })).ok).toBe(true);
-    expect((await first.call("lobby:create", { name: "Mia" })).ok).toBe(true);
+    for (const socket of [first, second, first, second, first]) {
+      expect((await socket.call("lobby:create", { name: "Mia" })).ok).toBe(true);
+    }
     expectError(await second.call("lobby:create", { name: "Mia" }), "RATE_LIMITED");
   });
 
@@ -400,7 +402,7 @@ describe("Event-Pipeline", () => {
     expect(await metricValue(metrics, "qm_rate_limit_hits_total", { rule: "socket.any-event" })).toBe(1);
   });
 
-  it("lobby:join: 20 Fehlversuche je IP in 5 min → 15 min Sperre (Handler nicht mehr aufgerufen)", async () => {
+  it("lobby:join: 20 Fehlversuche je IP in 5 min → 5 min Sperre (Handler nicht mehr aufgerufen, ADR-042)", async () => {
     const { registry, attach, metrics } = createTestRegistry();
     const handler = vi.fn<EventHandler<"lobby:join">>(() => {
       throw new ProtocolError("LOBBY_NOT_FOUND");
@@ -416,7 +418,10 @@ describe("Event-Pipeline", () => {
     expect(handler).toHaveBeenCalledTimes(21);
     const blocked = await join(third);
     expectError(blocked, "RATE_LIMITED");
-    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs).toBeLessThanOrEqual(5 * 60_000);
+    }
     expect(handler).toHaveBeenCalledTimes(21);
     expect(await metricValue(metrics, "qm_rate_limit_hits_total", { rule: "event.lobby-join.failed.ip" })).toBe(2);
     // Andere IP ist nicht betroffen.
@@ -456,7 +461,10 @@ describe("Event-Pipeline", () => {
     // Direkt nach dem Ack des 21. Fehlversuchs: gesperrt, mit (fast) voller Sperrdauer.
     const blocked = await join(sockets[2] as FakeSocket);
     expectError(blocked, "RATE_LIMITED");
-    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs).toBeLessThanOrEqual(5 * 60_000);
+    }
     expect(handler).toHaveBeenCalledTimes(21);
   });
 
@@ -508,7 +516,10 @@ describe("Event-Pipeline", () => {
     }
     const blocked = await (sockets[2] as FakeSocket).call("lobby:resume", { code: "ABC234" });
     expectError(blocked, "RATE_LIMITED");
-    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs).toBeLessThanOrEqual(5 * 60_000);
+    }
     expect(handler).toHaveBeenCalledTimes(21);
     // lobby:join zählt getrennt (eigene Regel).
     registry.register("lobby:join", () => ({ code: "ABC234" }));

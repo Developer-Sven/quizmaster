@@ -108,28 +108,34 @@ describe("Bewegungsreduktion (prefers-reduced-motion)", () => {
 describe("Overlay-Phasen aus der Serverzeit", () => {
   const start = 100_000;
 
-  it("folgt dem Intro: Personen, Titelkarte ab 3.200 ms, Ausblenden ab 3.700 ms", () => {
+  const ended = (phaseEndsAt: number | null) => ({ phaseStartedAt: start, phaseEndsAt, question: null });
+
+  it("folgt dem Intro (5 s, ADR-044): Personen, Titelkarte ab 3.500 ms, Ausblenden ab 4.600 ms", () => {
     expect(introStage(0)).toBe("people");
-    expect(introStage(3_199)).toBe("people");
-    expect(introStage(3_200)).toBe("title");
-    expect(introStage(3_700)).toBe("done");
-    expect(overlayLeaveAt("intro", { phaseStartedAt: start, question: null })).toBe(start + INTRO_TIMELINE.exitAtMs);
+    expect(introStage(3_499)).toBe("people");
+    expect(introStage(3_500)).toBe("title");
+    expect(introStage(4_600)).toBe("done");
+    expect(overlayLeaveAt("intro", ended(start + 5_000))).toBe(start + INTRO_TIMELINE.exitAtMs);
     expect(CHOREOGRAPHY.intro.avatarsAtMs).toBe(480);
-    expect(CHOREOGRAPHY.intro.avatarStaggerMs).toBe(60);
+    expect(CHOREOGRAPHY.intro.avatarStaggerMs).toBe(150);
   });
 
-  it("blendet die Kategorie nach 1.600 von 2.000 ms Vorlauf aus (im schnellen Modus anteilig)", () => {
-    expect(categoryRevealLeaveAt(start, start + TIMINGS.normal.leadInFirstQuestionMs)).toBe(start + 1_600);
+  it("blendet die Kategorie nach 2.400 von 3.000 ms Vorlauf aus (im schnellen Modus anteilig)", () => {
+    expect(categoryRevealLeaveAt(start, start + TIMINGS.normal.leadInFirstQuestionMs)).toBe(start + 2_400);
     expect(categoryRevealLeaveAt(start, start + TIMINGS.fast.leadInFirstQuestionMs)).toBe(start + 120);
-    const state = { phaseStartedAt: start, question: testQuestion({ startsAt: start + 2_000 }) };
-    expect(overlayLeaveAt("category_reveal", state)).toBe(start + 1_600);
-    expect(overlayLeaveAt("category_reveal", { phaseStartedAt: start, question: null })).toBeNull();
+    const state = { phaseStartedAt: start, phaseEndsAt: null, question: testQuestion({ startsAt: start + 3_000 }) };
+    expect(overlayLeaveAt("category_reveal", state)).toBe(start + 2_400);
+    expect(overlayLeaveAt("category_reveal", ended(null))).toBeNull();
   });
 
-  it("blendet die Auflösung bei 3.000 ms aus; andere Overlays enden mit ihrer Phase", () => {
-    expect(overlayLeaveAt("answer_reveal", { phaseStartedAt: start, question: null })).toBe(start + 3_000);
+  it("blendet die Auflösung 500 ms vor ihrem Ende aus – nicht, wenn sie auf den Host wartet (ADR-045)", () => {
+    expect(overlayLeaveAt("answer_reveal", ended(start + 5_000))).toBe(start + 4_500);
+    expect(overlayLeaveAt("answer_reveal", ended(start + 15_000))).toBe(start + 14_500);
+    expect(overlayLeaveAt("answer_reveal", ended(null))).toBeNull();
+    // Schneller Testmodus (300 ms): kein vorzeitiges Ausblenden, die Phase endet vorher.
+    expect(overlayLeaveAt("answer_reveal", ended(start + 300))).toBeNull();
     for (const kind of ["category_pick", "question", "turn_summary", "round_board", "game_over"] as const) {
-      expect(overlayLeaveAt(kind, { phaseStartedAt: start, question: null })).toBeNull();
+      expect(overlayLeaveAt(kind, ended(start + 5_000))).toBeNull();
     }
   });
 
@@ -170,7 +176,7 @@ describe("Wandernder Rahmen der Kategoriewahl", () => {
   });
 });
 
-describe("Punkte: „+1“ ab 400 ms der Auflösung", () => {
+describe("Punkte: „+1“ ab 1.200 ms der Auflösung", () => {
   const players = [testPlayer("p1", { score: 3 }), testPlayer("p2", { score: 5 }), testPlayer("p3", { score: 1 })];
   const reveal = testLobby({
     phase: "reveal",
@@ -184,12 +190,12 @@ describe("Punkte: „+1“ ab 400 ms der Auflösung", () => {
     expect(revealGains({ ...reveal, phase: "question" }).size).toBe(0);
   });
 
-  it("zeigt bis 400 ms den alten Stand, danach den neuen", () => {
-    expect(pointsShown(reveal, 10_399)).toBe(false);
-    expect(pointsShown(reveal, 10_400)).toBe(true);
+  it("zeigt bis 1.200 ms den alten Stand, danach den neuen", () => {
+    expect(pointsShown(reveal, 11_199)).toBe(false);
+    expect(pointsShown(reveal, 11_200)).toBe(true);
     expect(displayedScores(reveal, false)).toEqual({ p1: 2, p2: 5, p3: 1 });
     expect(displayedScores(reveal, true)).toEqual({ p1: 3, p2: 5, p3: 1 });
-    expect(scoreBoundaries(reveal)).toEqual([10_400]);
+    expect(scoreBoundaries(reveal)).toEqual([11_200]);
   });
 
   it("zeigt außerhalb der Auflösung immer den Serverstand", () => {

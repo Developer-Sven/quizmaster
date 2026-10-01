@@ -89,6 +89,7 @@ describe("Auflösung: gleiche Gruppe, gleiche Lage", () => {
       players: [mia, ben],
       selfId: "p1",
       phaseStartedAt: NOW - 500,
+      phaseEndsAt: NOW + 4_500,
     });
     const group = /<fieldset[^>]*>/.exec(html)?.[0] ?? "";
     const labelledBy = /aria-labelledby="([^"]+)"/.exec(group)?.[1];

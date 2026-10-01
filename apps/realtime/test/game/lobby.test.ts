@@ -5,7 +5,7 @@
  * höchstens einer Lobby“ und „DISCONNECT erst beim letzten Socket“.
  */
 import { randomUUID } from "node:crypto";
-import type { PublicLobbyState } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS, type PublicLobbyState } from "@quizmaster/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { countsAsCodeGuess } from "../../src/handlers/lobby.ts";
 import { eventually, metricValue, type TestServer } from "../helpers/index.ts";
@@ -122,7 +122,7 @@ describe("Erstellen und Beitreten", () => {
       ok: false,
       error: { code: "INVALID_OPTION" },
     });
-    expect(lastState(host)?.settings).toEqual({ rounds: 3, questionsPerCategory: 3, maxPlayers: 3 });
+    expect(lastState(host)?.settings).toEqual({ ...DEFAULT_LOBBY_SETTINGS, maxPlayers: 3 });
     for (const client of [host, second, third]) client.close();
   });
 
@@ -154,11 +154,11 @@ describe("Code-Raten", () => {
     stranger.close();
   });
 
-  it("20 fehlgeschlagene Beitritte je IP in 5 min → RATE_LIMITED (15 min Sperre), auch für gültige Codes", async () => {
+  it("20 fehlgeschlagene Beitritte je IP in 5 min → RATE_LIMITED (5 min Sperre, ADR-042), auch für gültige Codes", async () => {
     const host = await connectGuest(server);
     const code = await createLobby(host);
     const ip = server.nextIp();
-    // Mehrere Sockets derselben IP (das Socket-Limit von 10 Beitritten je Minute greift sonst zuerst).
+    // Mehrere Sockets derselben IP (das Socket-Limit von 20 Beitritten je Minute greift sonst zuerst).
     const guessers = await Promise.all([0, 1, 2].map(() => connectGuest(server, { ip })));
     let failures = 0;
     for (const guesser of guessers) {
@@ -178,7 +178,10 @@ describe("Code-Raten", () => {
     // Der Kern verbucht den Fehlversuch VOR dem Ack: Der direkt folgende Versuch ist schon gesperrt.
     const blocked = await last.emit("lobby:join", { code, name: "Rater" });
     expect(blocked).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
-    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs).toBeLessThanOrEqual(5 * 60_000);
+    }
     // Eine andere IP ist nicht betroffen.
     const other = await connectGuest(server);
     await joinLobby(other, code, "Ben");
@@ -203,7 +206,10 @@ describe("Code-Raten", () => {
     if (last === undefined) throw new Error("Client fehlt");
     const blocked = await last.emit("lobby:resume", { code });
     expect(blocked).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
-    if (!blocked.ok) expect(blocked.error.retryAfterMs).toBeGreaterThan(14 * 60_000);
+    if (!blocked.ok) {
+      expect(blocked.error.retryAfterMs).toBeGreaterThan(4 * 60_000);
+      expect(blocked.error.retryAfterMs).toBeLessThanOrEqual(5 * 60_000);
+    }
     // Beitreten zählt getrennt und ist von derselben IP weiter möglich.
     await joinLobby(last, code, "Rater");
     for (const client of [host, ...guessers]) client.close();
@@ -317,51 +323,54 @@ describe("Kontingente und Kill-Switches", () => {
     await server.app.services.appConfig.load();
   });
 
-  it("zweite gehostete Lobby → RATE_LIMITED; nach dem Verlassen der ersten wieder erlaubt", async () => {
+  it("zweite Lobby desselben Gasts: die erste wird vorher verlassen (ADR-042) – ohne Menschen geschlossen", async () => {
     const guestId = randomUUID();
     const first = await connectGuest(server, { guestId });
     const other = await connectGuest(server, { guestId });
     const code = await createLobby(first, "Mia");
     expect(runtimeOf(server).lobbies.hostsActiveLobby(guestId)).toBe(true);
-    expect(await other.emit("lobby:create", { name: "Mia" })).toMatchObject({
-      ok: false,
-      error: { code: "RATE_LIMITED" },
-    });
-    expect(await first.emit("lobby:leave", {})).toEqual({ ok: true, data: null });
-    // Ohne Menschen schließt die Lobby sofort; der Code ist wieder frei.
+    const created = await other.emit("lobby:create", { name: "Mia" });
+    if (!created.ok) throw new Error(created.error.code);
+    expect(created.data.code).not.toBe(code);
+    // Die alte Lobby hatte nur diese Person: sie schließt sofort, der Code ist wieder frei.
     await eventually(() => runtimeOf(server).lobbies.get(code) === undefined);
     await eventually(async () => !(await server.db.repos.lobbies.isCodeTaken(code)));
-    expect((await other.emit("lobby:create", { name: "Mia" })).ok).toBe(true);
+    expect(
+      runtimeOf(server)
+        .lobbies.membershipsOf(guestId)
+        .map((actor) => actor.code),
+    ).toEqual([created.data.code]);
     first.close();
     other.close();
   });
 
-  it("lobby:create nur ohne aktive Lobby-Mitgliedschaft (docs/05): Mitglied woanders → RATE_LIMITED", async () => {
+  it("lobby:create als Mitglied einer anderen Lobby: verlässt sie zuerst, die anderen bleiben (ADR-042)", async () => {
     const host = await connectGuest(server);
     const code = await createLobby(host, "Mia");
     const guestId = randomUUID();
     const member = await connectGuest(server, { guestId });
     await joinLobby(member, code, "Ben");
-    // Zweites Gerät/Tab desselben Gasts ohne eigene Lobby-Zuordnung – und der Lobby-Socket selbst.
+    // Zweites Gerät/Tab desselben Gasts ohne eigene Lobby-Zuordnung.
     const otherDevice = await connectGuest(server, { guestId });
-    expect(await otherDevice.emit("lobby:create", { name: "Ben" })).toMatchObject({
-      ok: false,
-      error: { code: "RATE_LIMITED" },
-    });
-    expect(await member.emit("lobby:create", { name: "Ben" })).toMatchObject({
-      ok: false,
-      error: { code: "RATE_LIMITED" },
-    });
+    const left = host.waitFor("lobby:state", (state) => state.players.length === 1);
+    const created = await otherDevice.emit("lobby:create", { name: "Ben" });
+    if (!created.ok) throw new Error(created.error.code);
+    expect((await left).players.map((player) => player.name)).toEqual(["Mia"]);
     // Weiterhin genau EINE Mitgliedschaft – die Zuordnung „einzige Lobby des Gasts“ bleibt eindeutig.
     expect(
       runtimeOf(server)
         .lobbies.membershipsOf(guestId)
         .map((actor) => actor.code),
-    ).toEqual([code]);
-    expect(actorOf(server, code).hasSocket(serverSocketOf(server, member))).toBe(true);
-    // Nach dem Verlassen ist die Erstellung erlaubt.
-    expect(await member.emit("lobby:leave", {})).toEqual({ ok: true, data: null });
-    expect((await otherDevice.emit("lobby:create", { name: "Ben" })).ok).toBe(true);
+    ).toEqual([created.data.code]);
+    expect(actorOf(server, code).hasSocket(serverSocketOf(server, member))).toBe(false);
+    // Der Lobby-Socket selbst darf ebenfalls neu erstellen: er verlässt die eben erstellte Lobby.
+    const again = await member.emit("lobby:create", { name: "Ben" });
+    if (!again.ok) throw new Error(again.error.code);
+    expect(
+      runtimeOf(server)
+        .lobbies.membershipsOf(guestId)
+        .map((actor) => actor.code),
+    ).toEqual([again.data.code]);
     for (const client of [host, member, otherDevice]) client.close();
   });
 
@@ -416,6 +425,49 @@ describe("Kontingente und Kill-Switches", () => {
     expect(await memberAgain.emit("lobby:join", { code, name: "egal" })).toEqual({ ok: true, data: { code } });
     expect(await memberAgain.emit("lobby:resume", { code })).toEqual({ ok: true, data: { code } });
     for (const client of [host, member, plain, stale, verified, memberAgain]) client.close();
+  });
+});
+
+describe("Namen ändern (ADR-041)", () => {
+  it("lobby:rename: eigener Name in der Lobby, alle sehen ihn; moderiert; eindeutig", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const guest = await connectGuest(server);
+    await joinLobby(guest, code, "Gast-123456");
+    const renamed = host.waitFor("lobby:state", (state) => state.players.some((player) => player.name === "Ben"));
+    expect(await guest.emit("lobby:rename", { name: "  Ben  " })).toEqual({ ok: true, data: null });
+    expect((await renamed).players.map((player) => player.name)).toEqual(["Mia", "Ben"]);
+    // Name der anderen Person → eindeutig; Beleidigung → NAME_REJECTED; zu kurz → NAME_REJECTED.
+    expect(await guest.emit("lobby:rename", { name: "Mia" })).toEqual({ ok: true, data: null });
+    await eventually(() => lastState(host)?.players[1]?.name === "Mia 2");
+    expect(await guest.emit("lobby:rename", { name: "Arschloch" })).toMatchObject({
+      ok: false,
+      error: { code: "NAME_REJECTED" },
+    });
+    expect(await guest.emit("lobby:rename", { name: "x" })).toMatchObject({
+      ok: false,
+      error: { code: "NAME_REJECTED" },
+    });
+    expect(lastState(host)?.players[1]?.name).toBe("Mia 2");
+    for (const client of [host, guest]) client.close();
+  });
+
+  it("lobby:rename nur für Mitglieder und nur in der Lobby", async () => {
+    const outsider = await connectGuest(server);
+    expect(await outsider.emit("lobby:rename", { name: "Lea" })).toMatchObject({
+      ok: false,
+      error: { code: "LOBBY_NOT_FOUND" },
+    });
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const guest = await connectGuest(server);
+    await joinLobby(guest, code, "Ben");
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    expect(await guest.emit("lobby:rename", { name: "Benni" })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PHASE" },
+    });
+    for (const client of [outsider, host, guest]) client.close();
   });
 });
 

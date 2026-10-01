@@ -12,10 +12,10 @@ export const transitions = {
   exit: { duration: seconds(DURATION_MS.base), ease: EASING.exit },
   /** Zustandswechsel und reduzierte Bewegung: Überblendung 200 ms standard */
   fade: { duration: seconds(DURATION_MS.base), ease: EASING.standard },
-  /** Punkte +1: 480 ms standard */
-  float: { duration: seconds(DURATION_MS.overlay), ease: EASING.standard },
-  /** Zahl hochzählen: 400 ms standard */
-  count: { duration: 0.4, ease: EASING.standard },
+  /** Punkte +1: 900 ms standard (Spieltempo ADR-044) */
+  float: { duration: 0.9, ease: EASING.standard },
+  /** Zahl hochzählen: 600 ms standard */
+  count: { duration: 0.6, ease: EASING.standard },
 } as const;
 
 /** Ein-/Ausblenden eines Panels (Dialog, Toast); bei reduzierter Bewegung nur Deckkraft. */

@@ -1,6 +1,6 @@
 "use client";
 
-import type { AnswerIndex } from "@quizmaster/shared";
+import type { AdvancePhase, AnswerIndex } from "@quizmaster/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
@@ -44,6 +44,8 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
   const soundOn = useGameStore(selectSoundOn);
   const actions = useLobbyActions(realtimeUrl);
   const [busy, setBusy] = useState<{ leave?: boolean; resign?: boolean }>({});
+  /** Beginn der Phase, für die „Weiter“ gerade gesendet wird (ADR-045) – danach wieder frei */
+  const [continuing, setContinuing] = useState<number | null>(null);
   useWakeLock(lobby !== null && isRunningPhase(lobby.phase));
   if (!lobby) return null;
 
@@ -82,6 +84,18 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
     actions.fail(result.code);
   };
 
+  const continueGame = async (phase: AdvancePhase) => {
+    const startedAt = lobby.phaseStartedAt;
+    if (continuing === startedAt) return;
+    setContinuing(startedAt);
+    const result = await actions.client().emit("game:continue", { phase });
+    // INVALID_PHASE: schon weiter (Doppeltipp, zweites Gerät) – kein Hinweis nötig.
+    if (!result.ok && result.code !== "INVALID_PHASE") {
+      setContinuing(null);
+      actions.fail(result.code);
+    }
+  };
+
   const leave = async (kind: "leave" | "resign") => {
     setBusy((current) => ({ ...current, [kind]: true }));
     await actions.client().leaveLobby();
@@ -97,7 +111,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
       pendingPick={pendingPick}
       syncGeneration={syncGeneration}
       soundOn={soundOn}
-      busy={busy}
+      busy={{ ...busy, continue: continuing === lobby.phaseStartedAt }}
       banner={lobby.phase === "game_over" ? <StatusBanners /> : null}
       handlers={{
         onPick: (categoryId) => void pick(categoryId),
@@ -111,6 +125,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
           gameActions.setSoundOn(!soundOn);
         },
         onLeave: () => void leave("leave"),
+        onContinue: (phase) => void continueGame(phase),
       }}
     />
   );

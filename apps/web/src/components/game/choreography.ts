@@ -19,6 +19,7 @@
 import type { PublicLobbyState } from "@quizmaster/shared";
 import type { HapticKind } from "../../lib/client/haptics";
 import {
+  ANSWER_REVEAL_EXIT_BEFORE_END_MS,
   INTRO_TIMELINE,
   PICK_HIGHLIGHT_STEP_MS,
   pickHighlightIndex,
@@ -33,30 +34,30 @@ import { ownOutcome } from "./results";
 // ---------------------------------------------------------------------------------------------------
 
 export const CHOREOGRAPHY = {
-  /** 1 · Intro „Anpfiff“ (Phase `intro`, 4 s) */
+  /** 1 · Intro „Anpfiff“ (Phase `intro`, 5 s – Spieltempo ADR-044: alles etwa doppelt so ruhig) */
   intro: {
     /** 0–480 ms Scrim, danach fahren die Avatare ein */
     avatarsAtMs: INTRO_TIMELINE.scrimMs,
     avatarStaggerMs: STAGGER_MS.people,
     avatarRisePx: 24,
-    enterMs: DURATION_MS.slow,
+    enterMs: DURATION_MS.overlay,
     titleAtMs: INTRO_TIMELINE.titleAtMs,
     titleRisePx: 24,
     exitAtMs: INTRO_TIMELINE.exitAtMs,
   },
   /** 2 · Kategoriewahl (Phase `category_pick`, 15 s) */
   pick: {
-    tileStaggerMs: STAGGER_MS.list,
-    enterMs: DURATION_MS.slow,
+    tileStaggerMs: STAGGER_MS.tiles,
+    enterMs: DURATION_MS.overlay,
     wanderStepMs: PICK_HIGHLIGHT_STEP_MS,
     fadeOthersMs: DURATION_MS.base,
   },
-  /** 3 · Kategorie-Reveal (Vorlauf der ersten Frage eines Zuges, 2 s) */
+  /** 3 · Kategorie-Reveal (Vorlauf der ersten Frage eines Zuges, 3 s) */
   categoryReveal: {
-    flightMs: DURATION_MS.slow,
-    tileMs: DURATION_MS.slow,
+    flightMs: DURATION_MS.overlay,
+    tileMs: DURATION_MS.overlay,
     tileFromScale: 0.8,
-    /** Ausblenden nach 80 % des Vorlaufs (1.600 von 2.000 ms) */
+    /** Ausblenden nach 80 % des Vorlaufs (2.400 von 3.000 ms) */
     exitFraction: 0.8,
     /** Der Flug startet nur, wenn die Einblendung höchstens so spät eingehängt wird. */
     flightLateMs: 250,
@@ -71,39 +72,40 @@ export const CHOREOGRAPHY = {
     /** Ab dieser Restzeit: Balken rot, Ton `tick` einmal pro Sekunde */
     tickFromMs: 5_000,
   },
-  /** 6 · Auflösung (Phase `reveal`, 3,5 s) */
+  /** 6 · Auflösung (Phase `reveal`, Standard 5 s bzw. Weiter-Einstellung, ADR-045) */
   answerReveal: {
     shakeMs: 160,
-    pickersAtMs: DURATION_MS.base,
+    pickersAtMs: 500,
     pickerStaggerMs: STAGGER_MS.pickers,
     maxPickers: 4,
-    pointsAtMs: 400,
-    exitAtMs: 3_000,
+    pointsAtMs: 1_200,
+    /** Ausblenden 500 ms vor dem Phasenende (wartet die Auflösung auf den Host: gar nicht) */
+    exitBeforeEndMs: ANSWER_REVEAL_EXIT_BEFORE_END_MS,
   },
-  /** 7 · Zug-Ergebnis (Phase `turn_summary`, 4 s): Sheet fährt von unten hoch (um die eigene Höhe, 320 ms) */
+  /** 7 · Zug-Ergebnis (Phase `turn_summary`, Standard 5 s): Sheet fährt von unten hoch (480 ms) */
   turnSummary: {
-    sheetMs: DURATION_MS.slow,
+    sheetMs: DURATION_MS.overlay,
     sheetFrom: "100%",
-    squaresAtMs: DURATION_MS.slow,
-    squareMs: DURATION_MS.base,
+    squaresAtMs: 600,
+    squareMs: DURATION_MS.slow,
   },
-  /** 8 · Rundentafel (Phase `round_board`, 6 s): neue Zeilen füllen sich (Board/fillDelayMs) */
+  /** 8 · Rundentafel (Phase `round_board`, Standard 7 s): neue Zeilen füllen sich (Board/fillDelayMs) */
   roundBoard: {
-    panelMs: DURATION_MS.slow,
-    squareMs: DURATION_MS.base,
+    panelMs: DURATION_MS.overlay,
+    squareMs: DURATION_MS.slow,
   },
-  /** 9 · Spielende (Phase `game_over`) */
+  /** 9 · Spielende (Phase `game_over`, 6 s) */
   gameOver: {
     headlineMs: DURATION_MS.overlay,
     headlineFromScale: 0.96,
-    avatarsAtMs: DURATION_MS.overlay,
-    avatarMs: DURATION_MS.slow,
+    avatarsAtMs: 640,
+    avatarMs: DURATION_MS.overlay,
     avatarFromPx: 24,
-    crownAtMs: DURATION_MS.overlay + DURATION_MS.slow,
-    crownMs: DURATION_MS.slow,
-    podiumAtMs: DURATION_MS.overlay,
+    crownAtMs: 640 + DURATION_MS.overlay,
+    crownMs: DURATION_MS.overlay,
+    podiumAtMs: 640,
     podiumStaggerMs: STAGGER_MS.podium,
-    columnMs: DURATION_MS.slow,
+    columnMs: DURATION_MS.overlay,
   },
 } as const;
 
@@ -231,20 +233,24 @@ export function stageTransition(kind: StageKind): StageTransition {
 }
 
 /**
- * Serverzeitpunkt, zu dem ein Overlay noch innerhalb seiner Phase ausblendet (docs/09 §7): Intro bei 3.700 ms,
- * Kategorie-Einblendung nach 80 % des Vorlaufs (1.600 von 2.000 ms), Auflösung bei 3.000 ms; sonst `null`.
+ * Serverzeitpunkt, zu dem ein Overlay noch innerhalb seiner Phase ausblendet (docs/09 §7): Intro bei 4.600 ms,
+ * Kategorie-Einblendung nach 80 % des Vorlaufs (2.400 von 3.000 ms), Auflösung 500 ms vor ihrem Ende – nicht,
+ * wenn sie auf den Host wartet (ADR-045) oder zu kurz ist (schneller Testmodus); sonst `null`.
  */
 export function overlayLeaveAt(
   kind: StageKind,
-  state: Pick<PublicLobbyState, "phaseStartedAt" | "question">,
+  state: Pick<PublicLobbyState, "phaseStartedAt" | "phaseEndsAt" | "question">,
 ): number | null {
   switch (kind) {
     case "intro":
       return state.phaseStartedAt + CHOREOGRAPHY.intro.exitAtMs;
     case "category_reveal":
       return state.question ? categoryRevealLeaveAt(state.phaseStartedAt, state.question.startsAt) : null;
-    case "answer_reveal":
-      return state.phaseStartedAt + CHOREOGRAPHY.answerReveal.exitAtMs;
+    case "answer_reveal": {
+      if (state.phaseEndsAt === null) return null;
+      const leaveAt = state.phaseEndsAt - CHOREOGRAPHY.answerReveal.exitBeforeEndMs;
+      return leaveAt > state.phaseStartedAt + CHOREOGRAPHY.answerReveal.pointsAtMs ? leaveAt : null;
+    }
     default:
       return null;
   }

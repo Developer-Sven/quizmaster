@@ -458,7 +458,14 @@ describe("Spielende und Revanche", () => {
     expect(pub.players.every((player) => player.score === 0 && player.status === "active")).toBe(true);
     expect(pub.board).toEqual([]);
     expect(pub.results).toBeNull();
-    expect(pub.settings).toEqual({ rounds: 1, questionsPerCategory: 2, maxPlayers: 8 });
+    expect(pub.settings).toEqual({
+      rounds: 1,
+      questionsPerCategory: 2,
+      maxPlayers: 8,
+      afterQuestionSec: 5,
+      afterTurnSec: 5,
+      afterRoundSec: 7,
+    });
     expect(sim.state.game?.gameId).not.toBe(firstGameId);
     expect([...(pub.order ?? [])].sort()).toEqual(pub.players.map((player) => player.id).sort());
     orders.add(JSON.stringify(pub.order));
@@ -528,6 +535,78 @@ describe("Spielende und Revanche", () => {
       expect(question.instanceId).not.toBe(question.questionId);
     }
     expect(sim.state.phase).toBe("question");
+  });
+});
+
+describe("Weiter nach Frage, Kategorie und Zwischenstand (ADR-045)", () => {
+  it("Standard: automatisch nach 5 / 5 / 7 s – das Spieltempo aus ADR-044", () => {
+    const sim = lobbyWith(2);
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "reveal");
+    expect(sim.state.phaseEndsAt).toBe(sim.state.phaseStartedAt + 5_000);
+    toPhase(sim, "turn_summary");
+    expect(sim.state.phaseEndsAt).toBe(sim.state.phaseStartedAt + 5_000);
+    toPhase(sim, "round_board");
+    expect(sim.state.phaseEndsAt).toBe(sim.state.phaseStartedAt + 7_000);
+  });
+
+  it("eingestellte Sekunden bestimmen die Dauer; im schnellen Testmodus bleiben die festen Werte", () => {
+    const sim = lobbyWith(2);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { afterQuestionSec: 15, afterTurnSec: 3 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "reveal");
+    expect(sim.state.phaseEndsAt).toBe(sim.state.phaseStartedAt + 15_000);
+    toPhase(sim, "turn_summary");
+    expect(sim.state.phaseEndsAt).toBe(sim.state.phaseStartedAt + 3_000);
+    const fast = lobbyWith(2, 0, { timing: "fast" });
+    fast.ok({ type: "UPDATE_SETTINGS", guestId: fast.host, update: { afterQuestionSec: 30 } });
+    fast.ok({ type: "START", guestId: fast.host });
+    toPhase(fast, "reveal");
+    expect(fast.state.phaseEndsAt).toBe(fast.state.phaseStartedAt + getTimings("fast").revealMs);
+  });
+
+  it("„Host tippt Weiter“: kein Timer, nur der Host geht weiter – und nur in der genannten Phase", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { afterQuestionSec: 0, afterTurnSec: 0, afterRoundSec: 0 },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "reveal");
+    expect(sim.state.phaseEndsAt).toBeNull();
+    expect(toPublicState(sim.state).phaseEndsAt).toBeNull();
+    // Es vergeht beliebig Zeit – ohne „Weiter“ bleibt die Auflösung stehen.
+    sim.advance(10 * 60_000);
+    expect(sim.state.phase).toBe("reveal");
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: ben, phase: "reveal" }))).toBe("NOT_HOST");
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "turn_summary" }))).toBe(
+      "INVALID_PHASE",
+    );
+    sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "reveal" });
+    expect(sim.state.phase).not.toBe("reveal");
+    // Doppeltipp: dasselbe „Weiter“ ein zweites Mal überspringt nichts.
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "reveal" }))).toBe("INVALID_PHASE");
+    // Weitere Fragen des Zuges: jede Auflösung wartet ebenso auf den Host.
+    sim.runUntil((state) => state.phase === "reveal" || state.phase === "turn_summary");
+    while (sim.state.phase === "reveal") {
+      expect(sim.state.phaseEndsAt).toBeNull();
+      sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "reveal" });
+      sim.runUntil((state) => state.phase === "reveal" || state.phase === "turn_summary");
+    }
+    expect(sim.state.phase).toBe("turn_summary");
+    expect(sim.state.phaseEndsAt).toBeNull();
+    sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "turn_summary" });
+    expect(sim.state.phase).toBe("category_pick");
+  });
+
+  it("automatische Phase: „Weiter“ wird abgelehnt (INVALID_PHASE); vor dem Spiel gibt es nichts weiterzuschalten", () => {
+    const sim = lobbyWith(2);
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "reveal" }))).toBe("INVALID_PHASE");
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "reveal");
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "reveal" }))).toBe("INVALID_PHASE");
   });
 });
 

@@ -3,8 +3,10 @@
 import type { PublicPlayer } from "@quizmaster/shared";
 import { useEffect, useId, useRef, useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { PlayerRow } from "@/components/ui/player-row";
 import { de } from "@/i18n/de";
+import { PencilIcon } from "@/lib/ui/icons";
 
 export interface PlayerListProps {
   players: readonly PublicPlayer[];
@@ -13,6 +15,8 @@ export interface PlayerListProps {
   /** Host sieht `user-round-x` an allen anderen (Entfernen mit Bestätigung) */
   canKick: boolean;
   onKick: (playerId: string) => void;
+  /** Eigene Zeile: `pencil` öffnet „Name ändern“ (ADR-041); ohne Handler kein Button */
+  onRename?: () => void;
 }
 
 /**
@@ -20,7 +24,7 @@ export interface PlayerListProps {
  * Verschwindet die Zeile mit dem Fokus (nach „Entfernen“ oder wenn die Person geht), springt der Fokus auf die
  * Überschrift der Liste statt auf `body` (WCAG 2.4.3); die Ansage übernimmt `LobbyAnnouncer`.
  */
-export function PlayerList({ players, maxPlayers, selfId, canKick, onKick }: PlayerListProps) {
+export function PlayerList({ players, maxPlayers, selfId, canKick, onKick, onRename }: PlayerListProps) {
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   /** Person, in deren Zeile der Fokus steht (der Kick-Button) – `null`, sobald er die Zeile verlässt */
@@ -63,6 +67,16 @@ export function PlayerList({ players, maxPlayers, selfId, canKick, onKick }: Pla
               color={player.color}
               isHost={player.isHost}
               connected={player.connected}
+              trailing={
+                player.id === selfId && onRename ? (
+                  <IconButton
+                    icon={PencilIcon}
+                    label={de.actions.rename}
+                    onClick={onRename}
+                    data-testid="lobby-rename"
+                  />
+                ) : undefined
+              }
               onKick={canKick && player.id !== selfId ? () => setTarget(player) : undefined}
             />
           </li>

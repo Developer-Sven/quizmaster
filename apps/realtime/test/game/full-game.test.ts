@@ -7,6 +7,7 @@
 import {
   type AnswerIndex,
   CLIENT_FORBIDDEN_KEYS,
+  DEFAULT_LOBBY_SETTINGS,
   findKeysDeep,
   PRE_REVEAL_FORBIDDEN_KEYS,
   type PublicLobbyState,
@@ -118,7 +119,7 @@ describe("Spiel mit 2 Personen", () => {
     const [game] = await waitForGameDoc(server, actor.lobbyId);
     expect(game?.outcome).toBe("win");
     expect(game?.code).toBe(code);
-    expect(game?.settings).toEqual({ rounds: 2, questionsPerCategory: 2, maxPlayers: 8 });
+    expect(game?.settings).toEqual({ ...DEFAULT_LOBBY_SETTINGS, rounds: 2, questionsPerCategory: 2 });
     expect(game?.players.map((player) => [player.guestId, player.place, player.score, player.isBot])).toEqual([
       [host.guestId, 1, 8, false],
       [guest.guestId, 2, 0, false],

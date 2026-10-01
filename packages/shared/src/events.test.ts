@@ -20,11 +20,13 @@ const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E> } = {
   "lobby:leave": {},
   "lobby:update-settings": { rounds: 5 },
   "lobby:kick": { playerId: "p_1a2B3c" },
+  "lobby:rename": { name: "Mia" },
   "lobby:start": {},
   "game:pick": { categoryId: "rund-um-die-welt" },
   "game:answer": { questionId: "q7", choice: 2 },
   "game:review": {},
   "game:rematch": {},
+  "game:continue": { phase: "reveal" },
   "question:rate": { questionId: "q7", value: -1 },
   "question:report": { questionId: "q7", reason: "veraltet" },
   "dev:add-bot": {},
@@ -43,11 +45,13 @@ describe("Registry Client → Server (docs/05)", () => {
         "lobby:leave",
         "lobby:update-settings",
         "lobby:kick",
+        "lobby:rename",
         "lobby:start",
         "game:pick",
         "game:answer",
         "game:review",
         "game:rematch",
+        "game:continue",
         "question:rate",
         "question:report",
         "dev:add-bot",
@@ -61,6 +65,17 @@ describe("Registry Client → Server (docs/05)", () => {
     expect(CLIENT_EVENTS["dev:add-bot"].devOnly).toBe(true);
     expect(CLIENT_EVENT_NAMES.filter((event) => CLIENT_EVENTS[event].devOnly)).toEqual(["dev:add-bot"]);
     expect(CLIENT_EVENTS["lobby:start"]).toMatchObject({ hostOnly: true, phases: ["lobby"] });
+    expect(CLIENT_EVENTS["lobby:rename"]).toMatchObject({
+      hostOnly: false,
+      requiresMembership: true,
+      phases: ["lobby"],
+    });
+    expect(CLIENT_EVENTS["lobby:create"].allowed).toContain("verlässt");
+    expect(CLIENT_EVENTS["game:continue"]).toMatchObject({
+      hostOnly: true,
+      phases: ["reveal", "turn_summary", "round_board"],
+    });
+    expect(CLIENT_EVENTS["game:continue"].payload.safeParse({ phase: "question" }).success).toBe(false);
     expect(CLIENT_EVENTS["game:answer"]).toMatchObject({ hostOnly: false, phases: ["question"] });
   });
 

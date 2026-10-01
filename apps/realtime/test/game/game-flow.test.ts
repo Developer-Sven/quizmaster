@@ -5,7 +5,7 @@
  * Spiel-Events (NOT_YOUR_TURN, INVALID_OPTION, TOO_EARLY, ALREADY_ANSWERED, TOO_LATE).
  */
 import { currentQuestion, currentTurn } from "@quizmaster/game-engine";
-import type { PublicLobbyState } from "@quizmaster/shared";
+import type { PublicLobbyState, SettingsUpdate } from "@quizmaster/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eventually, type TestClient, type TestServer } from "../helpers/index.ts";
 import {
@@ -31,7 +31,7 @@ beforeAll(async () => {
 });
 afterAll(() => server?.cleanup());
 
-async function lobbyWith(count: number, settings?: { rounds?: number; questionsPerCategory?: number }) {
+async function lobbyWith(count: number, settings?: SettingsUpdate) {
   const clients: TestClient[] = [];
   const host = await connectGuest(server, { guestDoc: true });
   clients.push(host);
@@ -270,6 +270,60 @@ describe("Spielregeln", () => {
     });
     host.close();
     guest.close();
+  });
+});
+
+describe("Weiter per Host (ADR-045)", () => {
+  it("wartet ohne Timer auf den Host; Gast → NOT_HOST, falsche Phase → INVALID_PHASE, Doppeltipp schadet nicht", async () => {
+    const { code, clients, host } = await lobbyWith(2, {
+      rounds: 1,
+      questionsPerCategory: 1,
+      afterQuestionSec: 0,
+      afterTurnSec: 0,
+      afterRoundSec: 0,
+    });
+    const guest = clients[1] as TestClient;
+    const players = clients.map((client) => autoPlay(server, client, code, { answer: "correct" }));
+    const reveal = host.waitFor("lobby:state", (state) => state.phase === "reveal", 30_000);
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    expect((await reveal).phaseEndsAt).toBeNull();
+    // Ohne „Weiter“ bleibt die Auflösung stehen (schneller Modus: sonst nach 300 ms vorbei).
+    await sleep(1_000);
+    expect(lastState(host)?.phase).toBe("reveal");
+    expect(await guest.emit("game:continue", { phase: "reveal" })).toMatchObject({
+      ok: false,
+      error: { code: "NOT_HOST" },
+    });
+    expect(await host.emit("game:continue", { phase: "round_board" })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PHASE" },
+    });
+    const summary = host.waitFor("lobby:state", (state) => state.phase === "turn_summary", 10_000);
+    const [first, second] = await Promise.all([
+      host.emit("game:continue", { phase: "reveal" }),
+      host.emit("game:continue", { phase: "reveal" }),
+    ]);
+    expect(first).toEqual({ ok: true, data: null });
+    expect(second).toMatchObject({ ok: false, error: { code: "INVALID_PHASE" } });
+    expect((await summary).phaseEndsAt).toBeNull();
+    for (const player of players) player.stop();
+    for (const client of clients) client.close();
+  });
+
+  it("automatische Phasen: game:continue → INVALID_PHASE; die Phase endet nach der festen Dauer", async () => {
+    const { code, clients, host } = await lobbyWith(2, { rounds: 1, questionsPerCategory: 1 });
+    const players = clients.map((client) => autoPlay(server, client, code, { answer: "correct" }));
+    const reveal = host.waitFor("lobby:state", (state) => state.phase === "reveal", 30_000);
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    const state = await reveal;
+    expect(state.phaseEndsAt).not.toBeNull();
+    expect(await host.emit("game:continue", { phase: "reveal" })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PHASE" },
+    });
+    await waitForPhase(host, "game_over", 30_000);
+    for (const player of players) player.stop();
+    for (const client of clients) client.close();
   });
 });
 

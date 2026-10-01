@@ -44,12 +44,17 @@ export const de = {
     installApp: "Als App installieren",
     back: "Zurück",
     close: "Schließen",
+    /** Host schaltet nach Frage, Kategorie oder Zwischenstand weiter (ADR-045) */
+    next: "Weiter",
+    /** Eigenen Namen in der Lobby ändern (ADR-041) */
+    rename: "Name ändern",
+    save: "Speichern",
   },
 
   fields: {
     name: "Dein Name",
     lobbyCode: "Lobby-Code",
-    /** Kündigt den Auto-Beitritt des CodeInput an (WCAG 3.2.2) – die eine Hilfezeile der Startseite */
+    /** Kündigt den Auto-Beitritt des CodeInput an (WCAG 3.2.2) – auf der Startseite nur für Screenreader (ADR-043) */
     lobbyCodeHint: "Nach dem 6. Zeichen trittst du automatisch bei.",
   },
 
@@ -116,6 +121,14 @@ export const de = {
     maxPlayers: "Personen maximal",
     decrease: (label: string) => `${label} verringern`,
     increase: (label: string) => `${label} erhöhen`,
+    /** Weiter nach Frage, Kategorie und Zwischenstand (ADR-045) */
+    advanceTitle: "Weiter",
+    afterQuestion: "Nach jeder Frage",
+    afterTurn: "Nach jeder Kategorie",
+    afterRound: "Nach dem Zwischenstand",
+    /** Wert im Stepper: Sekunden bzw. „Host“ (Host tippt „Weiter“) */
+    advanceValue: (seconds: number) => (seconds === 0 ? "Host" : `${seconds} s`),
+    advanceHint: "„Host“: Es geht erst weiter, wenn du auf „Weiter“ tippst.",
   },
 
   game: {

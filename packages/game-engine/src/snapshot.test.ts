@@ -226,6 +226,28 @@ describe("fromLobbySnapshot – laufendes Spiel", () => {
     expect(summary.state.phaseEndsAt).toBe(sim.now + 100 + normal.turnSummaryMs);
   });
 
+  it("„Host tippt Weiter“ (ADR-045): Auflösung und Zug-Ergebnis warten auch nach dem Neustart ohne Timer", () => {
+    const sim = lobbyWith(2, 0, { seed: "resume-manual" });
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { questionsPerCategory: 1, afterQuestionSec: 0, afterTurnSec: 0, afterRoundSec: 0 },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.runUntil((state) => state.phase === "reveal");
+    const reveal = restore(sim.state, sim.now + 1_000);
+    expect(reveal.state.phase).toBe("reveal");
+    expect(reveal.state.phaseEndsAt).toBeNull();
+    expect(reveal.state.timers.some((timer) => timer.kind === "phase")).toBe(false);
+    adopt(sim, reveal.state, sim.now + 1_000);
+    reconnectAll(sim);
+    sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "reveal" });
+    expect(sim.state.phase).toBe("turn_summary");
+    const summary = restore(sim.state, sim.now + 500);
+    expect(summary.state.phase).toBe("turn_summary");
+    expect(summary.state.phaseEndsAt).toBeNull();
+  });
+
   it("lässt Spielende und Ergebnis unverändert (inkl. Beginn der Phase)", () => {
     const sim = lobbyWith(2, 1, { seed: "resume-over" });
     sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });

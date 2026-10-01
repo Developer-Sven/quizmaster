@@ -23,9 +23,9 @@ afterAll(async () => {
 const logger = createLogger({ level: "silent" });
 
 describe("Web-Rate-Limits", () => {
-  it("Mongo-Store nicht erreichbar → Memory-insuranceLimiter zählt weiter (10 / 10 min je IP)", async () => {
+  it("Mongo-Store nicht erreichbar → Memory-insuranceLimiter zählt weiter (30 / 10 min je IP, ADR-042)", async () => {
     const limiters = createWebRateLimiters({ db: unreachable.db("quizmaster_test"), mode: "normal", logger });
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       expect(await limiters.consume("POST /api/session", "ip", "ip-a")).toEqual({ ok: true });
     }
     const limited = await limiters.consume("POST /api/session", "ip", "ip-a");

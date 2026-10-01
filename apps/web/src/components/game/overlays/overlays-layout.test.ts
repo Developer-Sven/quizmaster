@@ -77,7 +77,7 @@ describe("Intro: die Titelkarte springt nicht", () => {
   const players = ["Mia", "Ben", "Lea", "Tom", "Ida"].map((name, index) => player(`p${index + 1}`, name));
 
   it("lässt die Personen unter der Titelkarte als unsichtbaren Platzhalter stehen", () => {
-    const html = render(IntroOverlay, { players, phaseStartedAt: NOW - 3_400, round: 1 });
+    const html = render(IntroOverlay, { players, phaseStartedAt: NOW - 3_900, round: 1 });
     expect(html).toContain("Runde 1");
     const peopleBlock = /<div aria-hidden="true"[^>]*class="col-start-1 row-start-1[^"]*"/.exec(html);
     expect(peopleBlock).not.toBeNull();
@@ -243,6 +243,7 @@ describe("Frage → Auflösung: Karte und Antworten stehen still (ADR-034)", () 
       players: [mia, ben],
       selfId: "p1",
       phaseStartedAt: NOW - 500,
+      phaseEndsAt: NOW + 4_500,
     });
 
   const views = {

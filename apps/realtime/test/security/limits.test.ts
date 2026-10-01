@@ -30,7 +30,7 @@ const DOCS_TABLE: ReadonlyArray<{
   consume?: RateLimitRule["consume"];
   blockDurationSec?: number;
 }> = [
-  { target: "POST /api/session", scope: "ip", points: 10, durationSec: 600, store: "mongo" },
+  { target: "POST /api/session", scope: "ip", points: 30, durationSec: 600, store: "mongo" },
   { target: "POST /api/realtime/ticket", scope: "guest", points: 30, durationSec: 60 },
   { target: "POST /api/realtime/ticket", scope: "ip", points: 300, durationSec: 60 },
   { target: "GET /api/categories", scope: "ip", points: 60, durationSec: 60 },
@@ -38,9 +38,9 @@ const DOCS_TABLE: ReadonlyArray<{
   { target: "GET /healthz", scope: "ip", points: 60, durationSec: 60 },
   { target: "GET /metrics", scope: "ip", points: 30, durationSec: 60 },
   { target: "socket:handshake", scope: "ip", points: 60, durationSec: 60 },
-  { target: "lobby:create", scope: "guest", points: 3, durationSec: 60, store: "mongo" },
-  { target: "lobby:create", scope: "guest", points: 30, durationSec: 86_400, store: "mongo" },
-  { target: "lobby:create", scope: "ip", points: 30, durationSec: 3_600, store: "mongo" },
+  { target: "lobby:create", scope: "guest", points: 5, durationSec: 60, store: "mongo" },
+  { target: "lobby:create", scope: "guest", points: 60, durationSec: 86_400, store: "mongo" },
+  { target: "lobby:create", scope: "ip", points: 60, durationSec: 3_600, store: "mongo" },
   {
     target: "lobby:join",
     scope: "ip",
@@ -48,21 +48,22 @@ const DOCS_TABLE: ReadonlyArray<{
     durationSec: 300,
     store: "mongo",
     consume: "failure",
-    blockDurationSec: 900,
+    blockDurationSec: 300,
   },
-  { target: "lobby:join", scope: "socket", points: 10, durationSec: 60 },
+  { target: "lobby:join", scope: "socket", points: 20, durationSec: 60 },
   { target: "lobby:resume", scope: "socket", points: 10, durationSec: 60 },
-  { target: "lobby:update-settings", scope: "socket", points: 10, durationSec: 10 },
+  { target: "lobby:update-settings", scope: "socket", points: 40, durationSec: 10 },
+  { target: "lobby:rename", scope: "socket", points: 5, durationSec: 60 },
   { target: "lobby:kick", scope: "socket", points: 10, durationSec: 60 },
-  { target: "lobby:start", scope: "socket", points: 5, durationSec: 60 },
+  { target: "lobby:start", scope: "socket", points: 10, durationSec: 60 },
   { target: "game:rematch", scope: "socket", points: 5, durationSec: 60 },
   { target: "lobby:leave", scope: "socket", points: 10, durationSec: 60 },
   { target: "dev:add-bot", scope: "socket", points: 10, durationSec: 60 },
   { target: "game:answer", scope: "socket", points: 5, durationSec: 1 },
   { target: "game:pick", scope: "socket", points: 5, durationSec: 5 },
-  { target: "game:review", scope: "socket", points: 5, durationSec: 60 },
+  { target: "game:review", scope: "socket", points: 20, durationSec: 60 },
   { target: "question:rate", scope: "guest", points: 60, durationSec: 600 },
-  { target: "question:report", scope: "guest", points: 5, durationSec: 600 },
+  { target: "question:report", scope: "guest", points: 10, durationSec: 600 },
   { target: "time:sync", scope: "socket", points: 10, durationSec: 10 },
   { target: "socket:any-event", scope: "socket", points: 30, durationSec: 1 },
   { target: "socket:violation", scope: "socket", points: 10, durationSec: 60 },
@@ -190,7 +191,10 @@ describe("Invariante 6 – laufender Server (Produktions-Module)", () => {
       const hitsBefore = await metricValue(server.app.services.metrics, "qm_rate_limit_hits_total", { rule: rule.id });
       const codes: string[] = [];
       let limited: { retryAfterMs?: number } | undefined;
+      // Mehr Punkte als der Fallback (30/s je Socket) erlaubt? Dann gleichmäßig über > 1 s verteilen.
+      const paceMs = rule.scope === "socket" && rule.points >= 30 ? 40 : 0;
       for (let attempt = 0; attempt <= rule.points; attempt++) {
+        if (paceMs > 0) await new Promise((resolve) => setTimeout(resolve, paceMs));
         const client = clients[attempt % clients.length] as TestClient;
         const ack = (await emitRawWithAck(client.socket, event, [floodPayload(event)])) as {
           ok: boolean;

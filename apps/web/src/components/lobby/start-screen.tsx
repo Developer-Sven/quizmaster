@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { AppFooter } from "@/components/app/app-footer";
 import { FormError } from "@/components/app/form-error";
 import { InstallRow } from "@/components/pwa/install-row";
@@ -62,6 +62,7 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
   const router = useRouter();
   const nameRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
+  const createFormId = useId();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
@@ -192,77 +193,88 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
             <p className="text-body text-text-2">{de.app.claim}</p>
           </header>
 
-          <form noValidate onSubmit={create} className="flex flex-col gap-4">
-            <TextField
-              ref={nameRef}
-              label={de.fields.name}
-              value={name}
-              error={nameError}
-              onChange={(event) => {
-                setName(event.target.value);
-                setNameError(null);
-              }}
-              onFocus={warmUpRealtimeClient}
-              name="name"
-              autoComplete="nickname"
-              autoCapitalize="words"
-              enterKeyHint="go"
-              maxLength={NAME_MAX_LENGTH}
-              data-testid="start-name"
-            />
-            <span aria-hidden="true" className="h-px bg-line" />
-            <Button type="submit" variant="primary" block loading={busy === "create"} data-testid="start-create">
-              {de.actions.createLobby}
-            </Button>
-            <FormError message={formError?.at === "create" ? formError.text : null} testId="start-create-error" />
-          </form>
-
-          <div className="flex items-center gap-3">
-            <span aria-hidden="true" className="h-px flex-1 bg-line" />
-            <span className="text-caption text-text-3">{de.start.or}</span>
-            <span aria-hidden="true" className="h-px flex-1 bg-line" />
+          {/*
+            Name oben, darunter mit Abstand die drei Wege als Gruppe: erstellen · Code · QR-Code (ADR-043). Der
+            Erstellen-Button gehört per `form` zum Namensformular (Enter im Namensfeld erstellt die Lobby).
+          */}
+          <div className="flex flex-col">
+            <form id={createFormId} noValidate onSubmit={create}>
+              <TextField
+                ref={nameRef}
+                label={de.fields.name}
+                value={name}
+                error={nameError}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setNameError(null);
+                }}
+                onFocus={warmUpRealtimeClient}
+                name="name"
+                autoComplete="nickname"
+                autoCapitalize="words"
+                enterKeyHint="go"
+                maxLength={NAME_MAX_LENGTH}
+                data-testid="start-name"
+              />
+            </form>
+            <span aria-hidden="true" className="my-8 h-px bg-line" />
+            <div className="flex flex-col gap-4">
+              <Button
+                type="submit"
+                form={createFormId}
+                variant="primary"
+                block
+                loading={busy === "create"}
+                data-testid="start-create"
+              >
+                {de.actions.createLobby}
+              </Button>
+              <FormError message={formError?.at === "create" ? formError.text : null} testId="start-create-error" />
+              <OrSeparator />
+              <form
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  join(code);
+                }}
+                className="flex flex-col gap-4"
+              >
+                <CodeInput
+                  ref={codeRef}
+                  value={code}
+                  onChange={(value) => {
+                    setCode(value);
+                    setCodeError(null);
+                    if (value.length > 0) warmUpRealtimeClient();
+                  }}
+                  onComplete={join}
+                  hint={de.fields.lobbyCodeHint}
+                  hintHidden
+                  error={codeError}
+                  disabled={busy !== null}
+                  name="code"
+                />
+                <p role="status" data-testid="start-join-status" className="text-caption text-text-2 empty:hidden">
+                  {busy === "join" ? de.start.joining : ""}
+                </p>
+                <FormError message={formError?.at === "join" ? formError.text : null} testId="start-join-error" />
+              </form>
+              <OrSeparator />
+              <Button
+                variant="secondary"
+                icon={QrCodeIcon}
+                block
+                disabled={busy !== null}
+                onClick={() => {
+                  setScanMounted(true);
+                  setScanOpen(true);
+                }}
+                data-testid="start-scan"
+              >
+                {de.start.scanQr}
+              </Button>
+            </div>
           </div>
-
-          <form
-            noValidate
-            onSubmit={(event) => {
-              event.preventDefault();
-              join(code);
-            }}
-            className="flex flex-col gap-4"
-          >
-            <CodeInput
-              ref={codeRef}
-              value={code}
-              onChange={(value) => {
-                setCode(value);
-                setCodeError(null);
-                if (value.length > 0) warmUpRealtimeClient();
-              }}
-              onComplete={join}
-              hint={de.fields.lobbyCodeHint}
-              error={codeError}
-              disabled={busy !== null}
-              name="code"
-            />
-            <p role="status" data-testid="start-join-status" className="text-caption text-text-2 empty:hidden">
-              {busy === "join" ? de.start.joining : ""}
-            </p>
-            <Button
-              variant="secondary"
-              icon={QrCodeIcon}
-              block
-              disabled={busy !== null}
-              onClick={() => {
-                setScanMounted(true);
-                setScanOpen(true);
-              }}
-              data-testid="start-scan"
-            >
-              {de.start.scanQr}
-            </Button>
-            <FormError message={formError?.at === "join" ? formError.text : null} testId="start-join-error" />
-          </form>
           <TurnstileSlot solver={solver} />
         </div>
 
@@ -281,6 +293,17 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** Trenner „oder“ zwischen den Wegen in eine Lobby (docs/09 §6). */
+function OrSeparator() {
+  return (
+    <div className="flex items-center gap-3">
+      <span aria-hidden="true" className="h-px flex-1 bg-line" />
+      <span className="text-caption text-text-3">{de.start.or}</span>
+      <span aria-hidden="true" className="h-px flex-1 bg-line" />
     </div>
   );
 }

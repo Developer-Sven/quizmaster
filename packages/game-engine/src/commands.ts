@@ -8,6 +8,7 @@
  * die Engine prüft Formate zusätzlich mit denselben Schemas (Defense in Depth).
  */
 import {
+  type AdvancePhase,
   type AnswerIndex,
   type CategoryOption,
   type GameTimingMode,
@@ -59,6 +60,21 @@ export interface UpdateSettingsCommand {
   type: "UPDATE_SETTINGS";
   guestId: string;
   update: SettingsUpdate;
+}
+
+/** `lobby:rename` – Mitglied, Phase `lobby`: eigenen Namen ändern (ADR-041); moderiert vom Handler. */
+export interface RenameCommand {
+  type: "RENAME";
+  guestId: string;
+  name: string;
+}
+
+/** `game:continue` – Host, in einer Weiter-Phase mit „Host tippt Weiter“ (ADR-045). */
+export interface ContinueCommand {
+  type: "CONTINUE";
+  guestId: string;
+  /** Phase, die weitergeschaltet werden soll (Doppeltipp überspringt so nichts). */
+  phase: AdvancePhase;
 }
 
 /** `lobby:kick` – Host, nicht sich selbst; entfernt + sperrt die Person für diese Lobby. */
@@ -160,6 +176,8 @@ export type Command =
   | DisconnectCommand
   | LeaveCommand
   | UpdateSettingsCommand
+  | RenameCommand
+  | ContinueCommand
   | KickCommand
   | StartCommand
   | RematchCommand

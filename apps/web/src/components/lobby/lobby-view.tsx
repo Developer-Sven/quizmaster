@@ -1,6 +1,6 @@
 "use client";
 
-import { formatGameEstimate, type PublicLobbyState, type SettingsUpdate } from "@quizmaster/shared";
+import { formatGameEstimate, type LobbySettings, type PublicLobbyState, type SettingsUpdate } from "@quizmaster/shared";
 import { type ReactNode, useState } from "react";
 import { ActionBarNote } from "@/components/app/action-bar";
 import { AppFooter } from "@/components/app/app-footer";
@@ -14,10 +14,13 @@ import { connectedCount, hostPlayer } from "@/lib/client/game-view";
 import { ChevronLeftIcon, PlayIcon, PlusIcon, Settings2Icon } from "@/lib/ui/icons";
 import { InvitePanel } from "./invite-panel";
 import { PlayerList } from "./player-list";
+import { RenameSheet } from "./rename-sheet";
 import { SettingsSheet } from "./settings-sheet";
 
 export interface LobbyViewProps {
   lobby: PublicLobbyState;
+  /** Angezeigte Einstellungen inkl. noch nicht bestätigter Tipps des Hosts (ADR-042); Standard `lobby.settings` */
+  settings?: LobbySettings;
   selfId: string | null;
   isHost: boolean;
   /** „ABC 234“ */
@@ -38,6 +41,10 @@ export interface LobbyViewProps {
   /** nach Bestätigung im Dialog */
   onKick: (playerId: string) => void;
   onChangeSettings: (update: SettingsUpdate) => void;
+  /** Einstellungen-Sheet geschlossen: offene Tipps sofort senden (ADR-042) */
+  onSettingsClosed?: () => void;
+  /** Eigenen Namen ändern (ADR-041): Fehlermeldung oder `null` bei Erfolg; ohne Handler kein Stift */
+  onRename?: (name: string) => Promise<string | null>;
   onCopyCode: () => void;
   onShare: () => void;
   onAddBot?: () => void;
@@ -56,6 +63,7 @@ export interface LobbyViewProps {
  */
 export function LobbyView({
   lobby,
+  settings: shownSettings,
   selfId,
   isHost,
   displayCode,
@@ -69,6 +77,8 @@ export function LobbyView({
   onLeave,
   onKick,
   onChangeSettings,
+  onSettingsClosed,
+  onRename,
   onCopyCode,
   onShare,
   onAddBot,
@@ -77,7 +87,9 @@ export function LobbyView({
 }: LobbyViewProps) {
   const [settingsOpen, setSettingsOpen] = useState(defaultSettingsOpen);
   const [leaveOpen, setLeaveOpen] = useState(false);
-  const { rounds, questionsPerCategory, maxPlayers } = lobby.settings;
+  const [renameOpen, setRenameOpen] = useState(false);
+  const settings = shownSettings ?? lobby.settings;
+  const { rounds, questionsPerCategory, maxPlayers } = settings;
   const players = lobby.players;
   const host = hostPlayer(players);
   const canStart = connectedCount(players) >= 2;
@@ -136,7 +148,14 @@ export function LobbyView({
             onShare={onShare}
             defaultQrOpen={defaultQrOpen}
           />
-          <PlayerList players={players} maxPlayers={maxPlayers} selfId={selfId} canKick={isHost} onKick={onKick} />
+          <PlayerList
+            players={players}
+            maxPlayers={maxPlayers}
+            selfId={selfId}
+            canKick={isHost}
+            onKick={onKick}
+            onRename={onRename ? () => setRenameOpen(true) : undefined}
+          />
           {lastGame}
           {isHost && devBots && onAddBot ? (
             <div className="flex">
@@ -147,7 +166,7 @@ export function LobbyView({
           ) : null}
           <div data-testid="lobby-summary" className="flex flex-col gap-1 text-body text-text-2">
             <p>{de.lobby.settingsSummary(rounds, questionsPerCategory)}</p>
-            <p>{formatGameEstimate(rounds, Math.max(players.length, 1), questionsPerCategory)}</p>
+            <p>{formatGameEstimate(rounds, Math.max(players.length, 1), questionsPerCategory, settings)}</p>
           </div>
           {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach 30 s Trennung entfernt. */}
           <AppFooter newTab />
@@ -156,10 +175,21 @@ export function LobbyView({
       {isHost ? (
         <SettingsSheet
           open={settingsOpen}
-          settings={lobby.settings}
+          settings={settings}
           playerCount={players.length}
           onChange={onChangeSettings}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            onSettingsClosed?.();
+          }}
+        />
+      ) : null}
+      {onRename ? (
+        <RenameSheet
+          open={renameOpen}
+          name={players.find((player) => player.id === selfId)?.name ?? ""}
+          onSubmit={onRename}
+          onClose={() => setRenameOpen(false)}
         />
       ) : null}
       <Dialog

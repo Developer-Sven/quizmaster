@@ -8,7 +8,7 @@
 import { GAME_RULES, questionLeadInMs } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import type { TurnRef } from "./effects.ts";
-import { clearPhaseTimer, enterPhase } from "./phases.ts";
+import { advancePhaseEnd, clearPhaseTimer, enterPhase } from "./phases.ts";
 import { computeResults } from "./ranking.ts";
 import { buildGameDoc, buildGameStats } from "./records.ts";
 import { pickOne, randomId, shuffle } from "./rng.ts";
@@ -116,7 +116,9 @@ export function advanceFrom(state: LobbyState, round: number, afterIndex: number
   const next = nextPickerIndex(cleared, game, afterIndex);
   if (next !== null) return requestOptions(cleared, round, next, tx);
   if (game.turns.some((turn) => turn.round === round)) {
-    return enterPhase(cleared, "round_board", tx, { endsAt: tx.now + tx.timings.roundBoardMs });
+    return enterPhase(cleared, "round_board", tx, {
+      endsAt: advancePhaseEnd(cleared, "round_board", tx.now, tx.timings),
+    });
   }
   // Eine Runde ohne einen einzigen möglichen Zug gibt es nur ohne aktive Personen.
   return finishGame(cleared, "not_enough_players", tx);
@@ -172,14 +174,16 @@ export function revealCurrentQuestion(state: LobbyState, tx: Tx): LobbyState {
     ...question,
     outcomes: resolveOutcomes(question, participants),
   }));
-  return enterPhase(resolved, "reveal", tx, { endsAt: tx.now + tx.timings.revealMs });
+  return enterPhase(resolved, "reveal", tx, { endsAt: advancePhaseEnd(resolved, "reveal", tx.now, tx.timings) });
 }
 
 /** Nach der Auflösung: nächste Frage des Zuges oder Zug-Ergebnis. */
 function afterReveal(state: LobbyState, tx: Tx): LobbyState {
   const turn = currentTurn(state.game);
   if (turn && turn.currentIndex + 1 < turn.questions.length) return presentQuestion(state, turn.currentIndex + 1, tx);
-  return enterPhase(state, "turn_summary", tx, { endsAt: tx.now + tx.timings.turnSummaryMs });
+  return enterPhase(state, "turn_summary", tx, {
+    endsAt: advancePhaseEnd(state, "turn_summary", tx.now, tx.timings),
+  });
 }
 
 /** Nach der Rundentafel: nächste Runde oder Spielende. */

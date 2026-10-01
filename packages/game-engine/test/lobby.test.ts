@@ -28,7 +28,14 @@ describe("Lobby erstellen", () => {
     expect(pub.players).toEqual([
       expect.objectContaining({ name: "Mia", color: "blue", isHost: true, connected: true, isBot: false, score: 0 }),
     ]);
-    expect(pub.settings).toEqual({ rounds: 3, questionsPerCategory: 3, maxPlayers: 8 });
+    expect(pub.settings).toEqual({
+      rounds: 3,
+      questionsPerCategory: 3,
+      maxPlayers: 8,
+      afterQuestionSec: 5,
+      afterTurnSec: 5,
+      afterRoundSec: 7,
+    });
     expect(types(result.effects)).toEqual(["broadcast", "sendPrivate", "scheduleTimer", "persist"]);
     expect(result.effects).toContainEqual({ type: "persist", reason: "created" });
     expect(result.effects).toContainEqual(
@@ -113,6 +120,36 @@ describe("Beitreten", () => {
   });
 });
 
+describe("Namen ändern (ADR-041)", () => {
+  it("ändert den eigenen Namen in der Lobby – eindeutig gegenüber den anderen, alle sehen es", () => {
+    const sim = new Simulation();
+    const ben = sim.join("Ben");
+    const from = sim.effects.length;
+    sim.ok({ type: "RENAME", guestId: ben, name: "  Benni  " });
+    expect(toPublicState(sim.state).players.map((player) => player.name)).toEqual(["Mia", "Benni"]);
+    const effects = sim.effects.slice(from);
+    expect(effects).toContainEqual({ type: "broadcast" });
+    expect(effects).toContainEqual({ type: "persist", reason: "players" });
+    // Name einer anderen Person → eindeutig wie beim Beitritt; der eigene alte Name zählt nicht als belegt.
+    sim.ok({ type: "RENAME", guestId: ben, name: "mia" });
+    expect(toPublicState(sim.state).players[1]?.name).toBe("mia 2");
+    sim.ok({ type: "RENAME", guestId: sim.host, name: "Mia" });
+    expect(toPublicState(sim.state).players[0]?.name).toBe("Mia");
+  });
+
+  it("gleicher Name ändert nichts (kein Broadcast); ungültig → NAME_REJECTED; nur Mitglieder, nur Phase lobby", () => {
+    const sim = new Simulation();
+    const ben = sim.join("Ben");
+    const before = sim.state;
+    sim.ok({ type: "RENAME", guestId: ben, name: "Ben" });
+    expect(sim.state).toBe(before);
+    expect(errorCode(sim.dispatch({ type: "RENAME", guestId: ben, name: "x" }))).toBe("NAME_REJECTED");
+    expect(errorCode(sim.dispatch({ type: "RENAME", guestId: guestUuid(60), name: "Lea" }))).toBe("LOBBY_NOT_FOUND");
+    sim.ok({ type: "START", guestId: sim.host });
+    expect(errorCode(sim.dispatch({ type: "RENAME", guestId: ben, name: "Benni" }))).toBe("INVALID_PHASE");
+  });
+});
+
 describe("Einstellungen", () => {
   it("nur Host, nur Phase lobby, gültige Werte, nicht unter die Personenzahl", () => {
     const sim = lobbyWith(3);
@@ -129,7 +166,14 @@ describe("Einstellungen", () => {
     );
     const from = sim.effects.length;
     sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 2 } });
-    expect(toPublicState(sim.state).settings).toEqual({ rounds: 1, questionsPerCategory: 2, maxPlayers: 8 });
+    expect(toPublicState(sim.state).settings).toEqual({
+      rounds: 1,
+      questionsPerCategory: 2,
+      maxPlayers: 8,
+      afterQuestionSec: 5,
+      afterTurnSec: 5,
+      afterRoundSec: 7,
+    });
     expect(sim.effects.slice(from)).toContainEqual({ type: "persist", reason: "settings" });
     sim.ok({ type: "START", guestId: sim.host });
     expect(errorCode(sim.dispatch({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 2 } }))).toBe(

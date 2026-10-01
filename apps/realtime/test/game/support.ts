@@ -114,11 +114,15 @@ export interface AutoPlayerOptions {
   answer?: AnswerStrategy;
   /** Kategorie wählen, wenn man dran ist (Standard true; false = Zeit ablaufen lassen). */
   pick?: boolean;
+  /** Als Host „Weiter“ tippen, wenn eine Phase darauf wartet (ADR-045, Standard false). */
+  continueAsHost?: boolean;
 }
 
 export interface AutoPlayer {
   readonly picks: number;
   readonly answers: number;
+  /** Erfolgreiche `game:continue` (nur mit `continueAsHost`). */
+  readonly continues: number;
   /** Acks auf `game:answer` (für Invariante 3). */
   readonly answerAcks: unknown[];
   /** Abgelehnte Aktionen (Code je Event). */
@@ -144,6 +148,8 @@ export function autoPlay(
   const strategy = options.answer ?? "correct";
   const answered = new Set<string>();
   const pickedTurns = new Set<string>();
+  const continued = new Set<string>();
+  let continues = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const answerAcks: unknown[] = [];
   const rejected: string[] = [];
@@ -158,6 +164,22 @@ export function autoPlay(
 
   const onState = (state: PublicLobbyState) => {
     if (stopped || playerId === null) return;
+    const waitsForHost =
+      (state.phase === "reveal" || state.phase === "turn_summary" || state.phase === "round_board") &&
+      state.phaseEndsAt === null;
+    if (waitsForHost && options.continueAsHost === true) {
+      const key = `${state.phase}:${state.phaseStartedAt}`;
+      const self = state.players.find((player) => player.id === playerId);
+      if (self?.isHost !== true || continued.has(key)) return;
+      continued.add(key);
+      const phase = state.phase;
+      if (phase !== "reveal" && phase !== "turn_summary" && phase !== "round_board") return;
+      void client.emit("game:continue", { phase }).then((ack) => {
+        if (ack.ok) continues += 1;
+        else rejected.push(`game:continue:${ack.error.code}`);
+      });
+      return;
+    }
     if (state.phase === "category_pick" && state.turn !== null && state.turn.categoryId === null) {
       const key = `${state.phaseStartedAt}:${state.turn.pickerId}`;
       if (state.turn.pickerId !== playerId || pickedTurns.has(key) || options.pick === false) return;
@@ -207,6 +229,9 @@ export function autoPlay(
     },
     get answers() {
       return answers;
+    },
+    get continues() {
+      return continues;
     },
     answerAcks,
     rejected,

@@ -3,9 +3,11 @@
  * z. B. „36 Fragen · ca. 12 Min.“.
  *
  * Rundungsregel: Minuten = Sekunden / 60, kaufmännisch gerundet (`Math.round`, ab ,5 aufwärts),
- * mindestens 1 Minute. Beispiele: 3 Runden × 4 Personen × 3 Fragen = 706 s → 11,77 → „ca. 12 Min.“;
- * 3 × 3 × 3 = 535 s → 8,92 → „ca. 9 Min.“.
+ * mindestens 1 Minute. Beispiele: 3 Runden × 4 Personen × 3 Fragen = 806 s → 13,43 → „ca. 13 Min.“;
+ * 3 × 3 × 3 = 611 s → 10,18 → „ca. 10 Min.“.
  */
+
+import { ADVANCE_DEFAULTS, type AdvanceSettings, MANUAL_ADVANCE } from "./settings.ts";
 
 function assertCount(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 0) {
@@ -21,15 +23,29 @@ export function questionCount(rounds: number, players: number, questionsPerCateg
   return rounds * players * questionsPerCategory;
 }
 
+/** Eingestellte Sekunden oder – bei „Host tippt Weiter“ bzw. ohne Angabe – der Standard. */
+function advanceSec(value: number | undefined, fallback: number): number {
+  return value === undefined || value === MANUAL_ADVANCE ? fallback : value;
+}
+
 /**
- * Geschätzte Spieldauer in Sekunden: `4 + R × (P × (6 + 2 + K × 15 + 4) + 6)`
- * (Intro 4 s; je Zug Wahl ≈ 6 s, Einblendung 2 s, je Frage ≈ 15 s, Zug-Ergebnis 4 s; je Runde Tafel 6 s).
+ * Geschätzte Spieldauer in Sekunden: `5 + R × (P × (6 + 3 + K × (12 + F) + Z) + T)` mit F/Z/T = Sekunden nach
+ * jeder Frage, Kategorie und Runde (ADR-045; Standard 5/5/7 – Spieltempo ADR-044: Intro 5 s, je Zug Wahl ≈ 6 s,
+ * Einblendung 3 s, je Frage ≈ 12 s Vorlauf + Antwort). „Host tippt Weiter“ zählt wie der Standard.
  */
-export function estimateDurationSeconds(rounds: number, players: number, questionsPerCategory: number): number {
+export function estimateDurationSeconds(
+  rounds: number,
+  players: number,
+  questionsPerCategory: number,
+  advance: Partial<AdvanceSettings> = {},
+): number {
   assertCount("rounds", rounds);
   assertCount("players", players);
   assertCount("questionsPerCategory", questionsPerCategory);
-  return 4 + rounds * (players * (6 + 2 + questionsPerCategory * 15 + 4) + 6);
+  const afterQuestion = advanceSec(advance.afterQuestionSec, ADVANCE_DEFAULTS.afterQuestionSec);
+  const afterTurn = advanceSec(advance.afterTurnSec, ADVANCE_DEFAULTS.afterTurnSec);
+  const afterRound = advanceSec(advance.afterRoundSec, ADVANCE_DEFAULTS.afterRoundSec);
+  return 5 + rounds * (players * (6 + 3 + questionsPerCategory * (12 + afterQuestion) + afterTurn) + afterRound);
 }
 
 /** Sekunden → ganze Minuten nach der Rundungsregel oben (mindestens 1). */
@@ -43,8 +59,13 @@ export function formatDurationEstimate(seconds: number): string {
 }
 
 /** „36 Fragen · ca. 12 Min.“ (bei genau einer Frage „1 Frage · …“). */
-export function formatGameEstimate(rounds: number, players: number, questionsPerCategory: number): string {
+export function formatGameEstimate(
+  rounds: number,
+  players: number,
+  questionsPerCategory: number,
+  advance: Partial<AdvanceSettings> = {},
+): string {
   const count = questionCount(rounds, players, questionsPerCategory);
-  const seconds = estimateDurationSeconds(rounds, players, questionsPerCategory);
+  const seconds = estimateDurationSeconds(rounds, players, questionsPerCategory, advance);
   return `${count} ${count === 1 ? "Frage" : "Fragen"} · ${formatDurationEstimate(seconds)}`;
 }

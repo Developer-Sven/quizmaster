@@ -40,18 +40,19 @@ export interface Timings {
 }
 
 export const TIMINGS = {
+  // Spieltempo (ADR-044): Einblendungen bleiben lange genug stehen, um sie zu lesen – Antwortzeit unverändert.
   normal: {
-    introMs: 4_000,
+    introMs: 5_000,
     categoryPickMs: 15_000,
-    leadInFirstQuestionMs: 2_000,
-    leadInNextQuestionMs: 800,
+    leadInFirstQuestionMs: 3_000,
+    leadInNextQuestionMs: 1_500,
     answerMs: 20_000,
     deadlineGraceMs: 250,
-    earlyRevealMs: 400,
-    revealMs: 3_500,
-    turnSummaryMs: 4_000,
-    roundBoardMs: 6_000,
-    gameOverMs: 5_000,
+    earlyRevealMs: 700,
+    revealMs: 5_000,
+    turnSummaryMs: 5_000,
+    roundBoardMs: 7_000,
+    gameOverMs: 6_000,
     reconnectLobbyMs: 30_000,
     reconnectGameMs: 90_000,
     hostHandoverMs: 30_000,

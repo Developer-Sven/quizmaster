@@ -23,7 +23,7 @@ import {
   publicLobbyStateSchema,
   reviewListSchema,
 } from "./schemas.ts";
-import { updateSettingsPayloadSchema } from "./settings.ts";
+import { ADVANCE_PHASES, updateSettingsPayloadSchema } from "./settings.ts";
 import * as z from "./zod.ts";
 
 /** Beschreibung eines Client→Server-Events. */
@@ -66,7 +66,7 @@ export const CLIENT_EVENTS = {
   "lobby:create": clientEvent({
     payload: z.strictObject({ name: nameInputSchema }),
     ack: codeAck,
-    allowed: "ohne aktive Lobby-Mitgliedschaft",
+    allowed: "immer; verlässt vorher eine bestehende Lobby-Mitgliedschaft (ADR-042)",
     requiresMembership: false,
     hostOnly: false,
     devOnly: false,
@@ -117,6 +117,15 @@ export const CLIENT_EVENTS = {
     devOnly: false,
     phases: null,
   }),
+  "lobby:rename": clientEvent({
+    payload: z.strictObject({ name: nameInputSchema }),
+    ack: noData,
+    allowed: "Mitglied, Phase lobby (eigener Name, ADR-041)",
+    requiresMembership: true,
+    hostOnly: false,
+    devOnly: false,
+    phases: ["lobby"],
+  }),
   "lobby:start": clientEvent({
     payload: emptyPayload,
     ack: noData,
@@ -153,6 +162,15 @@ export const CLIENT_EVENTS = {
     hostOnly: false,
     devOnly: false,
     phases: ["game_over", "lobby"],
+  }),
+  "game:continue": clientEvent({
+    payload: z.strictObject({ phase: z.enum(ADVANCE_PHASES) }),
+    ack: noData,
+    allowed: "Host, wenn für diese Phase „Host tippt Weiter“ eingestellt ist (ADR-045)",
+    requiresMembership: true,
+    hostOnly: true,
+    devOnly: false,
+    phases: [...ADVANCE_PHASES],
   }),
   "game:rematch": clientEvent({
     payload: emptyPayload,

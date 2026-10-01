@@ -54,7 +54,11 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
       await self;
     }
     expect((await host.act.emit("dev:add-bot", {})).ok).toBe(true);
-    expect((await host.act.emit("lobby:update-settings", { rounds: 1, questionsPerCategory: 1 })).ok).toBe(true);
+    // Zwischenstand per Host (ADR-045): so kommt auch game:continue vor.
+    expect(
+      (await host.act.emit("lobby:update-settings", { rounds: 1, questionsPerCategory: 1, afterRoundSec: 0 })).ok,
+    ).toBe(true);
+    expect((await guest.act.emit("lobby:rename", { name: "Benni" })).ok).toBe(true);
     expect((await host.act.emit("time:sync", { t0: 1 })).ok).toBe(true);
 
     // Kick: kicked { host } an die Person, danach resume → KICKED.
@@ -84,6 +88,9 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
     await resumedSelf;
     secondTab.client.close();
 
+    // Rundentafel wartet auf den Host („Weiter“, ADR-045).
+    await waitForPhase(host.client, "round_board", 60_000);
+    expect(await host.act.emit("game:continue", { phase: "round_board" })).toEqual({ ok: true, data: null });
     await over;
     for (const player of players) player.stop();
     const actor = actorOf(server, code);

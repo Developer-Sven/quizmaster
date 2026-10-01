@@ -45,7 +45,7 @@ describe("Session und Tickets (docs/05, docs/06)", () => {
   it("hat die Konstanten aus docs/06", () => {
     expect(SESSION_COOKIE).toMatchObject({ name: "kd_sid", maxAgeSec: 180 * 86_400, renewBelowSec: 30 * 86_400 });
     expect(REALTIME_TICKET).toEqual({ audience: "realtime", issuer: "web", algorithm: "HS256", ttlSec: 60 });
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 
   it("validiert den Handshake und die Ticket-Claims", () => {

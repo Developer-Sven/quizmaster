@@ -77,14 +77,14 @@ export function stageBoundaries(state: StageInput): number[] {
   return [];
 }
 
-/** Choreografie des Intros relativ zum Phasenbeginn (docs/09 §7.1). */
+/** Choreografie des Intros relativ zum Phasenbeginn (docs/09 §7.1, Intro 5 s – Spieltempo ADR-044). */
 export const INTRO_TIMELINE = {
   /** Scrim, dann fahren die Avatare ein */
   scrimMs: 480,
   /** Titelkarte „Runde 1“ schiebt sich hoch */
-  titleAtMs: 3_200,
+  titleAtMs: 3_500,
   /** Ausblenden */
-  exitAtMs: 3_700,
+  exitAtMs: 4_600,
 } as const;
 
 export type IntroStage = "people" | "title" | "done";
@@ -95,11 +95,14 @@ export function introStage(elapsed: number): IntroStage {
   return "people";
 }
 
-/** Kategorie-Einblendung blendet 400 ms vor `startsAt` aus (1.600 von 2.000 ms, docs/09 §7.3). */
-export const CATEGORY_REVEAL_EXIT_BEFORE_START_MS = 400;
+/** Kategorie-Einblendung blendet 600 ms vor `startsAt` aus (2.400 von 3.000 ms, docs/09 §7.3). */
+export const CATEGORY_REVEAL_EXIT_BEFORE_START_MS = 600;
 
-/** Auflösung blendet 3.000 ms nach Phasenbeginn aus (docs/09 §7.6). */
-export const ANSWER_REVEAL_EXIT_AT_MS = 3_000;
+/**
+ * Auflösung blendet 500 ms vor ihrem Phasenende aus (docs/09 §7.6, Ende nach den Weiter-Einstellungen, ADR-045);
+ * wartet sie auf den Host, bleibt sie stehen.
+ */
+export const ANSWER_REVEAL_EXIT_BEFORE_END_MS = 500;
 
 /** Wandernder Rahmen bei der Kategoriewahl für Zuschauende (docs/09 §7.2): 1,2-s-Takt. */
 export const PICK_HIGHLIGHT_STEP_MS = 1_200;
@@ -112,7 +115,8 @@ export function pickHighlightIndex(elapsed: number, count = 3): number {
 
 /**
  * Timing-Modus aus einer Phase mit fester Dauer (normal/fast, docs/05 §Timings) – `null`, wenn die Phase
- * keine feste Dauer hat (Lobby, Spielende) oder die Dauer zu keinem Modus passt.
+ * keine feste Dauer hat (Lobby, Spielende, die einstellbaren Weiter-Phasen nach ADR-045) oder die Dauer zu keinem
+ * Modus passt.
  */
 export function inferTimingMode(
   state: Pick<PublicLobbyState, "phase" | "phaseStartedAt" | "phaseEndsAt" | "question">,
@@ -124,12 +128,6 @@ export function inferTimingMode(
         return timings.introMs;
       case "category_pick":
         return timings.categoryPickMs;
-      case "reveal":
-        return timings.revealMs;
-      case "turn_summary":
-        return timings.turnSummaryMs;
-      case "round_board":
-        return timings.roundBoardMs;
       default:
         return null;
     }

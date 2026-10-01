@@ -23,16 +23,18 @@ export const EASING = {
 
 /** Staffelungen aus docs/09 §7–8 in Millisekunden. */
 export const STAGGER_MS = {
-  /** Gestaffelte Listen (Antworten, Kacheln) */
+  /** Gestaffelte Listen (Antworten – die Antwortzeit läuft schon) */
   list: 40,
+  /** Kategorie-Kacheln der Wahl (Spieltempo ADR-044) */
+  tiles: 100,
   /** Personen (Avatare im Intro) */
-  people: 60,
+  people: 150,
   /** Avatare an der gewählten Antwort */
-  pickers: 50,
+  pickers: 150,
   /** Ergebnis-Kästchen im Zug-Ergebnis und auf der Tafel */
-  squares: 80,
+  squares: 160,
   /** Podest-Säulen */
-  podium: 160,
+  podium: 320,
 } as const;
 
 /** Anzeigedauer eines Toasts (docs/09 §5). */
