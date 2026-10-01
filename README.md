@@ -258,6 +258,77 @@ ergänzen, Altes erst im übernächsten Release entfernen) – sonst scheitert a
 Validator-Änderung hinweg setzt den Validator auf den alten Stand zurück; ein umbenannter Index lässt den Start des
 alten Releases scheitern (`ensureIndexes`: Index-Konflikt) – dann die Sicherung einspielen (`pnpm ops:restore`).
 
+### Smoke-Test gegen eine laufende Instanz
+
+Produktionsabnahme von außen mit echtem Chromium (docs/11 §Manuelle Abnahme, automatisierbarer Teil; docs/12): ein
+vollständiger Durchlauf über Session, Ticket, Lobby und Spiel, den der Smoke-Test des Deploys nicht abdeckt. Eigene
+Playwright-Konfiguration `e2e/playwright.smoke.config.ts` ohne `webServer` und mit eigenem `testDir` (`e2e/smoke/`) –
+nie Teil von `pnpm test:e2e` oder der CI.
+
+```bash
+SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm test:smoke                            # über Cloudflare (Kurzform)
+SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm --filter e2e test:smoke                 # über Cloudflare
+SMOKE_BASE_URL=https://quizmaster.dev-sven.de SMOKE_RESOLVE_TO=127.0.0.1 \
+  SMOKE_OUTPUT=reports/smoke-prod pnpm --filter e2e test:smoke                            # direkt am Origin (Caddy)
+SMOKE_BASE_URL=http://127.0.0.1:3200 pnpm --filter e2e test:smoke                          # gegen pnpm stack:test
+SMOKE_PLAY=0 SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm --filter e2e test:smoke    # ohne Spiel
+SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm --filter e2e test:smoke \
+  --grep "Startseite|Installierbarkeit"                                                   # legt nichts an
+```
+
+| Variable | Pflicht | Wirkung |
+|---|---|---|
+| `SMOKE_BASE_URL` | ja | Origin der Instanz (`http(s)://host[:port]`, ohne Pfad). Fehlt sie oder ist ein Wert ungültig, bricht der Lauf mit Meldung ab, bevor ein Browser startet (Playwright endet mit Code 2) |
+| `SMOKE_RESOLVE_TO` | nein | IP, auf die Chromium den Host auflöst (`--host-resolver-rules`, gilt auch für WebSockets) – Test am Cloudflare-Proxy vorbei. Nur dann werden Zertifikatsfehler ignoriert (`ignoreHTTPSErrors` und `--ignore-certificate-errors`; ohne das Flag scheitert die Service-Worker-Registrierung am Origin-Zertifikat). Caddy lässt außer Cloudflare nur Loopback zu, auf dem Server also `127.0.0.1` |
+| `SMOKE_OUTPUT` | nein | Ordner für Bericht und Artefakte, Standard `e2e/smoke-results`; relative Pfade gelten ab dem Aufrufverzeichnis (z. B. `reports/smoke-prod`). Nur ein neuer, leerer oder schon vom Smoke-Test markierter Ordner – Playwright leert darin `artifacts/` und `html/`. Eine `.gitignore` mit `*` im Ordner hält ihn aus Git heraus |
+| `SMOKE_PLAY` | nein | `0` = ohne Spiel (Kaltstart, Beitritt, Lobby und Verlassen laufen trotzdem) |
+
+Prüfungen (ein Worker, keine Wiederholung – jede Wiederholung legte weitere Gäste und Lobbys an):
+
+1. **Kaltstart** (Pixel 7, frischer Kontext ohne Cache und ohne Service Worker, Slow 4G per CDP: 150 ms Latenz je
+   Anfrage, 1,6 Mbit/s down, 750 kbit/s up, CPU 4×): „Öffnen → Lobby erstellt und sichtbar“ unter 10 s (docs/01,
+   Erfolgskriterium – docs/07 hat dafür keine eigene Zeile) und LCP der Startseite unter 1,8 s (docs/07, hier als
+   Einzelmessung im Labor). Gemessen im Browser ab Navigationsbeginn bis zum ersten Frame mit Lobby-Code, ohne die
+   Tippzeit eines Menschen; Zwischenzeiten TTFB, FCP, „bedienbar“ (Namensfeld hydriert) und Klick → Lobby.
+2. **Spiel zu zweit:** ein zweiter Kontext (iPhone 15, Chromium) tritt per `/j/<code>` bei, der Host stellt
+   1 Runde × 1 Frage je Kategorie ein und startet. Wer dran ist, wählt die erste Kategorie; beide antworten immer mit
+   der ersten Antwort (der echte Katalog ist unbekannt), bis bei beiden das Spielende steht. Danach verlassen beide
+   die Lobby.
+3. **Browser:** über den ganzen Lauf 0 CSP-Verstöße (Event `securitypolicyviolation` und Konsole „Refused to …“),
+   0 Konsolenfehler, 0 Seitenfehler.
+4. **axe** (WCAG 2.2 AA + Best Practices, dazu die Layout-Regeln aus docs/09 §13) auf Start, Beitreten, Lobby
+   (Host und Gast), Spielende (Host und Gast) und der Startseite nach dem Spiel – ohne Befunde jeder Schwere.
+5. **Installierbarkeit** auf `/`: `Page.getInstallabilityErrors` leer, Manifest ohne Meldungen von Chromium,
+   Manifest und Icons erreichbar, Service Worker `activated` und steuert die Seite.
+6. **Sicherheits-Header** der Startseite (docs/06): CSP mit Nonce und `'strict-dynamic'`, ohne `'unsafe-inline'`/
+   `'unsafe-eval'`, `default-src`, `object-src`, `base-uri`, `frame-ancestors`, bei https `upgrade-insecure-requests`;
+   die Nonce steht an den Skripten der Seite und ist je Anfrage neu (gleiche Nonce zweimal = ein Cache liefert das
+   HTML aus); HSTS (bei https), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cache-Control`
+   mit `no-store` und `no-transform`, `X-Frame-Options`, COOP, CORP, kein `X-Powered-By`.
+
+**Bericht:** `smoke-report.txt` (Kurzfassung, erscheint auch in der Konsole) und `smoke-report.json` (Zeiten,
+Befunde je Prüfung, Konsolenprotokoll, Lobby-Codes) im Ausgabeordner; dazu `html/` (HTML-Bericht mit Traces und
+Screenshots bei Fehlern, für den Standardordner: `pnpm --filter e2e exec playwright show-report smoke-results/html`)
+und `artifacts/` (Screenshots je axe-Screen). Exit-Code 0 nur, wenn alle Prüfungen bestanden sind. Der Kaltstart läuft
+als erster Test – nach einem Deploy trifft er also die noch kalte Instanz.
+
+**Spuren in der Zielinstanz:** je Lauf zwei neue Gast-Sessions (zählen gegen das Limit von 10 neuen Sessions je IP in
+10 min), eine Lobby und – mit Spiel – ein beendetes Spiel samt Statistik der gezeigten Fragen. Der Bericht nennt die
+Lobby-Codes mit dem passenden Befehl der Admin-CLI; zuerst die Wirkung ansehen, dann bereinigen:
+
+```bash
+pnpm admin:game purge --code <CODE> --env prod --dry-run
+pnpm admin:game purge --code <CODE> --env prod --confirm-prod
+```
+
+Gegen den lokalen Test-Stack entfällt das – seine Collections verschwinden beim Beenden.
+
+**Turnstile:** Mit `TURNSTILE_ENABLED=true` verlangt jede neue Gast-Session eine Turnstile-Prüfung, die ein
+automatisierter Browser in der Regel nicht besteht. Der Smoke-Test erkennt das (`TURNSTILE_REQUIRED` von
+`POST /api/session` bzw. geladenes Widget) und bricht den Durchlauf mit dieser Begründung ab; Header, axe der
+Startseite und Installierbarkeit laufen unabhängig davon. Den vollständigen Durchlauf deshalb vor dem Einschalten von
+Turnstile fahren oder den Schalter kurz umlegen (siehe Schalter umlegen) und danach sofort zurückstellen.
+
 ### pm2
 
 | Befehl | Zweck |
@@ -389,13 +460,32 @@ pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle
   Entwarnung bei Erholung; während eines Deploys und ohne Release ruhig. Läuft per Cron unabhängig von pm2 – sie
   meldet nicht antwortende Apps auch dann, wenn pm2 selbst ausgefallen ist (ein Watchdog unter pm2 könnte das
   nicht). Protokoll: `journalctl -t quizmaster-healthcheck`.
-- **Watchdog** (`quizmaster-watchdog`, `dist/watchdog.mjs`): **noch nicht geliefert.** Der Deploy warnt bei jedem
-  Release ohne Watchdog. Bis dahin gibt es keine Alarme aus `/metrics` (Event-Loop-p99, Fehlerrate,
-  Limit-Spitzen, Change-Stream-Abbrüche, Mongo-Fehler, docs/12) und keine Erkennung von Neustart-Schleifen.
+- **Watchdog** (`quizmaster-watchdog`, `dist/watchdog.mjs`, pm2): prüft alle 30 s `/api/health`, `/healthz` und
+  `/metrics` (Bearer `METRICS_TOKEN`) über Loopback. Alarme: Health down > 2 min · Event-Loop p99 > 200 ms für 5 min ·
+  Fehlerrate (`INTERNAL`-Acks) > 1 % in 5 min (ab 200 Events) · ≥ 200 Limit-Treffer in 5 min · ≥ 3 Change-Stream-
+  Neustarts in 15 min · ≥ 3 Mongo-Verbindungsfehler (oder ≥ 10 sonstige) in 5 min · ≥ 3 Realtime-Neustarts in 15 min ·
+  `/metrics` 5 min nicht lesbar. Höchstens ein Alarm je Regel in 15 min, Erinnerung stündlich, Entwarnung bei Erholung.
+  Nutzlast wie `ops:alert-test` (`{content, text}`, `@everyone` entschärft); ohne `ALERT_WEBHOOK_URL` nur im Log
+  (`pm2 logs quizmaster-watchdog`). Die Cron-Health-Kontrolle bleibt als von pm2 unabhängige Prüfung.
+- **Wiederaufnahme nach Neustart:** Realtime übernimmt beim Start alle aktiven Lobby-Snapshots – laufende Fragen bzw.
+  Kategoriewahlen beginnen neu (5 s Aufschub zum Wiederverbinden), Punkte bleiben; nicht wiederherstellbare Snapshots
+  werden geschlossen. Metrik `qm_lobbies_resumed_total{outcome}`.
 - **Extern:** Ein Ausfall des ganzen Servers oder des Cron-Dienstes fällt keiner lokalen Kontrolle auf – zusätzlich
   einen Uptime-Check von außen auf `https://<domain>/api/health` einrichten (docs/12: z. B. Uptime Kuma auf einem
   anderen Host).
 - `/metrics` (Prometheus-Format) ist nur lokal mit `METRICS_TOKEN` erreichbar.
+
+### Performance und Last
+
+```bash
+pnpm perf:budgets [--dist apps/web/.next] [--url http://127.0.0.1:3000]   # initiales JS je Route (CI-Gate)
+pnpm perf:lighthouse [--runs 3]                                            # lokaler Prod-Build + Test-Stack
+pnpm perf:lighthouse --url https://<domain> --resolve <domain>=127.0.0.1 --insecure   # Produktion über den Origin
+pnpm loadtest --lobbies 375 --players 8 --duration 4m --ramp 90s --catalog content     # 3.000 Sockets, Bericht --report
+```
+
+Budgets laut docs/07 bzw. ADR-037 (Startseite ≤ 165 KB, Lobby ≤ 180 KB gzip). Ergebnisse landen in `reports/`
+(lokal, gitignored); der Lasttest läuft nur gegen die Test-Datenbank.
 
 ### Admin-Werkzeuge (Kill-Switches, Sperren)
 
@@ -413,7 +503,18 @@ pnpm admin:ban add --ip 203.0.113.7 --reason "Bot-Welle" --hours 24 --confirm-pr
 pnpm admin:ban add --guest <guestId> --reason "Beleidigende Namen" --confirm-prod     # ohne --hours: dauerhaft
 pnpm admin:ban check --ip 203.0.113.7
 pnpm admin:ban remove --ip 203.0.113.7 --confirm-prod
+pnpm admin:ban add --lobby <CODE> --name "<Name>" --reason "…" --confirm-prod     # Gast über Lobby + Namen finden
+pnpm admin:ban add --report <meldungs-id> --reason "…" --confirm-prod             # Gast hinter einer Meldung
+pnpm admin:ban list                                                               # aktive Sperren (guestIds gekürzt)
+pnpm admin:config maintenance on "Kurze Wartung, gleich zurück" --confirm-prod   # Banner überall; off beendet ihn
+pnpm admin:config block-term list
+pnpm admin:game purge --code <CODE> --dry-run                                     # Test-/Abnahmespiel: Wirkung zeigen
+pnpm admin:game purge --code <CODE> --confirm-prod                                # … entfernen, Statistik zurückrechnen
 ```
+
+`admin:game purge` löscht beendete Spiele mit diesem Lobby-Code samt Lobby-Snapshot, rechnet die Fragen-Statistik
+(nur Menschen, nie unter 0) sowie Bewertungen/Meldungen und Gast-Statistiken der Beteiligten zurück – Gäste nur, wenn
+sie an keinem anderen Spiel beteiligt waren; laufende Lobbys bleiben unberührt (nach dem Schließen erneut ausführen).
 
 IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`IP_HASH_SECRET`), nie die IP.
 
@@ -457,7 +558,7 @@ IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`
   (Dienstbenutzer liest Env und Release, schreibt nur `.next/cache`; ein drittes Konto erreicht weder Env noch
   Releases). Offen sind die übrigen Punkte oben.
 - **Offsite-Backups** (siehe oben).
-- **Externer Uptime-Check** und der **Watchdog** (siehe Monitoring).
+- **Externer Uptime-Check** (siehe Monitoring).
 
 ## Sicherheit
 
