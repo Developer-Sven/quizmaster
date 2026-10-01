@@ -26,9 +26,7 @@
  * REALTIME_METRICS_URL, METRICS_TOKEN, optional ALERT_WEBHOOK_URL, APP_ORIGIN, LOG_LEVEL, NODE_ENV.
  * SIGINT/SIGTERM: laufende Prüfung abbrechen, Logs schreiben, Exit 0 (pm2 `kill_timeout` 5 s).
  */
-import { realpathSync } from "node:fs";
 import { hostname } from "node:os";
-import { fileURLToPath } from "node:url";
 import pino from "pino";
 import { z } from "zod";
 import { createLogger, type Logger } from "./logger.ts";
@@ -795,7 +793,11 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
 
 // ── Prozess ──────────────────────────────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+/**
+ * Startet den Watchdog als Programm (Env prüfen, Logger, Signale). Aufgerufen von `watchdog-main.ts` – dem Einstieg
+ * für pm2 (dist/watchdog.mjs); diese Datei selbst startet nichts, damit Tests sie gefahrlos importieren.
+ */
+export async function runWatchdog(): Promise<void> {
   const parsed = parseWatchdogEnv(process.env);
   if (!parsed.ok) {
     console.error(`watchdog – Env ungültig:\n${parsed.problems.map((problem) => `  - ${problem}`).join("\n")}`);
@@ -821,23 +823,4 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   watchdog.start();
-}
-
-/** true, wenn diese Datei als Programm gestartet wurde (dist/watchdog.mjs), nicht beim Import in Tests. */
-function isMainModule(): boolean {
-  const entry = process.argv[1];
-  if (entry === undefined) return false;
-  try {
-    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
-  } catch (error) {
-    console.error("watchdog – Einstiegspunkt nicht bestimmbar", error instanceof Error ? error.message : error);
-    return false;
-  }
-}
-
-if (isMainModule()) {
-  main().catch((error: unknown) => {
-    console.error("watchdog – unerwarteter Fehler beim Start", error instanceof Error ? error.message : error);
-    process.exit(1);
-  });
 }
