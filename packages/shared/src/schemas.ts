@@ -3,7 +3,7 @@
  * (etwa `guestId`, `source` oder ein vorzeitiges `correct`) lassen die Prüfung scheitern – so lassen sich
  * die Invarianten aus docs/06 in Tests der Engine und des Realtime-Servers direkt absichern.
  */
-import { z } from "zod";
+
 import {
   GAME_OUTCOMES,
   KICK_REASONS,
@@ -26,6 +26,7 @@ import {
   timestampSchema,
 } from "./primitives.ts";
 import { GAME_RULES, lobbySettingsSchema, SETTINGS_BOUNDS } from "./settings.ts";
+import * as z from "./zod.ts";
 
 const MAX_PLAYERS = GAME_RULES.maxPlayersPerLobby;
 /** Züge je Spiel höchstens: Runden × Personen. */

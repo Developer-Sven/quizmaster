@@ -2,10 +2,11 @@
  * HTTP-Endpunkte und ihre Request-/Response-Verträge (docs/02, docs/05 §Verbindung, docs/06).
  * Jeder Request-Body wird mit `strictObject` validiert (docs/06 Invariante 5).
  */
-import { z } from "zod";
+
 import { ackErrorBodySchema } from "./ack.ts";
 import { TICKET_MAX_LENGTH } from "./auth.ts";
 import { categoryIdSchema, hexColorSchema, iconNameSchema } from "./primitives.ts";
+import * as z from "./zod.ts";
 
 /** Alle HTTP-Endpunkte von Web und Realtime – jeder hat ein Rate-Limit (`limits.ts`). */
 export const HTTP_ENDPOINTS = [

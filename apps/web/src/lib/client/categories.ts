@@ -10,15 +10,15 @@ import {
   hexColorSchema,
   iconNameSchema,
 } from "@quizmaster/shared";
-import { z } from "zod";
+import { array, object, record, string } from "zod";
 import type { CategoryCatalog } from "./game-view";
 
 /** Höchstens so viele Kategorien werden gespeichert (es gibt 19). */
 const MAX_STORED = 64;
 
-const storedSchema = z.object({
-  code: z.string().max(16),
-  categories: z.record(categoryIdSchema, categoryOptionSchema),
+const storedSchema = object({
+  code: string().max(16),
+  categories: record(categoryIdSchema, categoryOptionSchema),
 });
 
 /** Gespeicherter Katalog für `code` – leer, wenn nichts, etwas Ungültiges oder eine andere Lobby gespeichert ist. */
@@ -43,17 +43,15 @@ export function serializeCategories(code: string, catalog: CategoryCatalog): str
 }
 
 /** Antwort von `GET /api/categories` (nur die Felder, die der Client braucht; weitere werden ignoriert). */
-const categoriesResponseSchema = z.object({
-  categories: z
-    .array(
-      z.object({
-        id: categoryIdSchema,
-        name: z.string().min(1).max(64),
-        icon: iconNameSchema,
-        color: hexColorSchema,
-      }),
-    )
-    .max(MAX_STORED),
+const categoriesResponseSchema = object({
+  categories: array(
+    object({
+      id: categoryIdSchema,
+      name: string().min(1).max(64),
+      icon: iconNameSchema,
+      color: hexColorSchema,
+    }),
+  ).max(MAX_STORED),
 });
 
 /** Liest die Antwort von `GET /api/categories`; ungültige Antworten ergeben eine leere Liste. */

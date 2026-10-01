@@ -3,7 +3,7 @@
  * dieselben Schemas; der Server validiert JEDE Nachricht mit `payload` (strictObject, Längengrenzen)
  * und antwortet im Ack-Format (`ack.ts`). Jede Änderung an Payload-Formen erhöht `PROTOCOL_VERSION`.
  */
-import { z } from "zod";
+
 import type { Ack } from "./ack.ts";
 import { type Phase, RATING_VALUES, REPORT_REASONS } from "./constants.ts";
 import {
@@ -24,6 +24,7 @@ import {
   reviewListSchema,
 } from "./schemas.ts";
 import { updateSettingsPayloadSchema } from "./settings.ts";
+import * as z from "./zod.ts";
 
 /** Beschreibung eines Client→Server-Events. */
 export interface ClientEventSpec<P extends z.ZodType = z.ZodType, A extends z.ZodType = z.ZodType> {

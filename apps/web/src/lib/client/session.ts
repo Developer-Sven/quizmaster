@@ -6,7 +6,7 @@
  * `NETWORK` = keine Antwort.
  */
 import { type ErrorCode, isErrorCode, ticketResponseSchema } from "@quizmaster/shared";
-import { z } from "zod";
+import { number, object, string } from "zod";
 import type { ClientErrorCode } from "./errors";
 import { writeSessionHint } from "./storage";
 
@@ -25,8 +25,8 @@ export class ApiError extends Error {
 }
 
 /** Fehler-Body der Web-API, bewusst tolerant gelesen (nur `code` und optional `retryAfterMs`). */
-const errorBodySchema = z.object({
-  error: z.object({ code: z.string().max(64), retryAfterMs: z.number().int().min(0).optional() }),
+const errorBodySchema = object({
+  error: object({ code: string().max(64), retryAfterMs: number().int().min(0).optional() }),
 });
 
 /** Code aus einem Fehler-Body; ohne verwertbaren Body nach HTTP-Status. */

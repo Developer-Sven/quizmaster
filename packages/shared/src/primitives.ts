@@ -3,10 +3,11 @@
  * bewusst eng (docs/06 Invariante 5); Server→Client-Schemas nutzen großzügigere Obergrenzen, damit
  * gültige Inhalte nie am Schema scheitern.
  */
-import { z } from "zod";
+
 import { ANSWER_INDEXES } from "./constants.ts";
 import { LOBBY_CODE_INPUT_MAX_LENGTH, LOBBY_CODE_REGEX, normalizeLobbyCode } from "./lobby-code.ts";
 import { NAME_INPUT_MAX_LENGTH } from "./names.ts";
+import * as z from "./zod.ts";
 
 /** Serverzeit in ms seit Epoche (`Date.now()`); Client-Zeitstempel sind nie maßgeblich. */
 export const timestampSchema = z.int().min(0);

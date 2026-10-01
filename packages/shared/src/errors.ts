@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "./zod.ts";
 
 /**
  * Alle Fehlercodes des Protokolls (docs/05 §Fehlercodes). Der Client zeigt je Code genau eine Darstellung

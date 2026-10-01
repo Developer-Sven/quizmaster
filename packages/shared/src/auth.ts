@@ -3,8 +3,9 @@
  * Konstanten und Schemas, damit Web (stellt aus) und Realtime (prüft) exakt dasselbe erwarten.
  * Die guestId ist GEHEIM – sie steht nur in Cookie/Ticket (`sub`) und in Server-Daten, nie in Payloads.
  */
-import { z } from "zod";
+
 import { errorCodeSchema } from "./errors.ts";
+import * as z from "./zod.ts";
 
 /** guestId = `crypto.randomUUID()`. */
 export const guestIdSchema = z.uuid();

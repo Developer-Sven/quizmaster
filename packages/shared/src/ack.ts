@@ -1,5 +1,5 @@
-import { z } from "zod";
 import { type ErrorCode, errorCodeSchema, ProtocolError } from "./errors.ts";
+import * as z from "./zod.ts";
 
 /** Fehlerteil eines Acks (docs/05 §Ack-Format). */
 export interface AckErrorBody {

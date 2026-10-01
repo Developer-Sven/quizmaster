@@ -2,7 +2,7 @@
  * Lobby-Einstellungen (docs/01 §Einstellungen, ADR-017): nur Host, nur vor Spielbeginn. Alles andere
  * ist fest wie beim Vorbild (`GAME_RULES`).
  */
-import { z } from "zod";
+import * as z from "./zod.ts";
 
 /** Einstellbare Werte mit Grenzen und Standard. */
 export const SETTINGS_BOUNDS = {
