@@ -81,12 +81,19 @@ export type EventHandler<E extends ClientEventName> = (
   ctx: EventContext<E>,
 ) => EventHandlerResult<E> | Promise<EventHandlerResult<E>>;
 
-export interface RegisterEventOptions {
+export interface RegisterEventOptions<E extends ClientEventName = ClientEventName> {
   /**
    * Für Regeln mit `consume: "failure"` (z. B. fehlgeschlagene `lobby:join` je IP): welche Fehlercodes als
    * Fehlversuch zählen. Standard: `isFailedAttempt` (alle fachlichen Ablehnungen außer Server-Zuständen).
    */
   countsAsFailure?: (code: ErrorCode) => boolean;
+  /**
+   * Für Regeln mit `consume: "failure"`: Anfragen, die eine bestehende Fehlversuchs-Sperre nicht betrifft – etwa
+   * Mitglieder, die in ihre eigene Lobby zurückkehren (kein Code-Raten; die IP-Sperre träfe sonst Unbeteiligte
+   * derselben IP). Bekommt den validierten Payload und die guestId; `true` = Sperre überspringen (die übrigen
+   * Limits gelten weiter). Darf nur verraten, was die Person schon weiß; ein Fehler gilt als `false` (Sperre bleibt).
+   */
+  skipFailureBlock?: (payload: ClientEventPayload<E>, guestId: string) => boolean;
 }
 
 /** Zugriff auf die Datenbank (ein Client pro Prozess, Collections ggf. mit Test-Präfix). */
@@ -151,7 +158,11 @@ export interface ModuleContext {
    * Rate-Limit gibt (Invariante 6) oder es schon registriert ist. `devOnly`-Events werden ohne
    * `DEV_BOTS_ENABLED` nicht registriert (Rückgabe `false`) – sie gelten dann als unbekannt.
    */
-  registerEvent<E extends ClientEventName>(event: E, handler: EventHandler<E>, options?: RegisterEventOptions): boolean;
+  registerEvent<E extends ClientEventName>(
+    event: E,
+    handler: EventHandler<E>,
+    options?: RegisterEventOptions<E>,
+  ): boolean;
   /** Nach erfolgreicher Authentifizierung (Socket ist bereits im Gast-Raum). */
   onConnection(listener: (socket: AppSocket) => void): void;
   /** Nach dem Trennen; die Verbindungszähler sind dann schon aktualisiert (`connections.countForGuest`). */

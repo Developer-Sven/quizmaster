@@ -21,6 +21,7 @@ import {
   findGuestOfReport,
   maintenancePatch,
   parseConfigAssignments,
+  parsePurgeSince,
   purgeGamesByCode,
   resolveBanTarget,
   shortId,
@@ -81,6 +82,18 @@ describe("banTarget", () => {
     expect(() => banTarget({ guest, ip: "1.2.3.4" }, SECRET)).toThrow(/genau eines/);
     expect(() => banTarget({ guest: "abc" }, SECRET)).toThrow(/UUID/);
     expect(() => banTarget({ ip: "999.1.1.1" }, SECRET)).toThrow(/keine gültige/);
+  });
+});
+
+describe("parsePurgeSince (admin:game purge --since)", () => {
+  it("nimmt ISO-Datum bzw. -Zeitpunkt und lehnt alles andere ab", () => {
+    expect(parsePurgeSince(undefined)).toBeUndefined();
+    expect(parsePurgeSince("2026-10-01")?.toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    expect(parsePurgeSince("2026-10-01T12:30:00Z")?.toISOString()).toBe("2026-10-01T12:30:00.000Z");
+    expect(parsePurgeSince("2026-10-01T14:30:00+02:00")?.toISOString()).toBe("2026-10-01T12:30:00.000Z");
+    for (const bad of ["", "gestern", "1.10.2026", "2026-13-01", "2026-02-30", "2026-10-01 12:00", "1759312200000"]) {
+      expect(() => parsePurgeSince(bad), bad).toThrow(AdminUsageError);
+    }
   });
 });
 
@@ -455,8 +468,15 @@ describe("admin:game purge – handgebaute Spiele (Test-DB)", () => {
       ratings: 1,
       reports: 1,
       guests: { participants: 2, rolledBack: 1, otherGames: 1, missing: 0 },
+      since: null,
+      // Je Spiel nur Zeitpunkte und Besetzung (Menschen/Bots) – ohne Namen und guestIds.
+      gameList: [{ startedAt: now, endedAt: now, players: 2, bots: 1 }],
     });
     expect(await t.collections.games.countDocuments({})).toBe(3);
+    // --since nach dem Spielende: nichts zu tun (ältere Spiele mit wiederverwendetem Code bleiben).
+    expect(
+      await purgeGamesByCode(client, t.collections, "ABC234", { dryRun: true, since: new Date(now.getTime() + 1) }),
+    ).toMatchObject({ games: 0, skippedGames: 0, gameList: [] });
 
     expect(await purgeGamesByCode(client, t.collections, "ABC234", { dryRun: false })).toEqual(preview);
     expect((await t.collections.games.find({}).toArray()).map((doc) => doc._id).sort()).toEqual([
@@ -527,8 +547,10 @@ describe("admin.ts (CLI) – neue Befehle", () => {
       cli("config", "maintenance", "an"),
       cli("config", "maintenance", "on", "Wartung"),
       cli("game", "drop", "--code", "ABC234"),
+      cli("game", "purge", "--code", "ABC234", "--since", "gestern", "--dry-run"),
     ]);
-    const [noCode, unconfirmed, lobbyNoName, twoTargets, badMode, maintenanceUnconfirmed, unknown] = results;
+    const [noCode, unconfirmed, lobbyNoName, twoTargets, badMode, maintenanceUnconfirmed, unknown, badSince] = results;
+    expect(badSince?.output).toContain("--since erwartet ein ISO-Datum");
     expect(noCode?.output).toContain("--code <CODE> fehlt");
     expect(unconfirmed?.output).toContain("nur mit --confirm-prod");
     expect(lobbyNoName?.output).toContain("--lobby braucht --name");

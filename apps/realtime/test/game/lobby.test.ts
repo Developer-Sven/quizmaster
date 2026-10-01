@@ -7,8 +7,8 @@
 import { randomUUID } from "node:crypto";
 import type { PublicLobbyState } from "@quizmaster/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { countsAsResumeFailure } from "../../src/handlers/lobby.ts";
-import { eventually, type TestServer } from "../helpers/index.ts";
+import { countsAsCodeGuess } from "../../src/handlers/lobby.ts";
+import { eventually, metricValue, type TestServer } from "../helpers/index.ts";
 import {
   actorOf,
   connectGuest,
@@ -209,11 +209,106 @@ describe("Code-Raten", () => {
     for (const client of [host, ...guessers]) client.close();
   });
 
-  it("nur LOBBY_NOT_FOUND zählt bei lobby:resume als Fehlversuch", () => {
-    expect(countsAsResumeFailure("LOBBY_NOT_FOUND")).toBe(true);
-    for (const code of ["KICKED", "RESIGNED", "INTERNAL", "SERVER_BUSY", "RATE_LIMITED"] as const) {
-      expect(countsAsResumeFailure(code), code).toBe(false);
+  it("nur LOBBY_NOT_FOUND zählt bei lobby:join und lobby:resume als Fehlversuch (Code-Raten)", () => {
+    expect(countsAsCodeGuess("LOBBY_NOT_FOUND")).toBe(true);
+    for (const code of [
+      "KICKED",
+      "RESIGNED",
+      "LOBBY_FULL",
+      "GAME_IN_PROGRESS",
+      "NAME_REJECTED",
+      "TURNSTILE_REQUIRED",
+      "INTERNAL",
+      "SERVER_BUSY",
+      "RATE_LIMITED",
+    ] as const) {
+      expect(countsAsCodeGuess(code), code).toBe(false);
     }
+  });
+
+  it("Ablehnungen existierender Codes (voll, Name, läuft) sperren die IP nicht – eine Klasse vor einer vollen Lobby", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host);
+    expect((await host.emit("lobby:update-settings", { maxPlayers: 2 })).ok).toBe(true);
+    const ip = server.nextIp();
+    const classmates = await Promise.all([0, 1, 2].map(() => connectGuest(server, { ip })));
+    const [first] = classmates;
+    if (first === undefined) throw new Error("Client fehlt");
+    await joinLobby(first, code, "Ben");
+    let rejected = 0;
+    for (const classmate of classmates.slice(1)) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const name = attempt % 2 === 0 ? "admin" : `Kind ${attempt}`;
+        const result = await classmate.emit("lobby:join", { code, name });
+        expect(result).toMatchObject({
+          ok: false,
+          error: { code: attempt % 2 === 0 ? "NAME_REJECTED" : "LOBBY_FULL" },
+        });
+        rejected += 1;
+      }
+    }
+    expect(rejected).toBe(20);
+    // 21. Ablehnung (laufendes Spiel) – danach tritt eine weitere Person derselben IP einer anderen Lobby bei.
+    const opponent = await connectGuest(server);
+    const other = await createLobby(opponent, "Olga");
+    const late = await connectGuest(server, { ip });
+    await joinLobby(late, other, "Lea");
+    expect(await opponent.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    const third = await connectGuest(server, { ip });
+    expect(await third.emit("lobby:join", { code: other, name: "Tim" })).toMatchObject({
+      ok: false,
+      error: { code: "GAME_IN_PROGRESS" },
+    });
+    const nora = await connectGuest(server);
+    const ownCode = await createLobby(nora, "Nora");
+    const newcomer = await connectGuest(server, { ip });
+    await joinLobby(newcomer, ownCode, "Neu");
+    for (const client of [host, ...classmates, opponent, late, third, nora, newcomer]) client.close();
+  });
+
+  it("IP-Sperre durch Code-Raten eines Mitnutzers: Mitglieder kommen per resume und join zurück, ohne Verstöße", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const ip = server.nextIp();
+    const member = await connectGuest(server, { ip });
+    await joinLobby(member, code, "Ben");
+    // Mitnutzer derselben IP rät Codes über resume und join, bis beide Sperren greifen.
+    const guessers = await Promise.all([0, 1, 2, 3, 4].map(() => connectGuest(server, { ip })));
+    const wrong = code === "ZZZZZZ" ? "ZZZZZY" : "ZZZZZZ";
+    for (let attempt = 0; attempt < 21; attempt++) {
+      const guesser = guessers[Math.floor(attempt / 9)];
+      if (guesser === undefined) throw new Error("Client fehlt");
+      expect(await guesser.emit("lobby:resume", { code: wrong })).toMatchObject({ error: { code: "LOBBY_NOT_FOUND" } });
+    }
+    for (let attempt = 0; attempt < 21; attempt++) {
+      const guesser = guessers[2 + Math.floor(attempt / 9)];
+      if (guesser === undefined) throw new Error("Client fehlt");
+      expect(await guesser.emit("lobby:join", { code: wrong, name: "Rater" })).toMatchObject({
+        error: { code: "LOBBY_NOT_FOUND" },
+      });
+    }
+    const stranger = await connectGuest(server, { ip });
+    expect(await stranger.emit("lobby:resume", { code })).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    expect(await stranger.emit("lobby:join", { code, name: "Fremd" })).toMatchObject({
+      error: { code: "RATE_LIMITED" },
+    });
+    const violationsBefore = await metricValue(server.app.services.metrics, "qm_violations_total", {
+      reason: "rate_limit",
+    });
+    // Das Mitglied verbindet neu (gleicher Gast, gleiche IP) und kehrt zurück – per resume und per join (Link).
+    const rejoined = await connectGuest(server, { ip, guestId: member.guestId });
+    member.close();
+    expect(await rejoined.emit("lobby:resume", { code })).toEqual({ ok: true, data: { code } });
+    expect(await rejoined.emit("lobby:join", { code, name: "Ben" })).toEqual({ ok: true, data: { code } });
+    // Blockierte Versuche Unbeteiligter derselben IP sind keine Verstöße (keine Trennung, keine Sperre).
+    for (let attempt = 0; attempt < 4; attempt++) {
+      expect(await stranger.emit("lobby:resume", { code })).toMatchObject({ error: { code: "RATE_LIMITED" } });
+    }
+    expect(await metricValue(server.app.services.metrics, "qm_violations_total", { reason: "rate_limit" })).toBe(
+      violationsBefore,
+    );
+    expect(stranger.socket.connected).toBe(true);
+    for (const client of [host, rejoined, stranger, ...guessers]) client.close();
   });
 });
 

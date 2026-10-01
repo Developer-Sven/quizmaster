@@ -120,10 +120,26 @@ describe("admin:game purge – echte Spiele", () => {
     expect(preview.shown).toBe(answers.length);
     expect(preview.correct).toBe(answers.filter((answer) => answer.correct).length);
     expect(preview.shown).toBeGreaterThan(0);
+    // Lobby-Codes werden wiederverwendet: der Dry-Run zeigt je Spiel Zeitpunkte und Besetzung (ohne Namen/IDs).
+    expect(preview.since).toBeNull();
+    expect(preview.gameList).toEqual([{ startedAt: game.startedAt, endedAt: game.endedAt, players: 2, bots: 1 }]);
     const text = describePurge(preview, true).join("\n");
     expect(text).toContain("Dry-Run");
-    for (const secret of [host.guestId, guest.guestId]) expect(text.includes(secret)).toBe(false);
+    expect(text).toContain(`beendet ${game.endedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`);
+    expect(text).toContain("2 Personen + 1 Bot");
+    for (const secret of [host.guestId, guest.guestId, "Mia", "Ben"]) expect(text.includes(secret)).toBe(false);
     expect(await server.db.collections.games.countDocuments({ code })).toBe(1);
+    // --since grenzt auf Spiele ab diesem Zeitpunkt ein (ältere Spiele mit wiederverwendetem Code bleiben).
+    const later = new Date(game.endedAt.getTime() + 1);
+    const narrowed = await purgeGamesByCode(server.db.client, server.db.collections, code, {
+      dryRun: true,
+      since: later,
+    });
+    expect(narrowed).toMatchObject({ games: 0, skippedGames: 0, since: later, gameList: [] });
+    expect(describePurge(narrowed, true).join("\n")).toContain(`seit ${later.toISOString()}`);
+    expect(
+      await purgeGamesByCode(server.db.client, server.db.collections, code, { dryRun: true, since: game.endedAt }),
+    ).toMatchObject({ games: 1 });
 
     const done = await purgeGamesByCode(server.db.client, server.db.collections, code, { dryRun: false });
     expect(done).toEqual(preview);

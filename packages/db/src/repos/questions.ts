@@ -8,6 +8,7 @@
  * - Schutzautomatik: `autoRetire` nimmt eine Frage sofort aus dem Pool (`retired` + `autoRetired`) – nur, solange
  *   sie seit der Prüfung unverändert ist (Guard auf `updatedAt`), damit ein paralleler Seed oder eine
  *   Wiederherstellung nie überschrieben wird. `restoreAutoRetired` macht das rückgängig (admin:reports).
+ *   Missbrauchsbremse: `countAutoRetiredSince` zählt die automatischen Rückzüge im Fenster (`AUTO_RETIRE_BUDGET`).
  * - Live-Zähler: `countPlayable(category)` zählt spielbare/belegte Fragen einer Kategorie (Index
  *   `status_category_difficulty`, ohne Dokumentzugriff).
  * - Kalibrierung: Trefferquote je Frage ab 30 Anzeigen → Vorschlag neue Schwierigkeit (`difficultyForHitRate`),
@@ -17,7 +18,7 @@
 import { categoryIdSchema, type Difficulty } from "@quizmaster/shared";
 import type { QuestionDbStatus } from "@quizmaster/shared/content";
 import type { QuestionDoc } from "@quizmaster/shared/documents";
-import type { AnyBulkWriteOperation, ClientSession, Collection, Filter, ReadPreferenceLike } from "mongodb";
+import type { AnyBulkWriteOperation, ClientSession, Collection, Document, Filter, ReadPreferenceLike } from "mongodb";
 import { z } from "zod";
 import { HOT_PATH_TIMEOUT_MS, POOL_LOAD_TIMEOUT_MS } from "../client.ts";
 import { chunk, questionIdSchema, uniqueIds } from "./ids.ts";
@@ -143,6 +144,15 @@ export const QUESTION_BATCH_SIZE = 500;
 
 /** Höchstzahl automatisch zurückgezogener Fragen je Abfrage der Prüf-Queue. */
 export const AUTO_RETIRED_LIST_MAX = 2_000;
+
+/**
+ * Missbrauchsbremse der Schutzautomatik: höchstens so viele automatische Rückzüge je Kategorie bzw. insgesamt im
+ * gleitenden Fenster. Darüber bleibt eine fällige Frage im Pool (Meldungen/Bewertungen bleiben in der Prüf-Queue),
+ * Realtime zählt `qm_questions_auto_retire_suppressed_total`, der Watchdog alarmiert. Ohne Bremse könnten wenige
+ * kostenlose Gast-Sessions Kategorien unter die Mindestmenge drücken; im Normalbetrieb liegt die Automatik weit
+ * darunter (geprüfter Katalog, Rückzüge sind Einzelfälle).
+ */
+export const AUTO_RETIRE_BUDGET = Object.freeze({ windowMs: 24 * 60 * 60 * 1_000, perCategory: 5, total: 20 });
 
 /** Bulk-Operationen für die Fragen-Statistik (auch in der Abschluss-Transaktion genutzt). */
 export function questionStatsOperations(deltas: readonly QuestionStatsDelta[]): AnyBulkWriteOperation<QuestionDoc>[] {
@@ -295,8 +305,15 @@ export interface QuestionsRepo {
   countPlayable(category: string): Promise<PlayableCounts>;
   /** Fragen für die Prüf-Queue per `$in` (unbekannte IDs fehlen). */
   findForReview(questionIds: readonly string[], options?: ScriptReadOptions): Promise<ReviewQuestion[]>;
-  /** Automatisch zurückgezogene Fragen (höchstens `AUTO_RETIRED_LIST_MAX`, neueste zuerst). */
-  listAutoRetired(options?: ScriptReadOptions): Promise<{ questions: ReviewQuestion[]; truncated: boolean }>;
+  /**
+   * Automatisch zurückgezogene Fragen, neueste zuerst (höchstens `limit` bzw. `AUTO_RETIRED_LIST_MAX`); optional nur
+   * seit `since` bzw. aus einem Grund (Massen-Wiederherstellung, admin:reports --restore-auto).
+   */
+  listAutoRetired(
+    options?: ScriptReadOptions & { since?: Date; reason?: AutoRetireReason; limit?: number },
+  ): Promise<{ questions: ReviewQuestion[]; truncated: boolean }>;
+  /** Automatische Rückzüge seit `since` (Missbrauchsbremse `AUTO_RETIRE_BUDGET`), optional nur einer Kategorie. */
+  countAutoRetiredSince(since: Date, category?: string): Promise<number>;
   /** Spielbare Fragen mit mindestens `minShown` Anzeigen (Kalibrierung). */
   calibrationStats(options: ScriptReadOptions & { minShown: number }): Promise<CalibrationRow[]>;
 }
@@ -456,23 +473,30 @@ export function createQuestionsRepo(questions: Collection<QuestionDoc>): Questio
       return found;
     },
 
-    async listAutoRetired(options) {
-      // Index status_category_difficulty (Präfix status = retired); sortiert wird im Speicher (wenige Fragen).
+    async listAutoRetired(options = {}) {
+      const limit = z
+        .int()
+        .min(1)
+        .max(AUTO_RETIRED_LIST_MAX)
+        .parse(options.limit ?? AUTO_RETIRED_LIST_MAX);
+      const filter: Document = { status: "retired", autoRetired: { $ne: null } };
+      if (options.since !== undefined) filter["autoRetired.at"] = { $gte: z.date().parse(options.since) };
+      if (options.reason !== undefined) filter["autoRetired.reason"] = autoRetireReasonSchema.parse(options.reason);
+      // Index status_category_difficulty (Präfix status = retired). Sortiert wird auf dem Server VOR der Höchstzahl –
+      // nach einem Massenabzug zeigt die Queue so die neuesten statt einer beliebigen Teilmenge.
       const rows = await questions
-        .find<ReviewQuestion>(
-          { status: "retired", autoRetired: { $ne: null } },
-          { projection: REVIEW_PROJECTION, ...scriptRead(options) },
-        )
-        .limit(AUTO_RETIRED_LIST_MAX + 1)
+        .find<ReviewQuestion>(filter as Filter<QuestionDoc>, { projection: REVIEW_PROJECTION, ...scriptRead(options) })
+        .sort({ "autoRetired.at": -1, _id: 1 })
+        .limit(limit + 1)
         .toArray();
-      const truncated = rows.length > AUTO_RETIRED_LIST_MAX;
-      const sorted = rows
-        .slice(0, AUTO_RETIRED_LIST_MAX)
-        .sort(
-          (a, b) =>
-            (b.autoRetired?.at.getTime() ?? 0) - (a.autoRetired?.at.getTime() ?? 0) || a._id.localeCompare(b._id),
-        );
-      return { questions: sorted, truncated };
+      return { questions: rows.slice(0, limit), truncated: rows.length > limit };
+    },
+
+    async countAutoRetiredSince(since, category) {
+      const filter: Document = { status: "retired", "autoRetired.at": { $gte: z.date().parse(since) } };
+      if (category !== undefined) filter.category = categoryIdSchema.parse(category);
+      // Index status_category_difficulty (status + category); zurückgezogene Fragen sind wenige.
+      return questions.countDocuments(filter as Filter<QuestionDoc>, HOT_PATH);
     },
 
     async calibrationStats(options) {

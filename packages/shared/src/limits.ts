@@ -180,6 +180,9 @@ export const RATE_LIMITS: readonly RateLimitRule[] = [
     points: 60,
     durationSec: 60,
     onExceed: { action: "reject_handshake", code: "RATE_LIMITED" },
+    note:
+      "Vor dem Ticket gezählt, abgelehnt werden darüber nur Handshakes ohne gültiges Ticket (Mitnutzer derselben IP " +
+      "sperren niemanden aus); Flut (Realtime: 10× je IP) → harte Ablehnung",
   }),
 
   // --- Client→Server-Events ---

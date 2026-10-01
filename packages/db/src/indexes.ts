@@ -40,6 +40,9 @@ export const INDEX_DEFINITIONS: readonly IndexDefinition[] = [
   { collection: "lobbies", name: "ownerInstanceId_active", key: { "owner.instanceId": 1, active: 1 } },
   { collection: "games", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
   { collection: "games", name: "playersGuestId_endedAt", key: { "players.guestId": 1, endedAt: -1 } },
+  // admin:game purge: Spiele je Lobby-Code (Codes werden nach dem Schließen wiederverwendet → neueste zuerst). Ohne
+  // ihn wäre die Suche ein COLLSCAN über 90 Tage Spiele – innerhalb der Bereinigungs-Transaktion (Frist 30 s).
+  { collection: "games", name: "code_endedAt", key: { code: 1, endedAt: -1 } },
   { collection: "categories", name: "playable_order", key: { playable: 1, order: 1 } },
   {
     collection: "questions",

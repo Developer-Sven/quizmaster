@@ -7,10 +7,15 @@
  *    - Handshake-Limit je IP-Schlüssel (60/min), IP- und globale Verbindungsgrenze, Lastabwurf, Shutdown.
  *    Limit-Entscheidungen werden am Request vermerkt und erst in Stufe 2 zugestellt, damit der Client
  *    `connect_error` mit `data.code` bekommt (Vertrag `reject_handshake` in `limits.ts`). Nur eine Flut
- *    (mehr als das Doppelte des Handshake-Limits) wird schon hier hart abgewiesen.
+ *    (mehr als das Zehnfache des Handshake-Limits) wird schon hier hart abgewiesen.
  * 2. Auth-Middleware (`io.use`): vermerkte Ablehnung → `handshakeAuthSchema` → Ticket (jose, `jti` einmalig)
  *    → Ban (Gast + IP-Schlüssel) → `protocolVersion ≥ appConfig.minClientProtocol` → verbindliche
  *    Reservierung der Verbindung (Gast 5, IP 100, global) → `socket.data`.
+ *
+ * Das Handshake-Limit der IP (60/min) wird vor dem Ticket gezählt (das Ticket kommt erst mit dem CONNECT-Paket),
+ * führt aber nur bei Handshakes OHNE gültiges Ticket zu `RATE_LIMITED`: Sonst könnte eine Person hinter derselben IP
+ * (Schulklasse, CGNAT, Party-WLAN) mit 61 ticketlosen Handshakes je Minute alle anderen aussperren. Gültige,
+ * einmalige Tickets begrenzt bereits das Web (30/min je Gast, 300/min je IP); für sie gilt hier nur die Flut-Grenze.
  *
  * Fehler gehen als `connect_error` mit `data: { code, retryAfterMs? }` (Vertrag `connectErrorDataSchema` aus
  * shared) an den Client (UNAUTHORIZED, UPDATE_REQUIRED, BANNED, TOO_MANY_CONNECTIONS, SERVER_BUSY, RATE_LIMITED);
@@ -64,6 +69,11 @@ export class HandshakeError extends Error {
 interface HandshakeNote {
   ipKey: string | null;
   rejection: HandshakeRejection | null;
+  /**
+   * Handshake-Limit der IP überschritten (Wartezeit in ms) – gilt nur, wenn der Handshake kein gültiges Ticket
+   * vorlegt (siehe Kopfkommentar); `null` = unter dem Limit.
+   */
+  ipLimitedMs: number | null;
 }
 
 export interface HandshakeDeps {
@@ -86,8 +96,12 @@ export type AllowRequest = (
 ) => void;
 export type SocketMiddleware = (socket: AppSocket, next: (err?: Error) => void) => void;
 
-/** Mehr als das Doppelte des Handshake-Limits gilt als Flut und wird ohne Engine-Sitzung abgewiesen. */
-export const HANDSHAKE_FLOOD_FACTOR = 2;
+/**
+ * Mehr als das Zehnfache des Handshake-Limits (600/min je IP) gilt als Flut und wird ohne Engine-Sitzung
+ * abgewiesen – für alle Handshakes dieser IP, auch mit gültigem Ticket. Liegt über dem, was das Web einer IP an
+ * Tickets ausstellt (300/min), trifft also nur echte Fluten (dann Cloudflare-Regeln, docs/06 Schicht 1).
+ */
+export const HANDSHAKE_FLOOD_FACTOR = 10;
 
 function headerValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -112,22 +126,33 @@ export function createHandshake(deps: HandshakeDeps): Handshake {
     return ip === null ? null : hashIp(ip, deps.env.IP_HASH_SECRET);
   };
 
-  const precheck = async (key: string | null): Promise<HandshakeRejection | "flood" | null> => {
+  const limitHit = () => {
+    deps.metrics.rateLimitHits.inc({ rule: handshakeRule.id });
+    deps.security.record("limit_hit", handshakeRule.id);
+  };
+
+  type Precheck = Pick<HandshakeNote, "rejection" | "ipLimitedMs">;
+
+  const precheck = async (key: string | null): Promise<Precheck | "flood"> => {
     const decision = await deps.rateLimit.consume(handshakeRule, key ?? UNKNOWN_IP_KEY);
+    let ipLimitedMs: number | null = null;
     if (!decision.allowed) {
-      deps.metrics.rateLimitHits.inc({ rule: handshakeRule.id });
-      deps.security.record("limit_hit", handshakeRule.id);
-      if (decision.consumedPoints > handshakeRule.points * HANDSHAKE_FLOOD_FACTOR) return "flood";
-      return { code: "RATE_LIMITED", reason: "RATE_LIMITED", retryAfterMs: decision.retryAfterMs };
+      if (decision.consumedPoints > handshakeRule.points * HANDSHAKE_FLOOD_FACTOR) {
+        limitHit();
+        return "flood";
+      }
+      // Erst in Stufe 2 entschieden (nur ohne gültiges Ticket eine Ablehnung, dann auch erst als Treffer gezählt).
+      ipLimitedMs = decision.retryAfterMs;
     }
-    if (deps.lifecycle.isShuttingDown()) return { code: "SERVER_BUSY", reason: "shutdown" };
-    if (deps.metrics.eventLoop.overloaded()) return { code: "SERVER_BUSY", reason: "overloaded" };
+    const reject = (rejection: HandshakeRejection): Precheck => ({ rejection, ipLimitedMs });
+    if (deps.lifecycle.isShuttingDown()) return reject({ code: "SERVER_BUSY", reason: "shutdown" });
+    if (deps.metrics.eventLoop.overloaded()) return reject({ code: "SERVER_BUSY", reason: "overloaded" });
     const limit = deps.connections.precheck(key);
     if (limit !== null) {
       deps.metrics.rateLimitHits.inc({ rule: `connections.${limit.limit}` });
-      return { code: limit.code, reason: limit.code };
+      return reject({ code: limit.code, reason: limit.code });
     }
-    return null;
+    return { rejection: null, ipLimitedMs };
   };
 
   const allowRequest: AllowRequest = (req, callback) => {
@@ -155,12 +180,12 @@ export function createHandshake(deps: HandshakeDeps): Handshake {
             callback("too many handshakes", false);
             return;
           }
-          notes.set(req, { ipKey: key, rejection: result });
+          notes.set(req, { ipKey: key, ...result });
           callback(null, true);
         },
         (error: unknown) => {
           deps.logger.error({ err: error }, "Handshake-Vorprüfung fehlgeschlagen");
-          notes.set(req, { ipKey: key, rejection: { code: "SERVER_BUSY", reason: "INTERNAL" } });
+          notes.set(req, { ipKey: key, rejection: { code: "SERVER_BUSY", reason: "INTERNAL" }, ipLimitedMs: null });
           callback(null, true);
         },
       )
@@ -171,12 +196,23 @@ export function createHandshake(deps: HandshakeDeps): Handshake {
 
   /** Stufe 2 bis einschließlich Ban/Protokollversion; die Reservierung folgt synchron in `middleware`. */
   const authenticate = async (socket: AppSocket): Promise<SocketData | HandshakeRejection> => {
-    const note = notes.get(socket.request) ?? { ipKey: clientIpKey(socket.request), rejection: null };
+    const note = notes.get(socket.request) ?? {
+      ipKey: clientIpKey(socket.request),
+      rejection: null,
+      ipLimitedMs: null,
+    };
     if (note.rejection !== null) return note.rejection;
     if (deps.lifecycle.isShuttingDown()) return { code: "SERVER_BUSY", reason: "shutdown" };
 
+    /** Ohne gültiges Ticket: über dem Handshake-Limit der IP `RATE_LIMITED` (mit Wartezeit), sonst die Ablehnung. */
+    const unauthenticated = (rejection: HandshakeRejection): HandshakeRejection => {
+      if (note.ipLimitedMs === null) return rejection;
+      limitHit();
+      return { code: "RATE_LIMITED", reason: "RATE_LIMITED", retryAfterMs: note.ipLimitedMs };
+    };
+
     const auth = handshakeAuthSchema.safeParse(socket.handshake.auth);
-    if (!auth.success) return { code: "UNAUTHORIZED", reason: "auth_payload" };
+    if (!auth.success) return unauthenticated({ code: "UNAUTHORIZED", reason: "auth_payload" });
 
     const now = deps.clock.now();
     const ticket = await deps.tickets.verify(auth.data.ticket, now);
@@ -185,7 +221,7 @@ export function createHandshake(deps: HandshakeDeps): Handshake {
         deps.logger.error("jti-Speicher voll – neue Tickets werden abgelehnt");
         return { code: "SERVER_BUSY", reason: "jti_store_full" };
       }
-      return { code: "UNAUTHORIZED", reason: `ticket_${ticket.reason}` };
+      return unauthenticated({ code: "UNAUTHORIZED", reason: `ticket_${ticket.reason}` });
     }
     const guestId = ticket.claims.sub;
 

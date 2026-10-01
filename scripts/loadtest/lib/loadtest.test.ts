@@ -14,6 +14,7 @@ import {
   record,
   summarize,
 } from "./stats.ts";
+import { healthReasons, isServerFault, summarizeCounters } from "./verdict.ts";
 
 describe("Parameter", () => {
   it("liest Dauern in allen Schreibweisen", () => {
@@ -171,5 +172,73 @@ describe("/metrics", () => {
     expect(seriesValue(after, "qm_sockets")).toBe(1_000);
     expect(sumOf(before, "qm_mongo_errors_total")).toBe(3);
     expect(sumOf(before, "qm_mongo_errors_total", { operation: "heartbeat" })).toBe(1);
+  });
+});
+
+describe("Bewertung (Serverfehler, gesund)", () => {
+  it("erkennt INTERNAL/SERVER_BUSY/ungültige Acks echter Zähler (Eventnamen mit Doppelpunkt) als Serverfehler", () => {
+    for (const counter of [
+      "error:lobby:create:INTERNAL",
+      "error:game:answer:SERVER_BUSY",
+      "error:time:sync:UNGUELTIG",
+      "timeout:game:answer",
+      "connect_error:SERVER_BUSY",
+      "disconnect:transport close",
+      "state_timeout:state:lobby:join",
+    ]) {
+      expect(isServerFault(counter), counter).toBe(true);
+    }
+    for (const counter of [
+      "error:lobby:join:LOBBY_NOT_FOUND",
+      "error:game:answer:ALREADY_ANSWERED",
+      "error:lobby:create:RATE_LIMITED",
+      "ok:game:answer",
+      "sockets",
+      "error:lobby:create:INTERNAL_X",
+    ]) {
+      expect(isServerFault(counter), counter).toBe(false);
+    }
+  });
+
+  it("ein Server, der jedes Event mit INTERNAL beantwortet, hat eine Serverfehlerquote wie die Fehlerquote", () => {
+    const summary = summarizeCounters({
+      sockets: 2,
+      "error:lobby:create:INTERNAL": 4,
+      "error:lobby:join:INTERNAL": 6,
+      "error:game:answer:SERVER_BUSY": 2,
+    });
+    expect(summary).toMatchObject({ attempts: 14, rejected: 12, faults: 12 });
+    expect(summary.serverErrorRate).toBeCloseTo(12 / 14, 9);
+    expect(summary.serverErrorRate).toBe(summary.errorRate);
+    const reasons = healthReasons(
+      {
+        maxP99Ms: 10,
+        fastWindows: 1,
+        dbPingP95Ms: 5,
+        mongoErrors: 0,
+        serverErrorRate: summary.serverErrorRate,
+        overloaded: false,
+        internalAcks: 0,
+      },
+      ms,
+    );
+    expect(reasons).toEqual(["Serverfehlerquote 85,71 %"]);
+  });
+
+  it("fachliche Ablehnungen sind keine Serverfehler; INTERNAL-Acks laut /metrics machen den Lauf ungesund", () => {
+    const summary = summarizeCounters({ sockets: 10, "ok:game:answer": 80, "error:lobby:join:LOBBY_FULL": 10 });
+    expect(summary).toMatchObject({ attempts: 100, rejected: 10, faults: 0, serverErrorRate: 0, errorRate: 0.1 });
+    const healthy = {
+      maxP99Ms: 10,
+      fastWindows: 1,
+      dbPingP95Ms: 5,
+      mongoErrors: 0,
+      serverErrorRate: 0,
+      overloaded: false,
+      internalAcks: 0,
+    };
+    expect(healthReasons(healthy, ms)).toEqual([]);
+    expect(healthReasons({ ...healthy, internalAcks: 3 }, ms)).toEqual(["3 INTERNAL-Acks laut /metrics"]);
+    expect(healthReasons({ ...healthy, internalAcks: null }, ms)).toEqual([]);
   });
 });

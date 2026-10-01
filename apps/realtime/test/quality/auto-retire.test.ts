@@ -9,16 +9,19 @@
  * - Bezugszeit: Nach einer Wiederherstellung zählen alte Meldungen nicht erneut.
  * - Live-Zähler: Fällt eine Kategorie unter `appConfig.catalog.minPlayable`, wird sie nicht mehr angeboten
  *   (Kategorien-Watcher); nach der Wiederherstellung wieder.
+ * - Missbrauchsbremse: Dieselben drei Gäste melden jede Frage einer Kategorie → höchstens das Tagesbudget je
+ *   Kategorie wird zurückgezogen, der Rest bleibt im Pool (Metrik `qm_questions_auto_retire_suppressed_total`).
  *
  * Eigener Port-Bereich 4530–4539.
  */
 import { randomUUID } from "node:crypto";
+import { AUTO_RETIRE_BUDGET } from "@quizmaster/db";
 import { findShownQuestion } from "@quizmaster/game-engine";
 import type { ReportReason } from "@quizmaster/shared";
 import type { QuestionDoc } from "@quizmaster/shared/documents";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type GameRuntime, gameRuntimeOf } from "../../src/lobby/module.ts";
-import { AUTO_RETIRED_METRIC } from "../../src/services/quality.ts";
+import { AUTO_RETIRE_SUPPRESSED_METRIC, AUTO_RETIRED_METRIC } from "../../src/services/quality.ts";
 import {
   actorOf,
   autoPlay,
@@ -265,5 +268,41 @@ describe("Live-Zähler der Kategorien", () => {
     } finally {
       await server.db.repos.appConfig.setCatalog(original, new Date());
     }
+  });
+});
+
+describe("Missbrauchsbremse (Tagesbudget der Schutzautomatik)", () => {
+  it("drei Gäste einer Lobby melden jede Frage einer Kategorie → höchstens das Budget, der Rest bleibt im Pool", async () => {
+    const category = "musik-hits";
+    const ids = await unverifiedQuestions(category, 8);
+    const since = new Date(Date.now() - AUTO_RETIRE_BUDGET.windowMs);
+    const already = await server.db.repos.questions.countAutoRetiredSince(since, category);
+    const suppressedBefore = await metricValue(server.app.services.metrics, AUTO_RETIRE_SUPPRESSED_METRIC, {
+      reason: "reports",
+    });
+    const trio = [randomUUID(), randomUUID(), randomUUID()];
+    for (const questionId of ids) {
+      for (const guestId of trio) {
+        expect(await runtime().feedback.report({ questionId, guestId, reason: "falsch", lobbyCode: "ABC234" })).toBe(
+          "created",
+        );
+      }
+    }
+    expect(await server.db.repos.questions.countAutoRetiredSince(since, category)).toBe(AUTO_RETIRE_BUDGET.perCategory);
+    const kept = (await Promise.all(ids.map(question))).filter((doc) => doc.status !== "retired");
+    expect(kept).toHaveLength(ids.length - (AUTO_RETIRE_BUDGET.perCategory - already));
+    for (const doc of kept) {
+      expect(doc.autoRetired).toBeNull();
+      expect(runtime().questions.hasQuestion(doc._id)).toBe(true);
+    }
+    expect(await metricValue(server.app.services.metrics, AUTO_RETIRE_SUPPRESSED_METRIC, { reason: "reports" })).toBe(
+      suppressedBefore + kept.length,
+    );
+    // Die Kategorie bleibt spielbar; die zurückgehaltenen Fragen stehen mit ihren Meldungen in der Prüf-Queue.
+    await eventually(() => offered(category), 10_000);
+    const reporters = await Promise.all(
+      kept.map((doc) => server.db.repos.reports.countDistinctReporters(doc._id, since)),
+    );
+    expect(reporters.every((count) => count === 3)).toBe(true);
   });
 });

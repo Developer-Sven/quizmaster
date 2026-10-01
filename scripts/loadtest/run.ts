@@ -39,6 +39,7 @@ import {
   sumOf,
 } from "./lib/server-metrics.ts";
 import { emptySamples, mergeStats, ms, observe, type Summary, summarize, type WorkerStats } from "./lib/stats.ts";
+import { healthReasons, summarizeCounters } from "./lib/verdict.ts";
 import type { FromWorker, ToWorker, WorkerConfig } from "./worker.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
@@ -432,30 +433,11 @@ interface LoadtestResult {
   healthReasons: string[];
 }
 
-/** Codes, die auf einen Serverfehler hindeuten (nicht auf eine fachliche Ablehnung). */
-const SERVER_FAULT =
-  /^(timeout|connect_error|disconnect|state_timeout):|^error:[^:]+:(INTERNAL|SERVER_BUSY|UNGUELTIG)$/;
-
 function evaluate(config: LoadtestConfig, stats: WorkerStats, view: ServerView): LoadtestResult {
   const client: Record<string, Summary> = {};
   for (const [name, set] of Object.entries(stats.samples)) client[name] = summarize(set);
   const counters = stats.counters;
-  const attempts =
-    Object.entries(counters)
-      .filter(([name]) => name.startsWith("ok:") || name.startsWith("error:") || name.startsWith("timeout:"))
-      .reduce((sum, [, value]) => sum + value, 0) +
-    (counters.sockets ?? 0) +
-    Object.entries(counters)
-      .filter(([name]) => name.startsWith("connect_error:"))
-      .reduce((sum, [, value]) => sum + value, 0);
-  const rejected = Object.entries(counters)
-    .filter(([name]) => /^(error|timeout|connect_error|disconnect|state_timeout):/.test(name))
-    .reduce((sum, [, value]) => sum + value, 0);
-  const faults = Object.entries(counters)
-    .filter(([name]) => SERVER_FAULT.test(name))
-    .reduce((sum, [, value]) => sum + value, 0);
-  const errorRate = attempts === 0 ? 0 : rejected / attempts;
-  const serverErrorRate = attempts === 0 ? 0 : faults / attempts;
+  const { errorRate, serverErrorRate } = summarizeCounters(counters);
 
   const { baseline, rampEnd, final } = view;
   const ack = (event: string, q: number) =>
@@ -573,15 +555,18 @@ function evaluate(config: LoadtestConfig, stats: WorkerStats, view: ServerView):
   ];
 
   // „Gesund“ für den nächsten Schritt (1.000 → 3.000): Event-Loop ohne Überlast, Datenbank schnell, keine Fehler.
-  const healthReasons: string[] = [];
-  if (view.maxP99 > 200) healthReasons.push(`Event-Loop p99 bis ${ms(view.maxP99)} ms (> 200 ms, Lastabwurf)`);
-  if (fastWindows !== null && fastWindows < 0.95) {
-    healthReasons.push(`nur ${Math.round(fastWindows * 100)} % der Fenster mit p99 ≤ 50 ms`);
-  }
-  if ((view.dbPing.p95 ?? 0) > 100) healthReasons.push(`DB-Ping p95 ${ms(view.dbPing.p95)} ms`);
-  if ((mongoErrors ?? 0) > 0) healthReasons.push(`${mongoErrors} Mongo-Fehler`);
-  if (serverErrorRate > 0.01) healthReasons.push(`Serverfehlerquote ${ms(serverErrorRate * 100, 2)} %`);
-  if (view.timeline.some((point) => point.overloaded === 1)) healthReasons.push("Lastabwurf war aktiv");
+  const reasons = healthReasons(
+    {
+      maxP99Ms: view.maxP99,
+      fastWindows,
+      dbPingP95Ms: view.dbPing.p95,
+      mongoErrors,
+      serverErrorRate,
+      overloaded: view.timeline.some((point) => point.overloaded === 1),
+      internalAcks: internal,
+    },
+    ms,
+  );
 
   return {
     hardware: describeHardware(config),
@@ -592,8 +577,8 @@ function evaluate(config: LoadtestConfig, stats: WorkerStats, view: ServerView):
     errorRate,
     serverErrorRate,
     slos,
-    healthy: healthReasons.length === 0,
-    healthReasons,
+    healthy: reasons.length === 0,
+    healthReasons: reasons,
   };
 }
 

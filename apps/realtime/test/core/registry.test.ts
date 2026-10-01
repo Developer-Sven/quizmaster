@@ -515,6 +515,59 @@ describe("Event-Pipeline", () => {
     expect((await (sockets[2] as FakeSocket).call("lobby:join", { code: "ABC234", name: "Mia" })).ok).toBe(true);
   });
 
+  it("IP-Sperre einer Fehlversuchs-Regel ist kein Verstoß des einzelnen Sockets (Unbeteiligte derselben IP)", async () => {
+    const { registry, attach, metrics } = createTestRegistry();
+    registry.register("lobby:resume", () => {
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    const guessers = [0, 1, 2].map(() => attach(createFakeSocket({ ipKey: "ip-shared" })));
+    for (let i = 0; i < 21; i++) {
+      expectError(
+        await (guessers[Math.floor(i / 10)] as FakeSocket).call("lobby:resume", { code: "ABC234" }),
+        "LOBBY_NOT_FOUND",
+      );
+    }
+    const violationsBefore = await metricValue(metrics, "qm_violations_total", { reason: "rate_limit" });
+    // Unbeteiligte Person derselben IP versucht es zehnmal (Socket-Limit 10/min) – gesperrt, aber kein Verstoß.
+    const bystander = attach(createFakeSocket({ ipKey: "ip-shared" }));
+    for (let i = 0; i < 10; i++) {
+      expectError(await bystander.call("lobby:resume", { code: "XYZ789" }), "RATE_LIMITED");
+    }
+    expect(await metricValue(metrics, "qm_violations_total", { reason: "rate_limit" })).toBe(violationsBefore);
+    expect(bystander.disconnects).toBe(0);
+    // Fluten zählen weiter über die Socket-Regel derselben Events (11. Versuch in der Minute → Verstoß).
+    expectError(await bystander.call("lobby:resume", { code: "XYZ789" }), "RATE_LIMITED");
+    expect(await metricValue(metrics, "qm_violations_total", { reason: "rate_limit" })).toBe(violationsBefore + 1);
+  });
+
+  it("skipFailureBlock: wer die Sperre nicht betrifft (z. B. Mitglied der Lobby), erreicht den Handler", async () => {
+    const { registry, attach } = createTestRegistry();
+    const member = randomUUID();
+    const handler = vi.fn<EventHandler<"lobby:resume">>((payload, ctx) => {
+      if (ctx.guestId === member && payload.code === "ABC234") return { code: "ABC234" };
+      throw new ProtocolError("LOBBY_NOT_FOUND");
+    });
+    const skip = vi.fn((payload: { code: string }, guestId: string) => guestId === member && payload.code === "ABC234");
+    registry.register("lobby:resume", handler, {
+      countsAsFailure: (code) => code === "LOBBY_NOT_FOUND",
+      skipFailureBlock: skip,
+    });
+    const guessers = [0, 1, 2].map(() => attach(createFakeSocket({ ipKey: "ip-member" })));
+    for (let i = 0; i < 21; i++) {
+      expectError(
+        await (guessers[Math.floor(i / 10)] as FakeSocket).call("lobby:resume", { code: "XYZ789" }),
+        "LOBBY_NOT_FOUND",
+      );
+    }
+    expectError(await (guessers[2] as FakeSocket).call("lobby:resume", { code: "ABC234" }), "RATE_LIMITED");
+    const own = attach(createFakeSocket({ guestId: member, ipKey: "ip-member" }));
+    expect(await own.call("lobby:resume", { code: "ABC234" })).toEqual({ ok: true, data: { code: "ABC234" } });
+    // Ein fremder Code bleibt für dieselbe Person gesperrt (kein Umweg zum Raten).
+    expectError(await own.call("lobby:resume", { code: "XYZ789" }), "RATE_LIMITED");
+    expect(handler).toHaveBeenCalledTimes(22);
+    expect(skip).toHaveBeenCalledWith({ code: "ABC234" }, member);
+  });
+
   it("isFailedAttempt: fachliche Ablehnungen zählen, Server-Zustände nicht", () => {
     for (const code of ["LOBBY_NOT_FOUND", "LOBBY_FULL", "GAME_IN_PROGRESS", "KICKED", "NAME_REJECTED"] as const) {
       expect(isFailedAttempt(code)).toBe(true);

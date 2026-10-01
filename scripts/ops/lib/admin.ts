@@ -20,6 +20,7 @@ import {
 import { ipKey, ipKeySubject } from "@quizmaster/shared/ip";
 import type { AnyBulkWriteOperation, ClientSession, Document, MongoClient } from "mongodb";
 import type { z } from "zod";
+import { ISO_INSTANT_HINT, parseIsoInstant } from "./iso-time.ts";
 
 export class AdminUsageError extends Error {
   constructor(message: string) {
@@ -328,9 +329,25 @@ export type PurgeCollections = Pick<
   "games" | "lobbies" | "questions" | "questionRatings" | "questionReports" | "guests"
 >;
 
+/** Ein zu bereinigendes Spiel (Dry-Run-Anzeige) – nur Zeitpunkte und Besetzung, keine Namen oder guestIds. */
+export interface PurgeGameInfo {
+  startedAt: Date;
+  endedAt: Date;
+  /** Menschen (ohne Dev-Bots). */
+  players: number;
+  bots: number;
+}
+
 /** Wirkung einer Bereinigung – nur Anzahlen, keine guestIds. */
 export interface PurgeSummary {
   code: string;
+  /** Nur Spiele, die ab diesem Zeitpunkt endeten (`--since`); `null` = alle mit diesem Code. */
+  since: Date | null;
+  /**
+   * Die bereinigten Spiele, neueste zuerst: Lobby-Codes werden nach dem Schließen wiederverwendet – im Dry-Run
+   * prüfen, ob nur die gemeinten Spiele betroffen sind (sonst mit `--since` eingrenzen).
+   */
+  gameList: PurgeGameInfo[];
   /** Beendete Spiele mit diesem Code, die bereinigt werden. */
   games: number;
   /** Spiele laufender Lobbys – bleiben unangetastet (nach dem Schließen erneut ausführen). */
@@ -372,9 +389,11 @@ interface PurgePlan {
   guestRollbacks: Map<string, StatsDelta>;
 }
 
-function emptySummary(code: string): PurgeSummary {
+function emptySummary(code: string, since: Date | null): PurgeSummary {
   return {
     code,
+    since,
+    gameList: [],
     games: 0,
     skippedGames: 0,
     lobbies: 0,
@@ -455,11 +474,28 @@ function addGameStats(game: GameDoc, questions: Map<string, QuestionDelta>, gues
   }
 }
 
+/** `--since <iso>`: Datum (`2026-10-01`) oder Zeitpunkt mit Zone (`2026-10-01T12:00:00Z`, `…+02:00`). */
+export function parsePurgeSince(raw: string | undefined): Date | undefined {
+  if (raw === undefined) return undefined;
+  const date = parseIsoInstant(raw);
+  if (date === null) throw new AdminUsageError(`--since erwartet ${ISO_INSTANT_HINT}`);
+  return date;
+}
+
 /** Liest alles, was eine Bereinigung braucht (mit `session` innerhalb der Transaktion). */
-async function planPurge(collections: PurgeCollections, code: string, session?: ClientSession): Promise<PurgePlan> {
+async function planPurge(
+  collections: PurgeCollections,
+  code: string,
+  since: Date | null,
+  session?: ClientSession,
+): Promise<PurgePlan> {
   const options = session === undefined ? {} : { session };
-  const summary = emptySummary(code);
-  const games = await collections.games.find({ code }, options).toArray();
+  const summary = emptySummary(code, since);
+  // Index code_endedAt (neueste zuerst, ohne SORT-Stufe).
+  const games = await collections.games
+    .find(since === null ? { code } : { code, endedAt: { $gte: since } }, options)
+    .sort({ endedAt: -1 })
+    .toArray();
   const plan: PurgePlan = {
     summary,
     gameIds: [],
@@ -481,6 +517,12 @@ async function planPurge(collections: PurgeCollections, code: string, session?: 
   summary.games = purgeable.length;
   if (purgeable.length === 0) return plan;
   plan.gameIds = purgeable.map((game) => game._id);
+  summary.gameList = purgeable.map((game) => ({
+    startedAt: game.startedAt,
+    endedAt: game.endedAt,
+    players: game.players.filter((player) => !player.isBot).length,
+    bots: game.players.filter((player) => player.isBot).length,
+  }));
   const closedLobbyIds = [...new Set(purgeable.map((game) => game.lobbyId))];
   plan.lobbyIds = (
     await collections.lobbies
@@ -626,14 +668,15 @@ export async function purgeGamesByCode(
   client: MongoClient,
   collections: PurgeCollections,
   rawCode: string,
-  options: { dryRun: boolean },
+  options: { dryRun: boolean; since?: Date | undefined },
 ): Promise<PurgeSummary> {
   const code = parseInput(lobbyCodeInputSchema, rawCode, "--code: ungültiger Lobby-Code");
-  if (options.dryRun) return (await planPurge(collections, code)).summary;
+  const since = options.since ?? null;
+  if (options.dryRun) return (await planPurge(collections, code, since)).summary;
   return client.withSession((session) =>
     session.withTransaction(
       async () => {
-        const plan = await planPurge(collections, code, session);
+        const plan = await planPurge(collections, code, since, session);
         if (plan.gameIds.length > 0) await applyPurge(plan, collections, session);
         return plan.summary;
       },
@@ -642,20 +685,31 @@ export async function purgeGamesByCode(
   );
 }
 
-/** Ausgabe einer Bereinigung (nur Anzahlen, nie guestIds). */
+/** `2026-10-01 12:34 UTC` */
+function minuteUtc(date: Date): string {
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** Ausgabe einer Bereinigung (nur Anzahlen und Zeitpunkte, nie guestIds oder Namen). */
 export function describePurge(summary: PurgeSummary, dryRun: boolean): string[] {
   const display = formatLobbyCode(summary.code);
+  const scope = summary.since === null ? "" : ` (Spiele seit ${summary.since.toISOString()})`;
   if (summary.games === 0) {
     return [
       summary.skippedGames > 0
-        ? `Lobby-Code ${display}: ${summary.skippedGames} Spiel(e) gehören zu einer laufenden Lobby – unangetastet, nach dem Schließen erneut ausführen`
-        : `Lobby-Code ${display}: keine beendeten Spiele (nichts zu tun)`,
+        ? `Lobby-Code ${display}${scope}: ${summary.skippedGames} Spiel(e) gehören zu einer laufenden Lobby – unangetastet, nach dem Schließen erneut ausführen`
+        : `Lobby-Code ${display}${scope}: keine beendeten Spiele (nichts zu tun)`,
     ];
   }
   const { guests } = summary;
+  const games = summary.gameList.map(
+    (game) =>
+      `    – beendet ${minuteUtc(game.endedAt)} (gestartet ${minuteUtc(game.startedAt)}), ${game.players} ${game.players === 1 ? "Person" : "Personen"}${game.bots > 0 ? ` + ${game.bots} ${game.bots === 1 ? "Bot" : "Bots"}` : ""}`,
+  );
   return [
-    `${dryRun ? "Dry-Run – würde bereinigen" : "Bereinigt"}: Lobby-Code ${display}`,
+    `${dryRun ? "Dry-Run – würde bereinigen" : "Bereinigt"}: Lobby-Code ${display}${scope}`,
     `  Spiele            ${summary.games} gelöscht${summary.skippedGames > 0 ? ` (${summary.skippedGames} einer laufenden Lobby unangetastet)` : ""}`,
+    ...games,
     `  Lobby-Snapshots   ${summary.lobbies} gelöscht (nur geschlossene)`,
     `  Fragen-Statistik  ${summary.questions} Fragen: shown −${summary.shown}, correct −${summary.correct}`,
     `  Bewertungen       ${summary.ratings} entfernt · Meldungen ${summary.reports} entfernt`,

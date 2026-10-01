@@ -8,7 +8,9 @@
  * 4. Payload validieren (`parseClientPayload`, strictObject) → `VALIDATION_FAILED` + Verstoß.
  * 5. Shutdown: `lobby:create` → `SERVER_BUSY` (keine neuen Lobbys).
  * 6. Rate-Limits aus `RATE_LIMITS` (Scope socket/guest/ip; `consume: "failure"` erst prüfen, nach einem
- *    Fehlschlag verbrauchen) → `RATE_LIMITED` mit `retryAfterMs` (+ Verstoß, wenn die Regel es verlangt).
+ *    Fehlschlag verbrauchen) → `RATE_LIMITED` mit `retryAfterMs` (+ Verstoß, wenn die Regel es verlangt). Eine
+ *    bestehende Fehlversuchs-Sperre gilt nicht für Anfragen, die sie laut `skipFailureBlock` nicht betrifft
+ *    (Mitglieder der Lobby); trifft sie einen IP-Schlüssel, ist der blockierte Versuch kein Verstoß des Sockets.
  * 7. Handler mit Kontext; Ack genau einmal: Rückgabewert → `{ ok: true, data }` (gegen das Ack-Schema geprüft),
  *    `ProtocolError` → Code, alles andere → `INTERNAL` + Log mit `requestId`; Frist 15 s → `INTERNAL`.
  *    Zählt der `ProtocolError` als Fehlversuch, wird er VOR dem Ack verbucht (die Sperre greift so sofort).
@@ -78,11 +80,13 @@ interface Registration {
   readonly attemptRules: readonly RateLimitRule[];
   readonly failureRules: readonly RateLimitRule[];
   countsAsFailure(code: ErrorCode): boolean;
+  /** Betrifft eine bestehende Fehlversuchs-Sperre diese Anfrage nicht? (`RegisterEventOptions.skipFailureBlock`) */
+  skipFailureBlock(payload: unknown, guestId: string): boolean;
 }
 
 export interface EventRegistry {
   /** Siehe `ModuleContext.registerEvent`. */
-  register<E extends ClientEventName>(event: E, handler: EventHandler<E>, options?: RegisterEventOptions): boolean;
+  register<E extends ClientEventName>(event: E, handler: EventHandler<E>, options?: RegisterEventOptions<E>): boolean;
   has(event: ClientEventName): boolean;
   registeredEvents(): ClientEventName[];
   /** Events aus `CLIENT_EVENTS` ohne Handler (`devOnly` nur mit DEV_BOTS_ENABLED). */
@@ -192,11 +196,24 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
       );
     };
 
-    const rejectLimited = async (hits: readonly { rule: RateLimitRule; retryAfterMs: number }[]) => {
+    const rejectLimited = async (
+      hits: readonly { rule: RateLimitRule; retryAfterMs: number }[],
+      options: { violation?: boolean } = {},
+    ) => {
       for (const hit of hits) limitHit(hit.rule);
       const retryAfterMs = Math.max(...hits.map((hit) => hit.retryAfterMs));
       respond(ackError("RATE_LIMITED", "Zu viele Anfragen", retryAfterMs));
-      if (hits.some((hit) => hit.rule.countsAsViolation)) await violation("rate_limit");
+      if ((options.violation ?? true) && hits.some((hit) => hit.rule.countsAsViolation)) await violation("rate_limit");
+    };
+
+    /** `skipFailureBlock` der Registrierung; ein Fehler darin lässt die Sperre gelten (fail closed). */
+    const failureBlockSkipped = (registration: Registration, payload: unknown): boolean => {
+      try {
+        return registration.skipFailureBlock(payload, socket.data.guestId);
+      } catch (error) {
+        log.error({ err: error }, "skipFailureBlock fehlgeschlagen – Sperre gilt");
+        return false;
+      }
     };
 
     try {
@@ -253,14 +270,9 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
         return;
       }
 
-      // 6. Rate-Limits: gesperrte Fehlversuchs-Zähler, dann Versuchs-Zähler
-      for (const rule of registration.failureRules) {
-        const state = await deps.rateLimit.peek(rule, limitKey(rule, socket));
-        if (!state.allowed) {
-          await rejectLimited([{ rule, retryAfterMs: state.retryAfterMs }]);
-          return;
-        }
-      }
+      // 6. Rate-Limits: zuerst die Versuchs-Zähler (auch blockierte Versuche zählen gegen das Socket-Limit – eine
+      //    Flut gegen eine Sperre bleibt so ein Verstoß und kostet höchstens wenige Store-Abfragen), dann gesperrte
+      //    Fehlversuchs-Zähler – außer für Anfragen, die die Sperre nicht betrifft (`skipFailureBlock`).
       const decisions = await Promise.all(
         registration.attemptRules.map(async (rule) => ({
           rule,
@@ -271,6 +283,17 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
       if (hits.length > 0) {
         await rejectLimited(hits.map((hit) => ({ rule: hit.rule, retryAfterMs: hit.decision.retryAfterMs })));
         return;
+      }
+      if (registration.failureRules.length > 0 && !failureBlockSkipped(registration, parsed.data)) {
+        for (const rule of registration.failureRules) {
+          const state = await deps.rateLimit.peek(rule, limitKey(rule, socket));
+          if (!state.allowed) {
+            // Eine IP-Sperre trifft alle Sockets dieser IP (Schule, CGNAT): der blockierte Versuch ist kein Verstoß
+            // dieses Sockets.
+            await rejectLimited([{ rule, retryAfterMs: state.retryAfterMs }], { violation: rule.scope !== "ip" });
+            return;
+          }
+        }
       }
 
       // 7. Handler
@@ -364,6 +387,9 @@ export function createEventRegistry(deps: EventRegistryDeps): EventRegistry {
         attemptRules: rules.filter((rule) => rule.consume === "attempt"),
         failureRules: rules.filter((rule) => rule.consume === "failure"),
         countsAsFailure: options.countsAsFailure ?? isFailedAttempt,
+        skipFailureBlock: (payload, guestId) =>
+          // Payload ist gegen das Schema von `event` validiert.
+          options.skipFailureBlock?.(payload as ClientEventPayload<typeof event>, guestId) ?? false,
       });
       return true;
     },

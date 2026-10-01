@@ -13,11 +13,13 @@
  * | `change_stream` | ≥ 3 Change-Stream-Neustarts in 15 min |
  * | `mongo` | ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler in 5 min |
  * | `restart_loop` | ≥ 3 Neustarts von Realtime in 15 min (`qm_process_start_time_seconds`) |
+ * | `auto_retire` | Schutzautomatik: ≥ 5 zurückgezogene Fragen in 15 min oder ≥ 1 vom Tagesbudget zurückgehaltene |
  * | `metrics` | `/metrics` 5 min lang nicht lesbar, obwohl `/healthz` antwortet (z. B. 401 → Token prüfen) |
  *
  * Entprellung: eine Regel meldet erst, wenn ihre Bedingung die Haltezeit erfüllt (Health 2 min, Event-Loop
  * 5 min); Zählerregeln werten ein gleitendes Fenster aus. Cooldown: höchstens ein Alarm je Regel in 15 min
- * (ein unterdrückter Alarm bekommt auch keine Entwarnung); bei anhaltender Störung eine Erinnerung je Stunde.
+ * (ein unterdrückter Alarm bekommt auch keine Entwarnung; hält die Störung über den Cooldown hinaus an, wird sie
+ * danach gemeldet); bei anhaltender Störung eine Erinnerung je Stunde.
  * Entwarnung, sobald die Bedingung nicht mehr gilt. Nutzlast wie `infra/ops/alert.sh` ({content, text},
  * Discord und Slack; @everyone/@here/@channel entschärft). Die Webhook-URL (enthält das Token) und der
  * Metrik-Token werden nie geloggt.
@@ -66,6 +68,12 @@ export const WATCHDOG_THRESHOLDS = {
   /** Neustarts von Realtime im Fenster ab dieser Zahl = Neustart-Schleife. */
   restarts: 3,
   restartWindowMs: 900_000,
+  /**
+   * Schutzautomatik: so viele automatisch zurückgezogene Fragen im Fenster sind auffällig (Missbrauch der Meldungen
+   * bzw. Bewertungen?); jeder vom Tagesbudget zurückgehaltene Rückzug ebenso.
+   */
+  autoRetireSpike: 5,
+  autoRetireWindowMs: 900_000,
   /** `/metrics` so lange nicht lesbar (bei gesundem `/healthz`). */
   metricsDownForMs: 300_000,
   /** Mindestabstand zweier Alarme derselben Regel. */
@@ -266,6 +274,7 @@ export const WATCHDOG_RULES = [
   "change_stream",
   "mongo",
   "restart_loop",
+  "auto_retire",
   "metrics",
 ] as const;
 export type WatchdogRule = (typeof WATCHDOG_RULES)[number];
@@ -383,6 +392,13 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
       title: "Realtime startet wiederholt neu",
       hint: "pm2 logs quizmaster-realtime --lines 200; pnpm deploy:status (ggf. pnpm deploy:rollback)",
     },
+    auto_retire: {
+      forMs: 0,
+      title: "Schutzautomatik zieht ungewöhnlich viele Fragen zurück (Missbrauch der Meldungen?)",
+      hint:
+        "pnpm admin:reports --env prod --confirm-prod; zu Unrecht zurückgezogene: pnpm admin:reports --restore-auto " +
+        "--since <iso> --env prod --confirm-prod; docs/06 Notfall-Runbook (admin:ban, turnstileOnJoin)",
+    },
     metrics: {
       forMs: limits.metricsDownForMs,
       title: "/metrics nicht lesbar",
@@ -416,6 +432,7 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
     limits.limitSpikeWindowMs,
     limits.changeStreamWindowMs,
     limits.mongoWindowMs,
+    limits.autoRetireWindowMs,
   );
   let lastStartTime: number | null = null;
   const restarts: number[] = [];
@@ -488,6 +505,21 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
         state.lastAlertAt = at;
         const since = spec.forMs > 0 ? ` seit ${minutes(at - state.badSince)} min` : "";
         await notify(rule, state, `ALARM ${spec.title}${since}: ${verdict.detail} – ${spec.hint}`, at);
+        return;
+      }
+      if (state.status === "firing" && !state.notified) {
+        // Im Cooldown unterdrückt: nachholen, sobald der Cooldown vorbei ist und die Störung noch anhält – sonst
+        // bliebe eine Störung, die kurz nach dem letzten Alarm beginnt, dauerhaft stumm.
+        if (state.lastAlertAt === null || at - state.lastAlertAt >= limits.cooldownMs) {
+          state.notified = true;
+          state.lastAlertAt = at;
+          await notify(
+            rule,
+            state,
+            `ALARM ${spec.title} (anhaltend seit ${minutes(at - state.badSince)} min): ${verdict.detail} – ${spec.hint}`,
+            at,
+          );
+        }
         return;
       }
       if (state.status === "firing" && state.notified && state.lastAlertAt !== null) {
@@ -674,6 +706,27 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
           ? {
               kind: "bad",
               detail: `${Math.round(restartsDelta.total)}× in ${minutes(limits.changeStreamWindowMs)} min (${describeGroups(restartsDelta.groups)})`,
+            }
+          : { kind: "good" },
+      );
+    }
+
+    // Schutzautomatik: Rückzüge bzw. vom Tagesbudget zurückgehaltene Rückzüge im Fenster
+    const retireBase = baseline(at, limits.autoRetireWindowMs);
+    if (retireBase === undefined) {
+      verdicts.set("auto_retire", { kind: "unknown" });
+    } else {
+      const byReason = (labels: Readonly<Record<string, string>>) => labels.reason ?? "?";
+      const retired = counterDelta(current, retireBase, "qm_questions_auto_retired_total", undefined, byReason);
+      const held = counterDelta(current, retireBase, "qm_questions_auto_retire_suppressed_total", undefined, byReason);
+      verdicts.set(
+        "auto_retire",
+        retired.total >= limits.autoRetireSpike || held.total > 0
+          ? {
+              kind: "bad",
+              detail:
+                `${Math.round(retired.total)} Fragen zurückgezogen${retired.total > 0 ? ` (${describeGroups(retired.groups)})` : ""}, ` +
+                `${Math.round(held.total)} vom Tagesbudget zurückgehalten in ${minutes(limits.autoRetireWindowMs)} min`,
             }
           : { kind: "good" },
       );

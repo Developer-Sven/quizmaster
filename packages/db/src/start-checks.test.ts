@@ -10,7 +10,14 @@ import {
   SOCKET_TIMEOUT_MS,
 } from "./client.ts";
 import type { DbLogger } from "./logger.ts";
-import { runStartChecks, StartCheckError, serverMajorVersion } from "./start-checks.ts";
+import {
+  knownServerVulnerabilities,
+  MONGODB_SERVER_ADVISORIES,
+  patchTarget,
+  runStartChecks,
+  StartCheckError,
+  serverMajorVersion,
+} from "./start-checks.ts";
 import { createTestDatabase, type TestDatabase } from "./testing/index.ts";
 
 let t: TestDatabase;
@@ -90,9 +97,35 @@ describe("runStartChecks", () => {
       topology: "sharded",
       setName: null,
       versionRecommended: false,
+      knownVulnerabilities: ["CVE-2025-14847 (MongoBleed)"],
       transport: "tls",
     });
     expect(logger.lines.join("\n")).toMatch(/7\.0\.12 < 8\.0/);
+  });
+
+  it("warnt bei einem ungepatchten Server (CVE-2025-14847 „MongoBleed“) mit Ziel-Version, startet aber", async () => {
+    const reply = (version: string) =>
+      fakeClient({
+        ping: async () => ({ ok: 1 }),
+        hello: async () => ({ setName: "rs0" }),
+        buildInfo: async () => ({ version }),
+      });
+    const vulnerable = recordingLogger();
+    const result = await runStartChecks(reply("8.0.4"), { logger: vulnerable });
+    expect(result).toMatchObject({ versionRecommended: true, knownVulnerabilities: ["CVE-2025-14847 (MongoBleed)"] });
+    const warning = vulnerable.lines.find((line) => line.includes("CVE-2025-14847"));
+    expect(warning).toContain("MongoDB 8.0.4");
+    expect(warning).toContain("8.0.17");
+
+    const patched = recordingLogger();
+    expect(await runStartChecks(reply("8.0.17"), { logger: patched })).toMatchObject({ knownVulnerabilities: [] });
+    expect(patched.lines.join("\n")).not.toContain("CVE-");
+
+    const unknown = recordingLogger();
+    expect(await runStartChecks(reply("unbekannt"), { logger: unknown })).toMatchObject({
+      knownVulnerabilities: null,
+    });
+    expect(unknown.lines.join("\n")).toMatch(/Patchstand.*nicht prüfbar/);
   });
 
   it("Ping-Timeout (5 s, hier verkürzt) und Ping-Fehler ergeben PING_FAILED ohne Zugangsdaten", async () => {
@@ -208,5 +241,43 @@ describe("createMongoClient", () => {
   it("lehnt ungültige URIs und Pool-Größen ab", () => {
     expect(() => createMongoClient("http://example.net", { appName: "x", maxPoolSize: 1 })).toThrow(/mongodb/);
     expect(() => createMongoClient(uri, { appName: "x", maxPoolSize: 0, cache: false })).toThrow(RangeError);
+  });
+});
+
+describe("knownServerVulnerabilities (Patchstand, docs/03 + docs/06)", () => {
+  it("kennt die Mindestversionen je Release-Linie für CVE-2025-14847 („MongoBleed“)", () => {
+    const vulnerable = ["CVE-2025-14847 (MongoBleed)"];
+    const cases: Array<[string, string[] | null]> = [
+      ["8.0.16", vulnerable],
+      ["8.0.17", []],
+      ["8.0.20", []],
+      ["8.0.17-rc0", vulnerable],
+      ["8.1.2", vulnerable], // Rapid Release ohne Fix auf der Linie
+      ["8.2.2", vulnerable],
+      ["8.2.3", []],
+      ["8.3.0", []],
+      ["9.0.1", []],
+      ["7.0.27", vulnerable],
+      ["7.0.28", []],
+      ["7.3.4", vulnerable],
+      ["6.0.27", []],
+      ["5.0.31", vulnerable],
+      ["4.4.30", []],
+      ["4.2.25", vulnerable],
+      ["3.6.23", vulnerable],
+      ["unbekannt", null],
+      ["8", null],
+      ["", null],
+    ];
+    for (const [version, expected] of cases) expect(knownServerVulnerabilities(version), version).toEqual(expected);
+    expect(MONGODB_SERVER_ADVISORIES.map((advisory) => advisory.id)).toContain("CVE-2025-14847");
+  });
+
+  it("nennt als Ziel den Patch der eigenen Linie, sonst die gepatchten Linien", () => {
+    expect(patchTarget("8.0.4")).toBe("mindestens 8.0.17");
+    expect(patchTarget("8.2.1")).toBe("mindestens 8.2.3");
+    expect(patchTarget("7.0.12")).toBe("mindestens 7.0.28");
+    expect(patchTarget("8.1.2")).toBe("eine gepatchte Version (8.0 ≥ 8.0.17, 8.2 ≥ 8.2.3 oder ≥ 8.3)");
+    expect(patchTarget("kaputt")).toBe("eine gepatchte Version (8.0 ≥ 8.0.17, 8.2 ≥ 8.2.3 oder ≥ 8.3)");
   });
 });

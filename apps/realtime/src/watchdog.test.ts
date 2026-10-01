@@ -35,6 +35,9 @@ interface FakeState {
     loopWindows: number;
     /** Fenster mit p99 ≤ 0,2 s. */
     loopFast: number;
+    /** Schutzautomatik: zurückgezogene bzw. vom Budget zurückgehaltene Fragen je Grund. */
+    autoRetired: Record<string, number>;
+    retireSuppressed: Record<string, number>;
   };
   startTime: number;
   hookStatus: number;
@@ -53,6 +56,8 @@ const fresh = (): FakeState => ({
     mongo: {},
     loopWindows: 10,
     loopFast: 10,
+    autoRetired: {},
+    retireSuppressed: {},
   },
   startTime: 1_759_300_000,
   hookStatus: 204,
@@ -81,6 +86,12 @@ function metricsText(): string {
     `qm_event_loop_p99_seconds_bucket{le="0.2"} ${c.loopFast}`,
     `qm_event_loop_p99_seconds_bucket{le="+Inf"} ${c.loopWindows}`,
     `qm_event_loop_p99_seconds_count ${c.loopWindows}`,
+    ...Object.entries(c.autoRetired).map(
+      ([reason, value]) => `qm_questions_auto_retired_total{reason="${reason}"} ${value}`,
+    ),
+    ...Object.entries(c.retireSuppressed).map(
+      ([reason, value]) => `qm_questions_auto_retire_suppressed_total{reason="${reason}"} ${value}`,
+    ),
     `qm_process_start_time_seconds ${state.startTime}`,
     "qm_sockets 3",
   ];
@@ -359,6 +370,31 @@ describe("Alarme", () => {
     expect(hooks.map((hook) => hook.content).join("\n")).toContain("Realtime startet wiederholt neu: 3 Neustarts");
   });
 
+  it("meldet viele Rückzüge der Schutzautomatik in 15 min und jedes Zurückhalten durch das Tagesbudget", async () => {
+    const dog = makeWatchdog();
+    const bump = (map: Record<string, number>, key: string, by: number) => {
+      map[key] = (map[key] ?? 0) + by;
+    };
+    await run(dog, 30_000);
+    // Vereinzelte Rückzüge sind normal …
+    await run(dog, 60_000, () => bump(state.counters.autoRetired, "reports", 2));
+    expect(hooks).toEqual([]);
+    expect(dog.status("auto_retire")).toBe("ok");
+    // … fünf in 15 min sind auffällig (Missbrauch der Meldungen?).
+    await run(dog, 30_000, () => bump(state.counters.autoRetired, "rating", 1));
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]?.content).toContain("ALARM Schutzautomatik zieht ungewöhnlich viele Fragen zurück");
+    expect(hooks[0]?.content).toContain("5 Fragen zurückgezogen (reports 4, rating 1)");
+    expect(hooks[0]?.content).toContain("--restore-auto");
+    // Ohne neue Rückzüge fällt die Spitze aus dem Fenster → Entwarnung.
+    await run(dog, 16 * 60_000);
+    expect(hooks[1]?.content).toContain("Entwarnung: Schutzautomatik");
+    // Schon EIN vom Budget zurückgehaltener Rückzug ist ein Alarm (die Bremse greift nur unter Missbrauch).
+    await run(dog, 30_000, () => bump(state.counters.retireSuppressed, "reports", 1));
+    expect(hooks).toHaveLength(3);
+    expect(hooks[2]?.content).toContain("1 vom Tagesbudget zurückgehalten");
+  });
+
   it("meldet einen falschen METRICS_TOKEN nur, solange /healthz antwortet", async () => {
     const dog = makeWatchdog({ token: "f".repeat(40) });
     await run(dog, 6 * 60_000);
@@ -387,6 +423,33 @@ describe("Alarme", () => {
     state.web = 500;
     await run(dog, 150_000);
     expect(hooks).toHaveLength(3);
+  });
+
+  it("meldet eine im Cooldown unterdrückte Störung, sobald der Cooldown vorbei ist und sie anhält", async () => {
+    const dog = makeWatchdog();
+    state.web = 500;
+    await run(dog, 150_000);
+    state.web = 200;
+    await run(dog, 60_000);
+    expect(hooks).toHaveLength(2);
+    // Zweiter Ausfall beginnt im Cooldown und dauert drei Stunden.
+    state.web = 500;
+    await run(dog, 150_000);
+    expect(hooks).toHaveLength(2);
+    expect(dog.status("web_health")).toBe("firing");
+    await run(dog, 3 * 60 * 60_000);
+    const texts = hooks.map((hook) => hook.content);
+    // Genau ein nachgeholter Alarm nach dem Cooldown (danach höchstens stündliche Erinnerungen) …
+    expect(texts[2]).toContain("ALARM Web /api/health gestört (anhaltend seit");
+    expect(texts[2]).toContain("HTTP 500");
+    expect(texts.slice(3).every((text) => text.includes("ALARM weiterhin"))).toBe(true);
+    expect(texts.length).toBeGreaterThanOrEqual(4);
+    expect(texts.length).toBeLessThanOrEqual(5);
+    // … und eine Entwarnung, wenn die Störung endet.
+    state.web = 200;
+    await run(dog, 30_000);
+    expect(hooks.at(-1)?.content).toContain("Entwarnung: Web /api/health gestört");
+    expect(dog.status("web_health")).toBe("ok");
   });
 
   it("erinnert stündlich bei anhaltender Störung", async () => {

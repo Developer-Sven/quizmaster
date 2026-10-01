@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sampleQuestion } from "../test-support.ts";
 import { createTestDatabase, type TestDatabase } from "../testing/index.ts";
 import {
+  AUTO_RETIRE_BUDGET,
   AUTO_RETIRE_RATING,
   AUTO_RETIRE_REPORTS,
   buildReviewQueue,
@@ -494,6 +495,60 @@ describe("questions – Schutzautomatik, Wiederherstellung, Live-Zähler", () =>
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("questions – Missbrauchsbremse und Massen-Wiederherstellung der Schutzautomatik", () => {
+  // Zwei Stunden nach den übrigen Tests dieser Datei: deren zurückgezogene Fragen sind älter als alle hier.
+  const base = new Date(now.getTime() + 2 * 60 * 60_000);
+  const at = (minutesAgo: number) => new Date(base.getTime() - minutesAgo * 60_000);
+  const retired = (id: string, category: string, reason: "reports" | "rating", when: Date) =>
+    sampleQuestion(id, { category, status: "retired", autoRetired: { reason, at: when }, updatedAt: when });
+
+  beforeAll(async () => {
+    // Neueste zuerst eingefügt: ein Limit VOR dem Sortieren lieferte die ältesten.
+    await t.collections.questions.insertMany([
+      retired("mh-brems001", "musik-hits", "reports", at(1)),
+      retired("mh-brems002", "musik-hits", "rating", at(30)),
+      retired("mh-brems003", "musik-hits", "reports", at(60 * 23)),
+      retired("mh-brems004", "musik-hits", "reports", at(60 * 25)), // außerhalb von 24 h
+      retired("il-brems001", "im-labor", "reports", at(5)),
+      sampleQuestion("il-brems002", { category: "im-labor", status: "retired" }), // im Repo retired, nicht automatisch
+    ]);
+  });
+
+  it("countAutoRetiredSince: automatische Rückzüge im Fenster je Kategorie und insgesamt", async () => {
+    const since = new Date(base.getTime() - AUTO_RETIRE_BUDGET.windowMs);
+    expect(await repos.questions.countAutoRetiredSince(since, "musik-hits")).toBe(3);
+    expect(await repos.questions.countAutoRetiredSince(since, "im-labor")).toBe(1);
+    expect(await repos.questions.countAutoRetiredSince(at(10))).toBe(2);
+    expect(await repos.questions.countAutoRetiredSince(base, "musik-hits")).toBe(0);
+    expect(AUTO_RETIRE_BUDGET).toEqual({ windowMs: DAY_MS, perCategory: 5, total: 20 });
+  });
+
+  it("listAutoRetired: neueste zuerst VOR der Höchstzahl; Filter Zeitpunkt und Grund", async () => {
+    const newest = await repos.questions.listAutoRetired({ ...PRIMARY, since: at(60 * 26), limit: 2 });
+    expect(newest.questions.map((question) => question._id)).toEqual(["mh-brems001", "il-brems001"]);
+    expect(newest.truncated).toBe(true);
+    const since = await repos.questions.listAutoRetired({ ...PRIMARY, since: at(60 * 24) });
+    expect(since.questions.map((question) => question._id).filter((id) => id.includes("brems"))).toEqual([
+      "mh-brems001",
+      "il-brems001",
+      "mh-brems002",
+      "mh-brems003",
+    ]);
+    expect(since.truncated).toBe(false);
+    const rating = await repos.questions.listAutoRetired({ ...PRIMARY, since: at(60 * 24), reason: "rating" });
+    expect(rating.questions.map((question) => question._id)).toEqual(["mh-brems002"]);
+  });
+
+  it("explain: Budget-Zählung über status_category_difficulty", async () => {
+    expectIndexScan(
+      await t.collections.questions
+        .find({ status: "retired", category: "musik-hits", "autoRetired.at": { $gte: at(60) } })
+        .explain("queryPlanner"),
+      "status_category_difficulty",
+    );
   });
 });
 

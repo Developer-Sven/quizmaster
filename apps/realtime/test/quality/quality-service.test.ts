@@ -5,20 +5,26 @@
  */
 import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
-import type {
-  CategoryRecount,
-  PlayableCounts,
-  QuestionQualityState,
-  RatingChange,
-  RatingSummary,
-  Repositories,
+import {
+  AUTO_RETIRE_BUDGET,
+  type CategoryRecount,
+  type PlayableCounts,
+  type QuestionQualityState,
+  type RatingChange,
+  type RatingSummary,
+  type Repositories,
 } from "@quizmaster/db";
 import { defaultAppConfig } from "@quizmaster/shared/documents";
 import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "../../src/logger.ts";
 import { createMetrics } from "../../src/metrics.ts";
 import { createFeedbackService } from "../../src/services/feedback.ts";
-import { AUTO_RETIRED_METRIC, createQualityService, type QualityServiceDeps } from "../../src/services/quality.ts";
+import {
+  AUTO_RETIRE_SUPPRESSED_METRIC,
+  AUTO_RETIRED_METRIC,
+  createQualityService,
+  type QualityServiceDeps,
+} from "../../src/services/quality.ts";
 import { metricValue } from "../helpers/index.ts";
 
 const now = new Date("2026-10-01T10:00:00Z");
@@ -63,11 +69,21 @@ interface FakeOptions {
   applyCounts?: () => Promise<CategoryRecount | null>;
   minPlayable?: number;
   change?: RatingChange;
+  /** Automatische Rückzüge im Budget-Fenster (Standard 0); `category` fehlt = insgesamt. */
+  retiredSince?: (since: Date, category?: string) => Promise<number>;
 }
 
 /** Fake-Repositories mit Aufrufzählern (nur die Methoden, die Feedback und Schutzautomatik nutzen). */
 function fakeRepos(options: FakeOptions = {}) {
-  const calls = { summary: 0, autoRetire: 0, countPlayable: 0, applyCounts: 0, appConfig: 0, reporters: 0 };
+  const calls = {
+    summary: 0,
+    autoRetire: 0,
+    countPlayable: 0,
+    applyCounts: 0,
+    appConfig: 0,
+    reporters: 0,
+    retiredSince: [] as Array<{ since: Date; category: string | undefined }>,
+  };
   const config = defaultAppConfig(now);
   const repos = {
     questions: {
@@ -84,6 +100,10 @@ function fakeRepos(options: FakeOptions = {}) {
       async countPlayable() {
         calls.countPlayable += 1;
         return options.counts ? options.counts() : { playableCount: 10, approvedCount: 1 };
+      },
+      async countAutoRetiredSince(since: Date, category?: string) {
+        calls.retiredSince.push({ since, category });
+        return options.retiredSince ? options.retiredSince(since, category) : 0;
       },
     },
     reports: {
@@ -266,6 +286,88 @@ describe("Schutzautomatik – Schwellen und Übergänge", () => {
       reporters: 3,
     });
     expect(calls.applyCounts).toBe(1);
+  });
+});
+
+describe("Schutzautomatik – Missbrauchsbremse (Tagesbudget je Kategorie und insgesamt)", () => {
+  it("Kategorie-Budget erschöpft: Frage bleibt im Pool, Metrik und Fehler-Log ohne guestIds", async () => {
+    const { quality, calls, metrics, lines } = setup({
+      reporters: 3,
+      retiredSince: async (_since, category) => (category === undefined ? 5 : AUTO_RETIRE_BUDGET.perCategory),
+    });
+    expect(await quality.afterReport("co-unit0001")).toEqual({
+      outcome: "suppressed",
+      reason: "reports",
+      reporters: 3,
+    });
+    expect(calls.autoRetire).toBe(0);
+    expect(calls.retiredSince.map((call) => call.category)).toContain("comics");
+    expect(calls.retiredSince[0]?.since).toEqual(new Date(now.getTime() - AUTO_RETIRE_BUDGET.windowMs));
+    expect(await metricValue(metrics, AUTO_RETIRE_SUPPRESSED_METRIC, { reason: "reports" })).toBe(1);
+    expect(await metricValue(metrics, AUTO_RETIRED_METRIC, { reason: "reports" })).toBe(0);
+    const log = lines.find((line) => line.includes("Tagesbudget"));
+    expect(JSON.parse(log ?? "{}")).toMatchObject({
+      level: 50,
+      question: "co-unit0001",
+      category: "comics",
+      scope: "category",
+      used: AUTO_RETIRE_BUDGET.perCategory,
+      limit: AUTO_RETIRE_BUDGET.perCategory,
+    });
+  });
+
+  it("Gesamtbudget erschöpft (alle Kategorien): auch Bewertungen ziehen nicht mehr zurück", async () => {
+    const { quality, calls, metrics } = setup({
+      summary: { likes: 1, dislikes: 19 },
+      retiredSince: async (_since, category) => (category === undefined ? AUTO_RETIRE_BUDGET.total : 0),
+    });
+    const question = state({ stats: { shown: 0, correct: 0, likes: 1, dislikes: 19, reports: 0 } });
+    const change: RatingChange = { previous: null, current: -1, delta: { likes: 0, dislikes: 1 }, question };
+    expect(await quality.afterRating("co-unit0001", change)).toMatchObject({ outcome: "suppressed", reason: "rating" });
+    expect(calls.autoRetire).toBe(0);
+    expect(await metricValue(metrics, AUTO_RETIRE_SUPPRESSED_METRIC, { reason: "rating" })).toBe(1);
+  });
+
+  it("parallele fällige Prüfungen überschreiten das Budget nicht (Prüfen und Zurückziehen nacheinander)", async () => {
+    let retired = 0;
+    const { quality, calls, metrics } = setup({
+      reporters: 3,
+      retiredSince: async () => retired,
+      autoRetire: async () => {
+        // Langsamer Store: ohne Reihenfolge sähen alle Prüfungen denselben (alten) Stand.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        retired += 1;
+        return true;
+      },
+    });
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        quality.afterReport(`co-unit000${index}`, state({ _id: `co-unit000${index}` })),
+      ),
+    );
+    const outcomes = results.map((result) => result.outcome);
+    expect(outcomes.filter((outcome) => outcome === "retired")).toHaveLength(AUTO_RETIRE_BUDGET.perCategory);
+    expect(outcomes.filter((outcome) => outcome === "suppressed")).toHaveLength(8 - AUTO_RETIRE_BUDGET.perCategory);
+    expect(calls.autoRetire).toBe(AUTO_RETIRE_BUDGET.perCategory);
+    expect(await metricValue(metrics, AUTO_RETIRED_METRIC, { reason: "reports" })).toBe(AUTO_RETIRE_BUDGET.perCategory);
+  });
+
+  it("Budget nicht lesbar → kein Zurückziehen (fail closed), Fehler bleibt beim Feedback geloggt", async () => {
+    const { feedback, calls, lines, metrics } = setup({
+      reporters: 3,
+      retiredSince: () => Promise.reject(new Error("Netzwerk weg")),
+    });
+    expect(
+      await feedback.report({
+        questionId: "co-unit0001",
+        guestId: randomUUID(),
+        reason: "falsch",
+        lobbyCode: "ABC234",
+      }),
+    ).toBe("created");
+    expect(calls.autoRetire).toBe(0);
+    expect(lines.some((line) => line.includes("Schutzautomatik: Prüfung fehlgeschlagen"))).toBe(true);
+    expect(await metricValue(metrics, "qm_mongo_errors_total", { operation: "auto_retire_budget" })).toBe(1);
   });
 });
 

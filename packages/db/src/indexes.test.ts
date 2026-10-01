@@ -191,6 +191,17 @@ describe("Indizes tragen die Hot-Path-Abfragen (explain)", () => {
     expect(stages.stages).not.toContain("COLLSCAN");
   });
 
+  it("Spiele je Lobby-Code (admin:game purge) → IXSCAN code_endedAt ohne SORT-Stufe", async () => {
+    const plan = await t.collections.games
+      .find({ code: "ABC234", endedAt: { $gte: new Date(0) } })
+      .sort({ endedAt: -1 })
+      .explain("queryPlanner");
+    const stages = planStages(plan);
+    expect(stages.indexNames).toContain("code_endedAt");
+    expect(stages.stages).not.toContain("COLLSCAN");
+    expect(stages.stages).not.toContain("SORT");
+  });
+
   it("Bans je Schlüssel → Unique-Index kind_value", async () => {
     const plan = await t.collections.bans.find({ kind: "guest", value: "x" }).explain("queryPlanner");
     expect(planStages(plan).indexNames).toContain("kind_value_unique");

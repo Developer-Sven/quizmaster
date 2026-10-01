@@ -12,7 +12,8 @@
 //   pnpm admin:ban check <ziel>
 //   pnpm admin:ban list            (auch: pnpm admin:ban --list)
 //     <ziel> = --guest <guestId> | --ip <adresse> | --lobby <code> --name <name> | --report <meldungs-id>
-//   pnpm admin:game purge --code <CODE> [--dry-run] --confirm-prod
+//   pnpm admin:game purge --code <CODE> [--since <iso>] [--dry-run] --confirm-prod
+//     (Lobby-Codes werden wiederverwendet: der Dry-Run listet je Spiel Ende/Beginn; --since grenzt ein)
 //
 // Verbindung aus .env.<env> (--env prod|dev, Standard prod) bzw. --env-file <datei> – Zugangsdaten werden nie
 // ausgegeben, guestIds nur gekürzt. Schreiben in eine Produktionsdatenbank (nicht *_dev/*_test) nur mit
@@ -41,6 +42,7 @@ import {
   describePurge,
   maintenancePatch,
   parseConfigAssignments,
+  parsePurgeSince,
   purgeGamesByCode,
   resolveBanTarget,
   turnstileWarning,
@@ -62,7 +64,7 @@ const USAGE = `Aufruf:
   pnpm admin:ban check <ziel>
   pnpm admin:ban list          (oder: pnpm admin:ban --list)
       <ziel> = --guest <guestId> | --ip <adresse> | --lobby <code> --name <name> | --report <meldungs-id>
-  pnpm admin:game purge --code <CODE> [--dry-run] --confirm-prod
+  pnpm admin:game purge --code <CODE> [--since <iso>] [--dry-run] --confirm-prod
 Optionen: --env prod|dev (Standard prod) · --env-file <datei>`;
 
 const { values, positionals } = parseArgs({
@@ -78,6 +80,7 @@ const { values, positionals } = parseArgs({
     name: { type: "string" },
     report: { type: "string" },
     code: { type: "string" },
+    since: { type: "string" },
     reason: { type: "string" },
     hours: { type: "string" },
     list: { type: "boolean", default: false },
@@ -127,6 +130,7 @@ async function main(): Promise<void> {
   if (area === "ban" && action !== "list") banTargetKind(targetOptions);
   if (area === "ban" && action === "add" && !values.reason?.trim()) throw new AdminUsageError("--reason fehlt");
   if (area === "game" && values.code === undefined) throw new AdminUsageError("--code <CODE> fehlt");
+  const since = area === "game" ? parsePurgeSince(values.since) : undefined;
   const expiresAt = banExpiry(values.hours, new Date());
 
   const env = loadEnv(values["env-file"] ? resolve(values["env-file"]) : envFilePath(ROOT, values.env));
@@ -172,7 +176,7 @@ async function main(): Promise<void> {
 
     if (area === "game") {
       const dryRun = values["dry-run"];
-      const summary = await purgeGamesByCode(client, collections, values.code ?? "", { dryRun });
+      const summary = await purgeGamesByCode(client, collections, values.code ?? "", { dryRun, since });
       for (const line of describePurge(summary, dryRun)) log(line);
       return;
     }

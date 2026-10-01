@@ -11,10 +11,12 @@
  * | `lobby:kick` | KICK (+ Lobby-Sperre) | NOT_HOST, INVALID_OPTION |
  * | `lobby:start` | START | NOT_HOST, INVALID_PHASE, NOT_ENOUGH_PLAYERS |
  *
- * Fehlgeschlagene `lobby:join` zählen als Fehlversuch je IP (Code-Raten, Regel `event.lobby-join.failed.ip`
- * aus shared) – das erledigt die Event-Registry des Kerns für jede fachliche Ablehnung. `lobby:resume` hat eine
- * eigene Regel (`event.lobby-resume.failed.ip`); dort zählt nur LOBBY_NOT_FOUND (KICKED/RESIGNED setzen eine
- * frühere Mitgliedschaft voraus und helfen beim Raten nicht).
+ * Fehlgeschlagene `lobby:join`/`lobby:resume` zählen als Fehlversuch je IP (Code-Raten, Regeln
+ * `event.lobby-join.failed.ip` bzw. `event.lobby-resume.failed.ip` aus shared; verbucht von der Event-Registry des
+ * Kerns) – aber nur LOBBY_NOT_FOUND (`countsAsCodeGuess`): Ablehnungen eines existierenden Codes (LOBBY_FULL,
+ * GAME_IN_PROGRESS, NAME_REJECTED, KICKED, RESIGNED) setzen den richtigen Code voraus und helfen beim Raten nicht;
+ * sie zu zählen sperrte nur Gruppen hinter derselben IP (Schule, CGNAT) aus. Eine bestehende Sperre gilt nicht für
+ * Mitglieder der angefragten Lobby (Rückkehr in die eigene Lobby ist kein Raten, `skipFailureBlock`).
  *
  * Sockets: create/join/resume nehmen den Socket VOR dem Command in den Lobby-Raum auf (Ablehnung → wieder
  * heraus); nach einem erfolgreichen LEAVE verlassen alle Sockets der Person den Raum.
@@ -35,9 +37,18 @@ import {
 /** Fehlercodes, nach denen die Person sicher kein Mitglied (mehr) ist – ihre Sockets verlassen den Raum. */
 const NOT_A_MEMBER = new Set(["LOBBY_NOT_FOUND", "KICKED", "RESIGNED"]);
 
-/** Fehlversuch für `event.lobby-resume.failed.ip`: nur ein unbekannter bzw. fremder Code (Code-Raten). */
-export function countsAsResumeFailure(code: ErrorCode): boolean {
+/** Fehlversuch für die IP-Regeln von join/resume: nur ein unbekannter bzw. fremder Code (Code-Raten). */
+export function countsAsCodeGuess(code: ErrorCode): boolean {
   return code === "LOBBY_NOT_FOUND";
+}
+
+/**
+ * Mitglied der angefragten Lobby? Dann gilt eine Fehlversuchs-Sperre der IP nicht (Reconnect, Beitrittslink erneut
+ * geöffnet). Verrät nichts: Für alle anderen bleibt die Antwort gleich – egal, ob der Code existiert.
+ */
+function isMemberOfRequestedLobby(runtime: RuntimeAccess) {
+  return (payload: { code: string }, guestId: string): boolean =>
+    runtime().lobbies.get(payload.code)?.isMember(guestId) === true;
 }
 
 export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: RuntimeAccess): void {
@@ -59,25 +70,31 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
     return sent;
   });
 
-  registerEvent("lobby:join", (payload, ctx) => {
-    const rt = runtime();
-    const config = rt.appConfig.get();
-    const found = rt.lobbies.get(payload.code);
-    // Notfall-Schalter VOR der Code-Prüfung (außer für Mitglieder): ohne Turnstile verrät der Beitritt nicht,
-    // ob ein Code existiert (TURNSTILE_REQUIRED zählt nicht als Fehlversuch).
-    if (found === undefined || !found.isMember(ctx.guestId)) {
-      requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
-    }
-    const actor = found ?? lobbyByCode(rt, payload.code);
-    // Läuft in der Warteschlange der Lobby: Mitgliedschaft und Namensprüfung sehen denselben Zustand wie JOIN.
-    const join = (state: LobbyState): Command => {
-      const member = findPlayerByGuestId(state, ctx.guestId);
-      if (member !== undefined && !member.left) return { type: "JOIN", guestId: ctx.guestId, name: member.name };
-      requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
-      return { type: "JOIN", guestId: ctx.guestId, name: moderateName(payload.name, config.blockedTerms) };
-    };
-    return runCommand(ctx, actor, join, { code: actor.code }, { attach: ctx.socket });
-  });
+  const codeGuessing = { countsAsFailure: countsAsCodeGuess, skipFailureBlock: isMemberOfRequestedLobby(runtime) };
+
+  registerEvent(
+    "lobby:join",
+    (payload, ctx) => {
+      const rt = runtime();
+      const config = rt.appConfig.get();
+      const found = rt.lobbies.get(payload.code);
+      // Notfall-Schalter VOR der Code-Prüfung (außer für Mitglieder): ohne Turnstile verrät der Beitritt nicht,
+      // ob ein Code existiert (TURNSTILE_REQUIRED zählt nicht als Fehlversuch).
+      if (found === undefined || !found.isMember(ctx.guestId)) {
+        requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
+      }
+      const actor = found ?? lobbyByCode(rt, payload.code);
+      // Läuft in der Warteschlange der Lobby: Mitgliedschaft und Namensprüfung sehen denselben Zustand wie JOIN.
+      const join = (state: LobbyState): Command => {
+        const member = findPlayerByGuestId(state, ctx.guestId);
+        if (member !== undefined && !member.left) return { type: "JOIN", guestId: ctx.guestId, name: member.name };
+        requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
+        return { type: "JOIN", guestId: ctx.guestId, name: moderateName(payload.name, config.blockedTerms) };
+      };
+      return runCommand(ctx, actor, join, { code: actor.code }, { attach: ctx.socket });
+    },
+    codeGuessing,
+  );
 
   registerEvent(
     "lobby:resume",
@@ -91,7 +108,7 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
         { attach: ctx.socket },
       );
     },
-    { countsAsFailure: countsAsResumeFailure },
+    codeGuessing,
   );
 
   registerEvent("lobby:leave", async (_payload, ctx) => {

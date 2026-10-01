@@ -1,5 +1,5 @@
-// pnpm admin:reports [--json] [--env dev|prod --confirm-prod] [--resolve <id> | --dismiss <id> | --restore <frage-id>]
-//                    [--content-dir <pfad>]
+// pnpm admin:reports [--json] [--env dev|prod --confirm-prod] [--resolve <id> | --dismiss <id> | --restore <frage-id>
+//                    | --restore-auto --since <iso> [--reason reports|rating] [--dry-run]] [--content-dir <pfad>]
 //
 // Prüf-Queue der Fragenqualität (docs/08 §5, §8): offene Meldungen je Frage (Gründe, Anzahl, Zeitraum),
 // automatisch zurückgezogene Fragen (Schutzautomatik), schlecht bewertete Fragen und Fragen mit Trefferquote < 10 %,
@@ -12,14 +12,23 @@
 //   --dismiss <id>      offene Meldungen verworfen (Frage ist korrekt) – wie --resolve
 //   --restore <frage>   automatisch zurückgezogene Frage nach Prüfung wieder in den Pool: Status aus dem Content-Repo
 //                       (nur wenn die Frage dort unverändert und spielbar ist), danach Live-Zähler der Kategorie
+//   --restore-auto --since <iso> [--reason reports|rating] [--dry-run]
+//                       Massen-Wiederherstellung (z. B. nach Missbrauch der Meldungen, Watchdog-Alarm `auto_retire`):
+//                       alle seit <iso> automatisch zurückgezogenen Fragen wie --restore (gleiche Prüfungen, im Repo
+//                       geänderte oder nicht spielbare werden übersprungen), Live-Zähler je Kategorie einmal am Ende;
+//                       --dry-run zeigt nur, was passieren würde. Offene Meldungen bleiben in der Queue (zählen nach
+//                       der Wiederherstellung nicht mehr für die Schutzautomatik).
 //
 // Verbindung aus .env.<env> (Standard dev); Zugangsdaten werden nie ausgegeben.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
+  AUTO_RETIRE_BUDGET,
   AUTO_RETIRE_RATING,
+  AUTO_RETIRE_REASONS,
   AUTO_RETIRE_REPORTS,
+  type AutoRetireReason,
   buildReviewQueue,
   closeMongoClient,
   createMongoClient,
@@ -43,10 +52,12 @@ import type { MongoClient } from "mongodb";
 import { DEFAULT_CONTENT_DIR, displayPath, isInside, REPO_ROOT, resolveCliPath } from "../content/lib/paths.ts";
 import { assertProdConfirmed, assertTargetDatabase, SeedGuardError } from "../content/lib/seed-guard.ts";
 import { loadEnv, OpsError } from "../ops/lib/env.ts";
+import { ISO_INSTANT_HINT, parseIsoInstant } from "../ops/lib/iso-time.ts";
 
 export const USAGE =
   "pnpm admin:reports [--json] [--env dev|prod --confirm-prod] " +
-  "[--resolve <id> | --dismiss <id> | --restore <frage-id>] [--content-dir <pfad>]";
+  "[--resolve <id> | --dismiss <id> | --restore <frage-id> | " +
+  "--restore-auto --since <iso> [--reason reports|rating] [--dry-run]] [--content-dir <pfad>]";
 
 /** Version des JSON-Formats für /faktencheck (bei inkompatiblen Änderungen erhöhen). */
 export const REVIEW_QUEUE_SCHEMA_VERSION = 1;
@@ -73,7 +84,8 @@ export type ReportTarget = { questionId: string } | { reportId: string };
 export type ReportsAction =
   | { kind: "list" }
   | { kind: "resolve" | "dismiss"; target: ReportTarget }
-  | { kind: "restore"; questionId: string };
+  | { kind: "restore"; questionId: string }
+  | { kind: "restore-auto"; since: Date; reason: AutoRetireReason | null; dryRun: boolean };
 
 export interface ReportsCommand {
   env: "dev" | "prod";
@@ -99,6 +111,10 @@ const OPTIONS = {
   resolve: { type: "string" },
   dismiss: { type: "string" },
   restore: { type: "string" },
+  "restore-auto": { type: "boolean", default: false },
+  since: { type: "string" },
+  reason: { type: "string" },
+  "dry-run": { type: "boolean", default: false },
   "content-dir": { type: "string" },
   help: { type: "boolean", short: "h", default: false },
 } as const;
@@ -118,7 +134,9 @@ export function parseReportsArgs(args: readonly string[]): ReportsCommand {
   if (positionals.length > 0) throw new ReportsUsageError(`Unerwartete Argumente: ${positionals.join(" ")}`);
   if (values.env !== "dev" && values.env !== "prod") throw new ReportsUsageError("--env muss dev oder prod sein");
   const chosen = (["resolve", "dismiss", "restore"] as const).filter((key) => values[key] !== undefined);
-  if (chosen.length > 1) throw new ReportsUsageError("Nur eine Aktion: --resolve, --dismiss oder --restore");
+  if (chosen.length + (values["restore-auto"] ? 1 : 0) > 1) {
+    throw new ReportsUsageError("Nur eine Aktion: --resolve, --dismiss, --restore oder --restore-auto");
+  }
   let action: ReportsAction = { kind: "list" };
   if (values.resolve !== undefined) action = { kind: "resolve", target: parseReportTarget(values.resolve) };
   if (values.dismiss !== undefined) action = { kind: "dismiss", target: parseReportTarget(values.dismiss) };
@@ -128,6 +146,20 @@ export function parseReportsArgs(args: readonly string[]): ReportsCommand {
       throw new ReportsUsageError(`--restore erwartet eine Fragen-ID (z. B. rw-8f3k2m1q), nicht „${values.restore}“`);
     }
     action = { kind: "restore", questionId };
+  }
+  if (values["restore-auto"]) {
+    if (values.since === undefined) {
+      throw new ReportsUsageError("--restore-auto braucht --since <iso> (ab wann automatisch zurückgezogene Fragen)");
+    }
+    const since = parseIsoInstant(values.since);
+    if (since === null) throw new ReportsUsageError(`--since erwartet ${ISO_INSTANT_HINT}`);
+    const reason = values.reason ?? null;
+    if (reason !== null && !(AUTO_RETIRE_REASONS as readonly string[]).includes(reason)) {
+      throw new ReportsUsageError(`--reason erwartet ${AUTO_RETIRE_REASONS.join(" oder ")}`);
+    }
+    action = { kind: "restore-auto", since, reason: reason as AutoRetireReason | null, dryRun: values["dry-run"] };
+  } else if (values.since !== undefined || values.reason !== undefined || values["dry-run"]) {
+    throw new ReportsUsageError("--since, --reason und --dry-run nur zusammen mit --restore-auto");
   }
   const contentDir = values["content-dir"];
   return {
@@ -220,6 +252,11 @@ export function queueToJson(queue: ReviewQueue, context: QueueContext) {
           reasons: [...AUTO_RETIRE_REPORTS.reasons],
         },
         rating: { minRatings: AUTO_RETIRE_RATING.minRatings, belowPercent: AUTO_RETIRE_RATING.belowPercent },
+        budget: {
+          windowHours: AUTO_RETIRE_BUDGET.windowMs / 3_600_000,
+          perCategory: AUTO_RETIRE_BUDGET.perCategory,
+          total: AUTO_RETIRE_BUDGET.total,
+        },
       },
       ratingWatch: queue.thresholds.ratingWatch,
       calibration: queue.thresholds.calibration,
@@ -302,7 +339,8 @@ export function formatQueueText(queue: ReviewQueue, context: QueueContext): stri
   lines.push(
     "",
     "Aktionen: --resolve <frage-id|meldungs-id> (korrigiert) · --dismiss <…> (unbegründet) · " +
-      "--restore <frage-id> (zurückgezogene Frage wieder in den Pool) · --json für /faktencheck",
+      "--restore <frage-id> (zurückgezogene Frage wieder in den Pool) · --restore-auto --since <iso> [--dry-run] " +
+      "(alle seit dann zurückgezogenen) · --json für /faktencheck",
   );
   return lines;
 }
@@ -320,16 +358,26 @@ export interface RestoreResult {
   openReports: number;
 }
 
+interface RestorePlan {
+  status: "unverified" | "approved";
+  category: string;
+  contentHash: string;
+  autoRetired: { reason: AutoRetireReason; at: Date };
+}
+
+type ParsedQuestionFile = ReturnType<typeof questionFileSchema.safeParse>;
+
 /**
- * Wiederherstellung einer automatisch zurückgezogenen Frage: Status aus dem Content-Repo (Quelle der Wahrheit),
- * nur wenn die Datei-Fassung exakt der gespielten entspricht (`contentHash`) und dort spielbar ist; danach
- * Live-Zähler der Kategorie. Geänderte Fragen übernimmt `pnpm content:seed` (setzt `autoRetired` dabei zurück).
+ * Prüft, ob eine automatisch zurückgezogene Frage wiederhergestellt werden darf, und liefert den Status aus dem
+ * Content-Repo (Quelle der Wahrheit) – nur, wenn die Datei-Fassung exakt der gespielten entspricht (`contentHash`)
+ * und dort spielbar ist. Wirft `ReportsActionError` mit dem Grund. `files` puffert gelesene Themen-Dateien.
  */
-export async function restoreQuestion(
+async function planRestore(
   repos: Repositories,
   questionId: string,
-  options: { contentDir: string; pool: QuestionPool; now: Date },
-): Promise<RestoreResult> {
+  contentDir: string,
+  files: Map<string, ParsedQuestionFile> = new Map(),
+): Promise<RestorePlan> {
   const doc = await repos.questions.findById(questionId);
   if (doc === null) throw new ReportsActionError(`Frage ${questionId} gibt es in der Datenbank nicht`);
   if (doc.autoRetired === null || doc.status !== "retired") {
@@ -337,18 +385,21 @@ export async function restoreQuestion(
   }
   const category = categoryIdSchema.parse(doc.category);
   if (!TOPIC_ID_REGEX.test(doc.topic)) throw new ReportsActionError(`Ungültiges Thema „${doc.topic}“`);
-  const path = join(options.contentDir, "questions", category, `${doc.topic}.json`);
-  if (!isInside(path, options.contentDir) || !existsSync(path)) {
+  const path = join(contentDir, "questions", category, `${doc.topic}.json`);
+  if (!isInside(path, contentDir) || !existsSync(path)) {
     throw new ReportsActionError(
       `Content-Datei fehlt (${displayPath(path)}) – --content-dir prüfen; ist die Frage verschoben, übernimmt ` +
         "pnpm content:seed den neuen Stand",
     );
   }
-  let parsed: ReturnType<typeof questionFileSchema.safeParse>;
-  try {
-    parsed = questionFileSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-  } catch (error) {
-    throw new ReportsActionError(`${displayPath(path)} ist kein gültiges JSON (${describeError(error)})`);
+  let parsed = files.get(path);
+  if (parsed === undefined) {
+    try {
+      parsed = questionFileSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    } catch (error) {
+      throw new ReportsActionError(`${displayPath(path)} ist kein gültiges JSON (${describeError(error)})`);
+    }
+    files.set(path, parsed);
   }
   if (!parsed.success) throw new ReportsActionError(`${displayPath(path)} ist ungültig – pnpm content:validate`);
   const entry = parsed.data.questions.find((candidate) => candidate.id === questionId);
@@ -368,29 +419,136 @@ export async function restoreQuestion(
       `${questionId} ist im Repo ${entry.status} – erst korrigieren (/faktencheck), dann seeden`,
     );
   }
+  return { status, category, contentHash: doc.contentHash, autoRetired: doc.autoRetired };
+}
+
+/** Live-Zähler einer Kategorie nach einer Wiederherstellung. */
+async function recountAfterRestore(
+  repos: Repositories,
+  category: string,
+  options: { pool: QuestionPool; now: Date },
+): Promise<{ playable: boolean | null; playableCount: number | null }> {
+  const minPlayable = (await repos.appConfig.get()).catalog.minPlayable;
+  const recount = await recountCategory(repos, category, { minPlayable, pool: options.pool }, options.now);
+  return { playable: recount?.after.playable ?? null, playableCount: recount?.after.playableCount ?? null };
+}
+
+/**
+ * Wiederherstellung einer automatisch zurückgezogenen Frage (Prüfungen siehe `planRestore`); danach Live-Zähler der
+ * Kategorie. Geänderte Fragen übernimmt `pnpm content:seed` (setzt `autoRetired` dabei zurück).
+ */
+export async function restoreQuestion(
+  repos: Repositories,
+  questionId: string,
+  options: { contentDir: string; pool: QuestionPool; now: Date },
+): Promise<RestoreResult> {
+  const plan = await planRestore(repos, questionId, options.contentDir);
   const restored = await repos.questions.restoreAutoRetired(
     questionId,
-    { status, contentHash: doc.contentHash },
+    { status: plan.status, contentHash: plan.contentHash },
     options.now,
   );
   if (!restored) throw new ReportsActionError(`${questionId} wurde parallel geändert – bitte erneut prüfen`);
-  const minPlayable = (await repos.appConfig.get()).catalog.minPlayable;
-  const recount = await recountCategory(repos, category, { minPlayable, pool: options.pool }, options.now);
+  const counts = await recountAfterRestore(repos, plan.category, options);
   // Je Gast höchstens eine Meldung pro Frage → verschiedene Gäste = offene Meldungen (Index questionId_createdAt).
   const openReports = await repos.reports.countDistinctReporters(questionId, new Date(0), REPORT_REASONS);
   return {
     questionId,
-    status,
-    category,
-    categoryPlayable: recount?.after.playable ?? null,
-    playableCount: recount?.after.playableCount ?? null,
+    status: plan.status,
+    category: plan.category,
+    categoryPlayable: counts.playable,
+    playableCount: counts.playableCount,
     openReports,
+  };
+}
+
+/** Ergebnis von `--restore-auto` (Massen-Wiederherstellung). */
+export interface BulkRestoreResult {
+  since: Date;
+  reason: AutoRetireReason | null;
+  dryRun: boolean;
+  /** Automatisch zurückgezogene Fragen seit `since` (ggf. nur dieses Grunds), neueste zuerst. */
+  candidates: number;
+  /** Wiederhergestellt (bzw. im Dry-Run: würden wiederhergestellt), neueste zuerst. */
+  restored: Array<{
+    questionId: string;
+    status: "unverified" | "approved";
+    category: string;
+    autoRetired: { reason: AutoRetireReason; at: Date };
+  }>;
+  /** Nicht wiederhergestellt – mit Grund (im Repo geändert, needs_fix, Datei fehlt, parallel geändert). */
+  skipped: Array<{ questionId: string; problem: string }>;
+  /** Live-Zähler je betroffener Kategorie (nicht im Dry-Run). */
+  categories: Array<{ category: string; playable: boolean | null; playableCount: number | null }>;
+  /** Mehr Kandidaten als die Höchstzahl je Lauf – danach erneut ausführen. */
+  truncated: boolean;
+}
+
+/**
+ * Massen-Wiederherstellung: alle seit `since` automatisch zurückgezogenen Fragen (optional nur eines Grunds) mit
+ * denselben Prüfungen wie `--restore`. Gelesen wird vom Primary (danach wird geschrieben); die Live-Zähler laufen je
+ * Kategorie einmal am Ende.
+ */
+export async function restoreAutoRetiredSince(
+  repos: Repositories,
+  action: Extract<ReportsAction, { kind: "restore-auto" }>,
+  options: { contentDir: string; pool: QuestionPool; now: Date },
+): Promise<BulkRestoreResult> {
+  const { questions, truncated } = await repos.questions.listAutoRetired({
+    readPreference: "primary",
+    since: action.since,
+    ...(action.reason === null ? {} : { reason: action.reason }),
+  });
+  const files = new Map<string, ParsedQuestionFile>();
+  const restored: BulkRestoreResult["restored"] = [];
+  const skipped: BulkRestoreResult["skipped"] = [];
+  for (const question of questions) {
+    try {
+      const plan = await planRestore(repos, question._id, options.contentDir, files);
+      if (!action.dryRun) {
+        const done = await repos.questions.restoreAutoRetired(
+          question._id,
+          { status: plan.status, contentHash: plan.contentHash },
+          options.now,
+        );
+        if (!done) {
+          skipped.push({ questionId: question._id, problem: "parallel geändert – bitte erneut prüfen" });
+          continue;
+        }
+      }
+      restored.push({
+        questionId: question._id,
+        status: plan.status,
+        category: plan.category,
+        autoRetired: plan.autoRetired,
+      });
+    } catch (error) {
+      if (!(error instanceof ReportsActionError)) throw error;
+      skipped.push({ questionId: question._id, problem: error.message });
+    }
+  }
+  const categories: BulkRestoreResult["categories"] = [];
+  if (!action.dryRun) {
+    for (const category of [...new Set(restored.map((entry) => entry.category))].sort()) {
+      categories.push({ category, ...(await recountAfterRestore(repos, category, options)) });
+    }
+  }
+  return {
+    since: action.since,
+    reason: action.reason,
+    dryRun: action.dryRun,
+    candidates: questions.length,
+    restored,
+    skipped,
+    categories,
+    truncated,
   };
 }
 
 export type ActionResult =
   | { action: "resolve" | "dismiss"; target: ReportTarget; changed: number }
-  | ({ action: "restore" } & RestoreResult);
+  | ({ action: "restore" } & RestoreResult)
+  | ({ action: "restore-auto" } & BulkRestoreResult);
 
 /** Führt eine schreibende Aktion aus (Liste: `buildReviewQueue`). */
 export async function runReportsAction(
@@ -400,11 +558,44 @@ export async function runReportsAction(
 ): Promise<ActionResult> {
   if (action.kind === "restore")
     return { action: "restore", ...(await restoreQuestion(repos, action.questionId, options)) };
+  if (action.kind === "restore-auto") {
+    return { action: "restore-auto", ...(await restoreAutoRetiredSince(repos, action, options)) };
+  }
   const changed = await repos.reports.resolveOpen(action.target, action.kind === "resolve" ? "resolved" : "dismissed");
   return { action: action.kind, target: action.target, changed };
 }
 
+/** Mehrzeilige Ausgabe einer Massen-Wiederherstellung (nur Fragen-IDs, Kategorien und Zahlen). */
+function describeBulkRestore(result: BulkRestoreResult): string {
+  const scope = `seit ${result.since.toISOString()}${result.reason === null ? "" : `, Grund ${AUTO_RETIRE_LABELS[result.reason]}`}`;
+  const head = result.dryRun
+    ? `Dry-Run – würde ${result.restored.length} von ${result.candidates} automatisch zurückgezogenen Fragen (${scope}) wiederherstellen`
+    : `${result.restored.length} von ${result.candidates} automatisch zurückgezogenen Fragen (${scope}) wiederhergestellt – Realtime übernimmt sie per Change Stream`;
+  const lines = [head];
+  for (const entry of result.restored) {
+    lines.push(
+      `  ${result.dryRun ? "würde" : "wieder"}: ${entry.questionId} · ${entry.category} · ${entry.status} (zurückgezogen ${entry.autoRetired.at.toISOString()}, ${AUTO_RETIRE_LABELS[entry.autoRetired.reason]})`,
+    );
+  }
+  for (const entry of result.skipped) lines.push(`  übersprungen: ${entry.questionId} – ${entry.problem}`);
+  for (const entry of result.categories) {
+    lines.push(
+      entry.playable === null
+        ? `  Kategorie ${entry.category} nicht gefunden`
+        : `  Kategorie ${entry.category}: ${entry.playableCount} spielbare Fragen, ${entry.playable ? "spielbar" : "NICHT spielbar"}`,
+    );
+  }
+  if (result.truncated) lines.push("  Höchstzahl je Lauf erreicht – danach erneut ausführen");
+  if (result.restored.length > 0) {
+    lines.push(
+      "  Offene Meldungen bleiben in der Prüf-Queue (zählen nicht erneut) – nach Prüfung mit --dismiss <frage-id> abschließen",
+    );
+  }
+  return lines.join("\n");
+}
+
 export function describeActionResult(result: ActionResult): string {
+  if (result.action === "restore-auto") return describeBulkRestore(result);
   if (result.action === "restore") {
     const category =
       result.categoryPlayable === null

@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { connectErrorDataSchema, PROTOCOL_VERSION } from "@quizmaster/shared";
 import { ipKey } from "@quizmaster/shared/ip";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { HandshakeError } from "../../src/auth/handshake.ts";
+import { HANDSHAKE_FLOOD_FACTOR, HandshakeError } from "../../src/auth/handshake.ts";
 import { roomForGuest } from "../../src/registry/rooms.ts";
 import {
   type ConnectFailure,
@@ -246,16 +246,34 @@ describe("Verbindungsgrenzen", () => {
     await eventually(() => server.app.services.connections.countForGuest(guestId) === 0);
   });
 
-  it("Handshake-Limit 60/min je IP → RATE_LIMITED mit retryAfterMs; ab dem Doppelten harte Ablehnung", async () => {
+  it("Handshake-Limit 60/min je IP gilt für Handshakes ohne gültiges Ticket; gültige Tickets bis zur Flut-Grenze", async () => {
     const ip = server.nextIp();
     for (let i = 0; i < 60; i++) {
       expect((await expectRejected({ ip, ticket: "kein-ticket" })).code).toBe("UNAUTHORIZED");
     }
-    const limited = await expectRejected({ ip });
+    // Ein Mitnutzer derselben IP (Schule, CGNAT) sperrt mit ticketlosen Handshakes niemanden mit gültigem Ticket aus.
+    const legit = await server.connectClient({ ip });
+    expect((await legit.emit("time:sync", { t0: 1 })).ok).toBe(true);
+    legit.close();
+    const hitsBefore = await metricValue(server.app.services.metrics, "qm_rate_limit_hits_total", {
+      rule: "socket.handshake.ip",
+    });
+    const limited = await expectRejected({ ip, ticket: "kein-ticket" });
     expect(limited.code).toBe("RATE_LIMITED");
     expect(limited.retryAfterMs).toBeGreaterThan(0);
     expect(limited.retryAfterMs).toBeLessThanOrEqual(60_000);
-    for (let i = 62; i <= 120; i++) expect((await expectRejected({ ip })).code).toBe("RATE_LIMITED");
+    expect(
+      await metricValue(server.app.services.metrics, "qm_rate_limit_hits_total", { rule: "socket.handshake.ip" }),
+    ).toBe(hitsBefore + 1);
+    // Flut: ab dem Zehnfachen (600/min) harte Ablehnung vor der Engine-Sitzung – auch mit gültigem Ticket.
+    for (let used = 62; used < 60 * HANDSHAKE_FLOOD_FACTOR; used++) {
+      const response = await server.request("/socket.io/?EIO=4&transport=polling", {
+        ip,
+        headers: { origin: server.origin },
+      });
+      expect(response.status, `Handshake ${used + 1}`).toBe(200);
+      await response.body?.cancel();
+    }
     const flood = await expectRejected({ ip });
     expect(flood.code).toBeNull();
     expect(await metricValue(server.app.services.metrics, "qm_connections_rejected_total", { reason: "flood" })).toBe(

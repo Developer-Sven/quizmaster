@@ -14,6 +14,15 @@
  * Prüfungen ziehen sie genau einmal zurück; nur dieser Übergang wird geloggt und gezählt
  * (`qm_questions_auto_retired_total{reason}`).
  *
+ * Missbrauchsbremse (`AUTO_RETIRE_BUDGET`): Gast-Sessions kosten nichts – ohne Obergrenze könnten wenige Sessions in
+ * einer Lobby jede gezeigte Frage melden und Kategorien unter die Mindestmenge drücken. Höchstens 5 automatische
+ * Rückzüge je Kategorie und 20 insgesamt in 24 h; darüber bleibt die fällige Frage im Pool (Meldungen bzw.
+ * Bewertungen bleiben in der Prüf-Queue, die nächste Meldung/Bewertung prüft erneut), gezählt in
+ * `qm_questions_auto_retire_suppressed_total{reason}` und als Fehler geloggt (je Kategorie höchstens alle 10 min) –
+ * der Watchdog alarmiert. Budget prüfen und zurückziehen laufen strikt nacheinander (eine Instanz, ADR-012), damit
+ * parallele Prüfungen das Budget nicht gemeinsam überschreiten; ist das Budget nicht lesbar, wird nicht
+ * zurückgezogen (fail closed, der Fehler landet wie jeder Prüffehler im Log).
+ *
  * Live-Zähler: Nach jedem Zurückziehen werden `playableCount`/`approvedCount`/`playable` der Kategorie neu
  * berechnet (Mindestmenge `appConfig.catalog.minPlayable`, Pool `QUESTION_POOL`); der Kategorien-Watcher bietet
  * Kategorien unter der Mindestmenge dann nicht mehr an. Neuberechnungen laufen je Kategorie nacheinander; kommt
@@ -23,6 +32,7 @@
  */
 import { Counter, type Registry } from "@prometheus-io/client";
 import {
+  AUTO_RETIRE_BUDGET,
   AUTO_RETIRE_RATING,
   type AutoRetireReason,
   type CategoryRecount,
@@ -46,6 +56,10 @@ import type { AppConfigService } from "./app-config.ts";
 export const QUALITY_TIMEOUT_MS = 5_000;
 /** Zähler der automatisch zurückgezogenen Fragen. */
 export const AUTO_RETIRED_METRIC = "qm_questions_auto_retired_total";
+/** Zähler der wegen erschöpften Budgets NICHT zurückgezogenen (aber fälligen) Fragen. */
+export const AUTO_RETIRE_SUPPRESSED_METRIC = "qm_questions_auto_retire_suppressed_total";
+/** Bei erschöpftem Budget höchstens ein Fehler-Log je Kategorie in diesem Abstand (sonst debug). */
+export const SUPPRESSED_LOG_INTERVAL_MS = 10 * 60_000;
 
 export interface QualityServiceDeps {
   repos: Pick<Repositories, "questions" | "reports" | "ratings" | "categories" | "appConfig">;
@@ -62,9 +76,10 @@ export interface QualityServiceDeps {
 export interface QualityCheck {
   /**
    * `retired`: diese Prüfung hat die Frage zurückgezogen · `kept`: Schwelle nicht erreicht · `skipped`: Frage
-   * unbekannt, schon retired oder parallel geändert (dann prüft die nächste Meldung/Bewertung erneut).
+   * unbekannt, schon retired oder parallel geändert (dann prüft die nächste Meldung/Bewertung erneut) ·
+   * `suppressed`: fällig, aber das Budget der Missbrauchsbremse ist erschöpft – die Frage bleibt im Pool.
    */
-  outcome: "retired" | "kept" | "skipped";
+  outcome: "retired" | "kept" | "skipped" | "suppressed";
   reason: AutoRetireReason | null;
   /** Verschiedene Gäste mit zählenden Meldungen im Fenster (nur bei Meldungen). */
   reporters?: number;
@@ -82,22 +97,33 @@ export interface QualityService {
 }
 
 /** Counter je Registry genau einmal (mehrere Dienste derselben App teilen ihn). */
-function autoRetiredCounter(registry: Registry): Counter<"reason"> {
-  const existing = registry.getSingleMetric(AUTO_RETIRED_METRIC);
+function reasonCounter(registry: Registry, name: string, help: string): Counter<"reason"> {
+  const existing = registry.getSingleMetric(name);
   if (existing instanceof Counter) return existing as Counter<"reason">;
-  return new Counter({
-    name: AUTO_RETIRED_METRIC,
-    help: "Von der Schutzautomatik aus dem Pool genommene Fragen je Grund (reports, rating)",
-    labelNames: ["reason"] as const,
-    registers: [registry],
-  });
+  return new Counter({ name, help, labelNames: ["reason"] as const, registers: [registry] });
+}
+
+/** Erschöpftes Budget der Missbrauchsbremse. */
+interface BudgetExhausted {
+  scope: "category" | "total";
+  used: number;
+  limit: number;
 }
 
 export function createQualityService(deps: QualityServiceDeps): QualityService {
   const log = deps.logger.child({ component: "quality" });
   const timeoutMs = deps.timeoutMs ?? QUALITY_TIMEOUT_MS;
   const pool: QuestionPool = deps.pool ?? "all";
-  const autoRetired = autoRetiredCounter(deps.metrics.registry);
+  const autoRetired = reasonCounter(
+    deps.metrics.registry,
+    AUTO_RETIRED_METRIC,
+    "Von der Schutzautomatik aus dem Pool genommene Fragen je Grund (reports, rating)",
+  );
+  const suppressed = reasonCounter(
+    deps.metrics.registry,
+    AUTO_RETIRE_SUPPRESSED_METRIC,
+    "Fällige Rückzüge der Schutzautomatik, die das Budget (Missbrauchsbremse) zurückhielt, je Grund",
+  );
   const now = () => new Date(deps.clock.now());
 
   const guarded = async <T>(operation: string, task: Promise<T>): Promise<T> => {
@@ -164,15 +190,74 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
     return next;
   };
 
+  // Budget prüfen und zurückziehen strikt nacheinander: Jede Prüfung sieht den Stand nach dem vorigen Rückzug.
+  let serial: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = serial.then(task, task);
+    serial = run.catch(() => undefined);
+    return run;
+  };
+
+  /** `null` = Budget frei; sonst welches Budget erschöpft ist (zuerst die Kategorie). */
+  const budgetExhausted = async (category: string): Promise<BudgetExhausted | null> => {
+    const since = new Date(deps.clock.now() - AUTO_RETIRE_BUDGET.windowMs);
+    const inCategory = await guarded("auto_retire_budget", deps.repos.questions.countAutoRetiredSince(since, category));
+    if (inCategory >= AUTO_RETIRE_BUDGET.perCategory) {
+      return { scope: "category", used: inCategory, limit: AUTO_RETIRE_BUDGET.perCategory };
+    }
+    const total = await guarded("auto_retire_budget", deps.repos.questions.countAutoRetiredSince(since));
+    if (total >= AUTO_RETIRE_BUDGET.total) return { scope: "total", used: total, limit: AUTO_RETIRE_BUDGET.total };
+    return null;
+  };
+
+  const suppressedLoggedAt = new Map<string, number>();
+  const reportSuppressed = (
+    state: QuestionQualityState,
+    reason: AutoRetireReason,
+    exhausted: BudgetExhausted,
+    evidence: Pick<QualityCheck, "reporters" | "ratings">,
+  ) => {
+    suppressed.inc({ reason });
+    const fields = {
+      question: state._id,
+      category: state.category,
+      reason,
+      ...exhausted,
+      windowHours: AUTO_RETIRE_BUDGET.windowMs / 3_600_000,
+      ...(evidence.reporters === undefined ? {} : { reporters: evidence.reporters }),
+      ...(evidence.ratings === undefined ? {} : { likes: evidence.ratings.likes, dislikes: evidence.ratings.dislikes }),
+    };
+    const message =
+      "Schutzautomatik: Tagesbudget erschöpft – Frage bleibt im Pool, Meldungen/Bewertungen in der Prüf-Queue " +
+      "(Missbrauch? pnpm admin:reports, Runbook docs/06)";
+    const at = deps.clock.now();
+    const last = suppressedLoggedAt.get(state.category);
+    if (last === undefined || at - last >= SUPPRESSED_LOG_INTERVAL_MS) {
+      suppressedLoggedAt.set(state.category, at);
+      log.error(fields, message);
+    } else {
+      log.debug(fields, message);
+    }
+  };
+
   const retire = async (
     state: QuestionQualityState,
     reason: AutoRetireReason,
     evidence: Pick<QualityCheck, "reporters" | "ratings">,
   ): Promise<QualityCheck> => {
-    const changed = await guarded(
-      "auto_retire",
-      deps.repos.questions.autoRetire(state._id, reason, now(), { updatedAt: state.updatedAt }),
-    );
+    const result = await exclusive(async (): Promise<BudgetExhausted | boolean> => {
+      const exhausted = await budgetExhausted(state.category);
+      if (exhausted !== null) return exhausted;
+      return guarded(
+        "auto_retire",
+        deps.repos.questions.autoRetire(state._id, reason, now(), { updatedAt: state.updatedAt }),
+      );
+    });
+    if (typeof result === "object") {
+      reportSuppressed(state, reason, result, evidence);
+      return { outcome: "suppressed", reason, ...evidence };
+    }
+    const changed = result;
     if (!changed) {
       // Schon zurückgezogen (parallele Prüfung) oder inzwischen geändert (Seed, Wiederherstellung).
       log.debug({ question: state._id, reason }, "Schutzautomatik: Frage schon zurückgezogen oder geändert");

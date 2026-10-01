@@ -141,6 +141,7 @@ describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
     expect(json.thresholds.autoRetire).toEqual({
       reports: { minReporters: 3, windowDays: 7, reasons: ["falsch", "veraltet", "mehrdeutig"] },
       rating: { minRatings: 20, belowPercent: 30 },
+      budget: { windowHours: 24, perCategory: 5, total: 20 },
     });
     const ids = json.items.map((item) => item.questionId);
     expect(ids.indexOf(reported._id)).toBeLessThan(ids.indexOf(retired._id)); // 2 schwere Meldungen vor 1
@@ -304,5 +305,104 @@ describe("Aktionen", () => {
     await expect(
       restoreQuestion(repos, changed._id, { contentDir: join(contentDir, "gibt-es-nicht"), pool: "all", now }),
     ).rejects.toThrow(/Content-Datei fehlt/);
+  });
+});
+
+describe("Massen-Wiederherstellung (--restore-auto, z. B. nach Missbrauch der Meldungen)", () => {
+  it("Argumente: --since Pflicht (ISO mit Zone), --reason reports|rating, --dry-run nur mit --restore-auto", () => {
+    expect(parseReportsArgs(["--restore-auto", "--since", "2026-10-01T08:00:00Z"]).action).toEqual({
+      kind: "restore-auto",
+      since: new Date("2026-10-01T08:00:00Z"),
+      reason: null,
+      dryRun: false,
+    });
+    expect(
+      parseReportsArgs(["--restore-auto", "--since", "2026-10-01", "--reason", "rating", "--dry-run"]).action,
+    ).toEqual({ kind: "restore-auto", since: new Date("2026-10-01T00:00:00Z"), reason: "rating", dryRun: true });
+    expect(() => parseReportsArgs(["--restore-auto"])).toThrow(/--since/);
+    for (const bad of [
+      ["--restore-auto", "--since", "gestern"],
+      ["--restore-auto", "--since", "2026-10-01 08:00"],
+      ["--restore-auto", "--since", "2026-10-01", "--reason", "trolle"],
+      ["--dry-run"],
+      ["--since", "2026-10-01"],
+      ["--reason", "reports"],
+      ["--restore-auto", "--since", "2026-10-01", "--restore", "rw-8f3k2m1q"],
+    ]) {
+      expect(() => parseReportsArgs(bad), bad.join(" ")).toThrow(ReportsUsageError);
+    }
+  });
+
+  it("stellt alle seit dem Zeitpunkt zurückgezogenen wieder her – Dry-Run, Grund-Filter, geänderte übersprungen", async () => {
+    const category = "kinofilme";
+    const original = await repos.questions.countPlayable(category);
+    const [first, second, third, changed] = await questionsOf(category, 4);
+    if (first === undefined || second === undefined || third === undefined || changed === undefined) {
+      throw new Error("Fixtures fehlen");
+    }
+    const hour = 3_600_000;
+    const at = (hoursAgo: number) => new Date(now.getTime() + 30 * DAY_MS - hoursAgo * hour);
+    expect(await repos.questions.autoRetire(first._id, "reports", at(4))).toBe(true);
+    expect(await repos.questions.autoRetire(second._id, "rating", at(3))).toBe(true);
+    expect(await repos.questions.autoRetire(third._id, "reports", at(2))).toBe(true);
+    // Im Repo inzwischen geändert (anderer Hash) → übernimmt der Seed, nicht die Wiederherstellung.
+    await t.collections.questions.updateOne({ _id: changed._id }, { $set: { contentHash: "f".repeat(64) } });
+    expect(await repos.questions.autoRetire(changed._id, "reports", at(1))).toBe(true);
+    const options = { contentDir, pool: "all" as const, now: at(0) };
+
+    const preview = await runReportsAction(
+      repos,
+      { kind: "restore-auto", since: at(3), reason: null, dryRun: true },
+      options,
+    );
+    expect(preview).toMatchObject({
+      action: "restore-auto",
+      dryRun: true,
+      candidates: 3,
+      truncated: false,
+      restored: [
+        { questionId: third._id, status: "unverified", category },
+        { questionId: second._id, status: "unverified", category },
+      ],
+      skipped: [{ questionId: changed._id, problem: expect.stringContaining("im Repo geändert") }],
+      categories: [],
+    });
+    expect(await repos.questions.findQualityState(second._id)).toMatchObject({ status: "retired" });
+    expect(describeActionResult(preview)).toContain("Dry-Run – würde 2 von 3 automatisch zurückgezogenen Fragen");
+
+    const reportsOnly = await runReportsAction(
+      repos,
+      { kind: "restore-auto", since: at(3), reason: "reports", dryRun: false },
+      options,
+    );
+    expect(reportsOnly).toMatchObject({ candidates: 2, restored: [{ questionId: third._id }] });
+    expect(await repos.questions.findQualityState(third._id)).toMatchObject({
+      status: "unverified",
+      autoRetired: null,
+    });
+    expect(await repos.questions.findQualityState(second._id)).toMatchObject({ status: "retired" });
+
+    const all = await runReportsAction(
+      repos,
+      { kind: "restore-auto", since: at(5), reason: null, dryRun: false },
+      options,
+    );
+    expect(all).toMatchObject({
+      candidates: 3,
+      restored: [{ questionId: second._id }, { questionId: first._id }],
+      skipped: [{ questionId: changed._id }],
+      categories: [{ category, playable: true, playableCount: original.playableCount - 1 }],
+    });
+    const text = describeActionResult(all);
+    expect(text).toContain("2 von 3 automatisch zurückgezogenen Fragen");
+    expect(text).toContain(`übersprungen: ${changed._id}`);
+    expect(text).toContain(`Kategorie ${category}: ${original.playableCount - 1} spielbare Fragen, spielbar`);
+    for (const question of [first, second, third]) {
+      expect(await repos.questions.findQualityState(question._id)).toMatchObject({
+        status: "unverified",
+        autoRetired: null,
+      });
+    }
+    expect(await repos.questions.findQualityState(changed._id)).toMatchObject({ status: "retired" });
   });
 });

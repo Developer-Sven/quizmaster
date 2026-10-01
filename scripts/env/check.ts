@@ -1,12 +1,13 @@
 // pnpm env:check <dev|prod> [--connect]
 // Prüft .env.<target> gegen das Schema und die Regeln der Zielumgebung. Gibt nur Schlüsselnamen,
 // Fehlercodes und maskierte Hosts aus – niemals Werte (ADR-022). --connect: Transport (TLS), Verbindung,
-// Replica Set, Version und Rechte (fehlende UND überzählige – Least Privilege, docs/04).
+// Replica Set, Version, Patchstand (bekannte Server-Lücken wie CVE-2025-14847 – prod: Fehler) und Rechte
+// (fehlende UND überzählige – Least Privilege, docs/04).
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { clientTransport } from "@quizmaster/db";
+import { clientTransport, knownServerVulnerabilities, patchTarget } from "@quizmaster/db";
 import {
   checkSourceRules,
   ENV_TARGETS,
@@ -105,6 +106,20 @@ async function checkConnection(): Promise<boolean> {
       ok = false;
     }
     if (!(major >= 8)) console.warn(`env:check – WARNUNG SERVER_VERSION: ${version} < 8.0`);
+    const vulnerabilities = knownServerVulnerabilities(version);
+    if (vulnerabilities === null) {
+      console.warn(
+        `env:check – WARNUNG SERVER_PATCH_UNKNOWN: Version „${version}“ nicht auswertbar – Patchstand prüfen`,
+      );
+    } else if (vulnerabilities.length > 0) {
+      const line = `SERVER_PATCH: ${version} ist anfällig für ${vulnerabilities.join(", ")} – auf ${patchTarget(version)} aktualisieren`;
+      if (target === "prod") {
+        console.error(`env:check – FEHLER ${line}`);
+        ok = false;
+      } else {
+        console.warn(`env:check – WARNUNG ${line}`);
+      }
+    }
     const status = await admin.command({ connectionStatus: 1, showPrivileges: true });
     const privileges: Privilege[] = status.authInfo?.authenticatedUserPrivileges ?? [];
     const databases = [
