@@ -112,7 +112,15 @@ export {
   type SeenQuestions,
 } from "./selection/pool.ts";
 export { type DrawnQuestion, drawQuestions, type QuestionDrawInput } from "./selection/question-draw.ts";
-export { GAME_SNAPSHOT_VERSION, toLobbySnapshot } from "./snapshot.ts";
+export {
+  fromLobbySnapshot,
+  GAME_SNAPSHOT_MIN_VERSION,
+  GAME_SNAPSHOT_VERSION,
+  type RestoreContext,
+  type RestoreReset,
+  type RestoreResult,
+  toLobbySnapshot,
+} from "./snapshot.ts";
 export {
   activePlayers,
   connectedHumans,

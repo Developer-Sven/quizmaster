@@ -1,7 +1,8 @@
 /**
  * Prozess-Einstieg des Realtime-Servers (docs/02 §Start-Checks, docs/12, ADR-024):
  * Env (zod) → MongoClient (appName quizmaster-realtime, Pool 20) → Start-Checks → ensureIndexes → App →
- * `listen(HOST, REALTIME_PORT)` → `process.send("ready")` (pm2 `wait_ready`).
+ * Wiederaufnahme laufender Lobbys aus Snapshots (`resume/`) → `listen(HOST, REALTIME_PORT)` →
+ * `process.send("ready")` (pm2 `wait_ready`).
  *
  * Graceful Shutdown bei SIGTERM und SIGINT (`installProcessShutdown`: `app.stop()`, dann MongoClient
  * schließen, Exit < 10 s); ein zweites Signal beendet sofort. Unerwartete Fehler → Log `fatal`, Exit 1.
@@ -11,7 +12,9 @@ import pino from "pino";
 import { connectRealtimeDb, createRealtimeApp, installProcessShutdown, type RealtimeApp } from "./app.ts";
 import { parseRealtimeEnv } from "./env.ts";
 import { createLogger } from "./logger.ts";
+import { REALTIME_MODULES } from "./registry/modules.ts";
 import type { RealtimeDb } from "./registry/types.ts";
+import { resumeModule } from "./resume/index.ts";
 
 const destination = pino.destination({ dest: 1, sync: false });
 
@@ -34,7 +37,8 @@ async function main(): Promise<void> {
   let app: RealtimeApp | undefined;
   try {
     db = await connectRealtimeDb(env, logger);
-    app = await createRealtimeApp({ env, db, logger });
+    // Wiederaufnahme laufender Lobbys aus Snapshots nach dem Lobby-Modul, vor `listen` (docs/07 Phase 6).
+    app = await createRealtimeApp({ env, db, logger, modules: [...REALTIME_MODULES, resumeModule] });
     const client = db.client;
     installProcessShutdown({ app, logger, exit, afterStop: () => closeMongoClient(client) });
     await app.start();

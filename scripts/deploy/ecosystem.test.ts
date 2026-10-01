@@ -125,7 +125,7 @@ describe("ecosystem.config.js (ADR-024)", () => {
     expect(byName.get("quizmaster-web")?.max_memory_restart).toBe("768M");
     const realtime = byName.get("quizmaster-realtime");
     expect(realtime).toMatchObject({
-      max_memory_restart: "1536M",
+      max_memory_restart: "2560M",
       wait_ready: true,
       listen_timeout: 20_000,
       kill_timeout: 15_000,

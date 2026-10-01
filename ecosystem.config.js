@@ -114,7 +114,9 @@ module.exports = {
       cwd: path.join(current, "realtime"),
       script: "dist/index.mjs",
       interpreter_args: [envFile("realtime"), "--enable-source-maps"],
-      max_memory_restart: "1536M",
+      // Lasttest (docs/perf-report.md): ≈ 57 KB RSS je Verbindung → MAX_CONNECTIONS 20.000 ≈ 1,4 GB; Reserve, damit pm2
+      // einen gesunden, nur ausgelasteten Prozess nicht neu startet (das würde alle laufenden Spiele unterbrechen).
+      max_memory_restart: "2560M",
       wait_ready: true,
       listen_timeout: 20_000,
       kill_timeout: 15_000,

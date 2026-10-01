@@ -18,12 +18,7 @@ import {
   MONGO_POOL_SIZES,
   runStartChecks,
 } from "@quizmaster/db";
-import {
-  type ClientToServerEvents,
-  type ErrorCode,
-  type ServerToClientEvents,
-  socketServerOptions,
-} from "@quizmaster/shared";
+import { type ClientToServerEvents, type ServerToClientEvents, socketServerOptions } from "@quizmaster/shared";
 import { defaultAppConfig } from "@quizmaster/shared/documents";
 import { Server } from "socket.io";
 import { createHandshake } from "./auth/handshake.ts";
@@ -31,7 +26,7 @@ import { createTicketVerifier } from "./auth/ticket.ts";
 import { RELAXED_LIMIT_FACTOR, type RealtimeEnv } from "./env.ts";
 import { createHttpHandler } from "./http.ts";
 import { createLogger, createSecurityLog, guestTag, type Logger, toDbLogger } from "./logger.ts";
-import { createMetrics } from "./metrics.ts";
+import { createMetrics, instrumentServerEvents } from "./metrics.ts";
 import { REALTIME_MODULES } from "./registry/modules.ts";
 import { createEventRegistry, type EventRegistry } from "./registry/registry.ts";
 import { roomForGuest } from "./registry/rooms.ts";
@@ -51,6 +46,7 @@ import {
   systemClock,
 } from "./registry/types.ts";
 import { createViolationTracker } from "./registry/violations.ts";
+import { createAdmissionService } from "./services/admission.ts";
 import { createAppConfigService } from "./services/app-config.ts";
 import { createBansService } from "./services/bans.ts";
 import { connectionLimits, createConnectionsService } from "./services/connections.ts";
@@ -310,16 +306,8 @@ export async function createRealtimeApp(options: CreateRealtimeAppOptions): Prom
   const bans = createBansService({ repo: db.repos.bans, connections, clock });
   const health = createHealthService(logger);
 
-  const admission: AdmissionService = {
-    lobbyCreation(activeLobbies): ErrorCode | null {
-      if (shuttingDown) return "SERVER_BUSY";
-      const config = appConfig.get();
-      if (!config.lobbyCreationEnabled) return "LOBBY_CREATION_DISABLED";
-      if (metrics.eventLoop.overloaded()) return "SERVER_BUSY";
-      if (activeLobbies >= config.maxActiveLobbies) return "SERVER_BUSY";
-      return null;
-    },
-  };
+  // Lastabwurf und Kontingente für neue Lobbys (docs/06 Schichten 5–6) – inkl. Verbindungsgrenze MAX_CONNECTIONS.
+  const admission: AdmissionService = createAdmissionService({ lifecycle, appConfig, metrics, connections });
 
   const services: RealtimeServices = {
     appConfig,
@@ -365,6 +353,8 @@ export async function createRealtimeApp(options: CreateRealtimeAppOptions): Prom
     },
   );
   io.use(handshake.middleware);
+  // Größe jedes Server→Client-Events (lobby:state = Broadcast-Größe) ohne zweite Serialisierung (metrics.ts).
+  instrumentServerEvents(io, metrics);
 
   const violations = createViolationTracker({ rateLimit, bans, metrics, security, logger });
   const registry = createEventRegistry({
