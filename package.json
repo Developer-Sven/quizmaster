@@ -25,6 +25,7 @@
     "content:seed": "pnpm --filter @quizmaster/scripts content:seed",
     "content:ids": "pnpm --filter @quizmaster/scripts content:ids",
     "content:fixtures": "pnpm --filter @quizmaster/scripts content:fixtures",
+    "content:calibrate": "node scripts/content/calibrate.ts",
     "stack:test": "node scripts/dev/stack-test.ts",
     "deploy:prod": "node scripts/deploy/deploy.ts deploy",
     "deploy:rollback": "node scripts/deploy/deploy.ts rollback",
@@ -40,7 +41,8 @@
     "ops:install-cron": "bash infra/ops/install-cron.sh",
     "ops:restore": "bash infra/ops/restore.sh",
     "admin:config": "node scripts/ops/admin.ts config",
-    "admin:ban": "node scripts/ops/admin.ts ban"
+    "admin:ban": "node scripts/ops/admin.ts ban",
+    "admin:reports": "node scripts/admin/reports.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
