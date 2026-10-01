@@ -75,6 +75,21 @@ export function chromeFlags(options: ChromeOptions): string[] {
   return flags;
 }
 
+/**
+ * Wert für `--chrome-flags`: Lighthouse zerlegt den String mit yargs-parser an Leerzeichen – Werte mit Leerzeichen
+ * (`--host-resolver-rules=MAP host ip`) brauchen Anführungszeichen, sonst bleibt nur `MAP` übrig und die Messung läuft
+ * am Origin vorbei über das öffentliche DNS.
+ */
+export function chromeFlagsArgument(flags: readonly string[]): string {
+  return flags
+    .map((flag) => {
+      const separator = flag.indexOf("=");
+      if (separator === -1 || !/\s/.test(flag)) return flag;
+      return `${flag.slice(0, separator + 1)}"${flag.slice(separator + 1)}"`;
+    })
+    .join(" ");
+}
+
 /** Argumente für die Lighthouse-CLI (mobile Standard-Drosselung: simuliertes langsames 4G, Moto-G-Profil). */
 export function lighthouseArgs(url: string, outputBase: string, options: ChromeOptions): string[] {
   return [
@@ -83,7 +98,7 @@ export function lighthouseArgs(url: string, outputBase: string, options: ChromeO
     "--output=html",
     `--output-path=${outputBase}`,
     `--only-categories=${LIGHTHOUSE_CATEGORIES.join(",")}`,
-    `--chrome-flags=${chromeFlags(options).join(" ")}`,
+    `--chrome-flags=${chromeFlagsArgument(chromeFlags(options))}`,
     "--max-wait-for-load=45000",
     "--quiet",
   ];

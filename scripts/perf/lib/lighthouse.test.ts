@@ -1,9 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   chromeFlags,
+  chromeFlagsArgument,
   findChromium,
   type LighthouseRun,
   lighthouseArgs,
@@ -46,6 +48,24 @@ describe("Chromium und Chrome-Flags", () => {
     const args = lighthouseArgs("https://quiz.example/", "/tmp/x/start-1", { resolve: null, insecure: false });
     expect(args).toContain("--only-categories=performance,accessibility,best-practices");
     expect(args).toContain("--output-path=/tmp/x/start-1");
+  });
+
+  it("übergibt die Host-Zuordnung so, dass Lighthouse sie unzerlegt an Chromium weitergibt", () => {
+    const options = { resolve: { host: "quiz.example", ip: "127.0.0.1" }, insecure: true };
+    const args = lighthouseArgs("https://quiz.example/", "/tmp/x/start-1", options);
+    const value = args.find((arg) => arg.startsWith("--chrome-flags="))?.slice("--chrome-flags=".length) ?? "";
+    expect(value).toBe(chromeFlagsArgument(chromeFlags(options)));
+    // Mit dem echten Parser der Lighthouse-CLI (vorher wurde aus der Regel nur „MAP“).
+    const code = `import { parseChromeFlags } from "lighthouse/cli/run.js"; console.log(JSON.stringify(parseChromeFlags(process.argv[1])));`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", code, "--", value], {
+      cwd: join(import.meta.dirname, "../.."),
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout) as string[];
+    expect(parsed).toContain("--host-resolver-rules=MAP quiz.example 127.0.0.1");
+    expect(parsed).toContain("--ignore-certificate-errors");
+    expect(parsed).toContain("--headless=new");
   });
 });
 
