@@ -1,0 +1,87 @@
+"use client";
+
+import type { SettingsUpdate } from "@quizmaster/shared";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { StatusBanners } from "@/components/app/status-banners";
+import { inviteLink } from "@/lib/client/paths";
+import { useOrigin } from "@/lib/client/use-origin";
+import { selectIsHost, selectLobby, selectSelfId, useGameStore } from "@/stores/game-store";
+import { LobbyView } from "./lobby-view";
+import { useLobbyActions } from "./use-lobby-actions";
+
+export interface LiveLobbyProps {
+  code: string;
+  displayCode: string;
+  realtimeUrl: string;
+  devBots: boolean;
+}
+
+/** Lobby (Phase `lobby`) mit Live-Zustand aus dem Store und Aktionen über den Realtime-Client. */
+export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobbyProps) {
+  const router = useRouter();
+  const lobby = useGameStore(selectLobby);
+  const selfId = useGameStore(selectSelfId);
+  const isHost = useGameStore(selectIsHost);
+  const origin = useOrigin();
+  const actions = useLobbyActions(realtimeUrl);
+  const [starting, setStarting] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  if (!lobby) return null;
+  const inviteUrl = origin ? inviteLink(origin, code) : "";
+
+  const start = async () => {
+    if (starting) return;
+    setStarting(true);
+    const result = await actions.client().emit("lobby:start", {});
+    setStarting(false);
+    if (!result.ok) actions.fail(result.code);
+  };
+
+  const leave = async () => {
+    if (leaving) return;
+    setLeaving(true);
+    await actions.client().leaveLobby();
+    router.push("/");
+  };
+
+  const kick = async (playerId: string) => {
+    const result = await actions.client().emit("lobby:kick", { playerId });
+    if (!result.ok) actions.fail(result.code);
+  };
+
+  const changeSettings = async (update: SettingsUpdate) => {
+    const result = await actions.client().emit("lobby:update-settings", update);
+    if (!result.ok) {
+      // Abgelehnt (z. B. „Personen maximal“ unter der Personenzahl): Server-Stand neu holen, Wert springt zurück.
+      if (result.code === "INVALID_OPTION" || result.code === "VALIDATION_FAILED") actions.client().resync();
+      else actions.fail(result.code);
+    }
+  };
+
+  const addBot = async () => {
+    const result = await actions.client().emit("dev:add-bot", {});
+    if (!result.ok) actions.fail(result.code);
+  };
+
+  return (
+    <LobbyView
+      lobby={lobby}
+      selfId={selfId}
+      isHost={isHost}
+      displayCode={displayCode}
+      inviteUrl={inviteUrl}
+      banner={<StatusBanners />}
+      starting={starting}
+      leaving={leaving}
+      devBots={devBots}
+      onStart={() => void start()}
+      onLeave={() => void leave()}
+      onKick={(playerId) => void kick(playerId)}
+      onChangeSettings={(update) => void changeSettings(update)}
+      onCopyCode={() => void actions.copyCode(code)}
+      onShare={() => void actions.shareInvite(displayCode, inviteUrl || inviteLink(window.location.origin, code))}
+      onAddBot={() => void addBot()}
+    />
+  );
+}

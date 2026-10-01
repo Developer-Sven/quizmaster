@@ -1,0 +1,220 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { testLobby, testPlayer, testQuestion, testSelf } from "../lib/client/test-support";
+import {
+  gameActions,
+  selectConnectionOverlayVisible,
+  selectCurrentToast,
+  selectPhase,
+  useGameStore,
+} from "./game-store";
+
+const state = () => useGameStore.getState();
+
+beforeEach(() => {
+  gameActions.resetAll();
+});
+
+describe("rev-Regel (docs/05: kleinere rev verwerfen)", () => {
+  it("übernimmt höhere und gleiche rev, verwirft kleinere", () => {
+    expect(gameActions.applyPublicState(testLobby({ rev: 5 }))).toBe(true);
+    expect(gameActions.applyPublicState(testLobby({ rev: 7, phase: "intro" }))).toBe(true);
+    expect(selectPhase(state())).toBe("intro");
+    expect(gameActions.applyPublicState(testLobby({ rev: 6, phase: "lobby" }))).toBe(false);
+    expect(selectPhase(state())).toBe("intro");
+    expect(gameActions.applyPublicState(testLobby({ rev: 7, phase: "category_pick" }))).toBe(true);
+    expect(state().lastRev).toBe(7);
+  });
+
+  it("nimmt nach einer Wiederaufnahme den nächsten Zustand unabhängig von rev an (z. B. Server-Neustart)", () => {
+    gameActions.applyPublicState(testLobby({ rev: 40 }));
+    gameActions.beginResync();
+    expect(gameActions.applyPublicState(testLobby({ rev: 12, phase: "question" }))).toBe(true);
+    expect(state().lastRev).toBe(12);
+    expect(gameActions.applyPublicState(testLobby({ rev: 11 }))).toBe(false);
+  });
+
+  it("verwirft Zustände einer fremden Lobby, übernimmt den Code ohne Lobby-Kontext", () => {
+    gameActions.enterLobby("ABC234");
+    expect(gameActions.applyPublicState(testLobby({ code: "XYZ789" }))).toBe(false);
+    gameActions.resetLobby();
+    expect(gameActions.applyPublicState(testLobby({ code: "XYZ789" }))).toBe(true);
+    expect(state().code).toBe("XYZ789");
+  });
+
+  it("beginnt beim Wechsel in eine andere Lobby von vorn", () => {
+    gameActions.applyPublicState(testLobby({ rev: 50 }));
+    gameActions.enterLobby("HJK789");
+    expect(state().lobby).toBeNull();
+    expect(state().lastRev).toBeNull();
+    expect(gameActions.applyPublicState(testLobby({ code: "HJK789", rev: 1 }))).toBe(true);
+  });
+
+  it("nimmt nach dem Ende der Lobby (entfernt) nichts mehr an", () => {
+    gameActions.applyPublicState(testLobby({ rev: 3 }));
+    gameActions.exitLobby({ kind: "kicked", reason: "host" });
+    expect(gameActions.applyPublicState(testLobby({ rev: 4 }))).toBe(false);
+    expect(state().lobby).toBeNull();
+    gameActions.applyPrivateState(testSelf("p1"));
+    expect(state().self).toBeNull();
+  });
+});
+
+describe("optimistische Antwort und Wahl", () => {
+  it("behält die getippte Antwort für dieselbe Frage und verwirft sie bei der nächsten", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", question: testQuestion({ id: "q1" }) }));
+    gameActions.setPendingAnswer({ questionId: "q1", choice: 2 });
+    gameActions.applyPublicState(
+      testLobby({ rev: 2, phase: "question", question: testQuestion({ id: "q1", answeredBy: ["p1"] }) }),
+    );
+    expect(state().pendingAnswer).toEqual({ questionId: "q1", choice: 2 });
+    gameActions.applyPublicState(
+      testLobby({ rev: 3, phase: "question", question: testQuestion({ id: "q2", index: 2 }) }),
+    );
+    expect(state().pendingAnswer).toBeNull();
+  });
+
+  it("behält die eigene Wahl nur in derselben Kategoriewahl", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "category_pick", phaseStartedAt: 5_000 }));
+    gameActions.setPendingPick({ phaseStartedAt: 5_000, categoryId: "musik-hits" });
+    gameActions.applyPublicState(testLobby({ rev: 2, phase: "category_pick", phaseStartedAt: 5_000 }));
+    expect(state().pendingPick?.categoryId).toBe("musik-hits");
+    gameActions.applyPublicState(testLobby({ rev: 3, phase: "question", phaseStartedAt: 9_000 }));
+    expect(state().pendingPick).toBeNull();
+  });
+});
+
+describe("Verbindung und Reconnect-Frist", () => {
+  it("startet beim Verlust die Frist (Lobby 30 s) und beendet sie bei Erfolg", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1 }));
+    gameActions.connecting();
+    gameActions.connected();
+    gameActions.connectionLost(100_000);
+    expect(state().connection).toMatchObject({ status: "reconnecting", lostAt: 100_000, graceUntil: 130_000 });
+    expect(selectConnectionOverlayVisible(state())).toBe(true);
+    // Weitere Fehlversuche verlängern die Frist nicht
+    gameActions.connectionLost(104_000);
+    expect(state().connection.graceUntil).toBe(130_000);
+    gameActions.connected();
+    expect(state().connection).toMatchObject({ status: "connected", lostAt: null, graceUntil: null });
+    expect(selectConnectionOverlayVisible(state())).toBe(false);
+  });
+
+  it("hält den Platz im Spiel 90 s, im fast-Modus 5 s", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "intro", phaseStartedAt: 0, phaseEndsAt: 4_000 }));
+    gameActions.connectionLost(10_000);
+    expect(state().connection.graceUntil).toBe(100_000);
+    gameActions.connected();
+    gameActions.applyPublicState(testLobby({ rev: 2, phase: "intro", phaseStartedAt: 0, phaseEndsAt: 300 }));
+    expect(state().timingMode).toBe("fast");
+    gameActions.connectionLost(10_000);
+    expect(state().connection.graceUntil).toBe(15_000);
+  });
+
+  it("zeigt „offline“ sofort und verbindet nach „online“ neu", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1 }));
+    gameActions.connected();
+    gameActions.wentOffline(50_000);
+    expect(state().connection).toMatchObject({ status: "offline", lostAt: 50_000, graceUntil: 80_000 });
+    gameActions.wentOnline();
+    expect(state().connection.status).toBe("reconnecting");
+    expect(state().connection.lostAt).toBe(50_000);
+  });
+
+  it("zeigt das Overlay schon vor dem ersten Zustand, wenn der erste Verbindungsaufbau scheitert", () => {
+    gameActions.enterLobby("ABC234");
+    gameActions.connecting();
+    expect(selectConnectionOverlayVisible(state())).toBe(false);
+    gameActions.connectionLost(2_000);
+    expect(selectConnectionOverlayVisible(state())).toBe(true);
+    // ohne Lobby-Zustand keine Frist – das Overlay zeigt dann den Lade-Indikator
+    expect(state().connection.graceUntil).toBeNull();
+  });
+
+  it("zeigt ohne Lobby kein Overlay und bei endgültigen Fehlern stattdessen den Hinweis", () => {
+    gameActions.connectionLost(1_000);
+    expect(state().connection.graceUntil).toBeNull();
+    expect(selectConnectionOverlayVisible(state())).toBe(false);
+    gameActions.applyPublicState(testLobby({ rev: 1 }));
+    gameActions.connectionFatal("UPDATE_REQUIRED");
+    expect(state().updateRequired).toBe(true);
+    expect(selectConnectionOverlayVisible(state())).toBe(false);
+  });
+
+  it("speichert den Uhren-Offset in ganzen Millisekunden und ignoriert ungültige Werte", () => {
+    gameActions.setOffset(7_000.5);
+    expect(state().offset).toBe(7_001);
+    gameActions.setOffset(Number.NaN);
+    expect(state().offset).toBe(7_001);
+    gameActions.setOffset(-250.4);
+    expect(state().offset).toBe(-250);
+  });
+
+  it("zählt Wiederaufnahmen (Timer starten mit Restzeit neu) und merkt vorübergehende Ablehnungen", () => {
+    gameActions.resumed();
+    gameActions.resumed();
+    expect(state().syncGeneration).toBe(2);
+    gameActions.connectionRejected("TOO_MANY_CONNECTIONS");
+    expect(state().connection.lastError).toBe("TOO_MANY_CONNECTIONS");
+    gameActions.connected();
+    expect(state().connection.lastError).toBeNull();
+  });
+
+  it("zeigt die Wartung bis zur nächsten neuen Verbindung", () => {
+    gameActions.connected();
+    gameActions.applyNotice("MAINTENANCE");
+    expect(state().maintenance).toBe(true);
+    gameActions.connected();
+    expect(state().maintenance).toBe(true);
+    gameActions.connectionLost(1);
+    gameActions.connected();
+    expect(state().maintenance).toBe(false);
+  });
+});
+
+describe("Hinweise und Kategorien", () => {
+  it("erzeugt Toasts für Host-Wechsel und Aufgeben, keine Doppelten hintereinander", () => {
+    const players = [testPlayer("p1", { isHost: true, name: "Mia" }), testPlayer("p2", { name: "Ben" })];
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", players }));
+    gameActions.applyPrivateState(testSelf("p2"));
+    gameActions.applyPublicState(
+      testLobby({
+        rev: 2,
+        phase: "question",
+        players: [
+          testPlayer("p1", { name: "Mia", status: "resigned" }),
+          testPlayer("p2", { name: "Ben", isHost: true }),
+        ],
+      }),
+    );
+    expect(state().toasts.map((toast) => [toast.kind, toast.text])).toEqual([
+      ["hostChanged", "Ben ist jetzt Host."],
+      ["playerResigned", "Mia hat aufgegeben."],
+    ]);
+    const first = selectCurrentToast(state());
+    expect(first?.kind).toBe("hostChanged");
+    if (first) gameActions.dismissToast(first.id);
+    expect(selectCurrentToast(state())?.kind).toBe("playerResigned");
+
+    gameActions.showToast("info", "Code kopiert.");
+    gameActions.showToast("info", "Code kopiert.");
+    expect(state().toasts.filter((toast) => toast.text === "Code kopiert.")).toHaveLength(1);
+    gameActions.applyNotice("SERVER_RESTART");
+    expect(state().toasts.at(-1)?.text).toBe("Neustart – gleich geht es weiter.");
+  });
+
+  it("merkt sich die Kategorien aus den Zug-Optionen", () => {
+    const music = { id: "musik-hits", name: "Musik & Hits", icon: "music", color: "#5988F8" };
+    const books = { id: "buecher-woerter", name: "Bücher & Wörter", icon: "book-open", color: "#EBB447" };
+    const world = { id: "rund-um-die-welt", name: "Rund um die Welt", icon: "globe", color: "#3F9FF3" };
+    gameActions.applyPublicState(
+      testLobby({
+        rev: 1,
+        phase: "category_pick",
+        turn: { pickerId: "p1", options: [music, books, world], categoryId: null },
+      }),
+    );
+    expect(Object.keys(state().categories)).toEqual([music.id, books.id, world.id]);
+    gameActions.addCategories([{ id: "comics", name: "Comics", icon: "message-circle", color: "#F7DF45" }]);
+    expect(state().categories.comics?.name).toBe("Comics");
+  });
+});
