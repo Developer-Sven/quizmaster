@@ -4,14 +4,20 @@
  * Anhang, Kontexte schließen und prüfen, dass es 0 CSP-Verstöße, 0 unbehandelte Fehler und keine unerwarteten
  * Konsolenfehler gab.
  */
-import { type BrowserContext, test as base, expect } from "@playwright/test";
+import { type BrowserContext, type BrowserContextOptions, test as base, expect } from "@playwright/test";
 import { BrowserMonitor } from "./monitor.ts";
 import { Player } from "./player.ts";
 import { installStageRecorder } from "./stage-recorder.ts";
 
+/** Kontext-Optionen einer Person (ergänzen die Projekt-Optionen, z. B. `{ reducedMotion: "reduce" }`). */
+export interface PlayerOptions extends BrowserContextOptions {
+  /** Konsolenfehler, die der Test für diese Person absichtlich auslöst (siehe `BrowserMonitor`) */
+  expectedConsoleErrors?: readonly RegExp[];
+}
+
 export interface Players {
   /** Neue Person mit eigener Session (neuer Kontext, leere Speicher). */
-  create(name: string): Promise<Player>;
+  create(name: string, options?: PlayerOptions): Promise<Player>;
   /** Schließt den Kontext einer Person (Tab zu, Verbindung weg). */
   close(player: Player): Promise<void>;
 }
@@ -21,10 +27,11 @@ export const test = base.extend<{ players: Players }>({
     const monitor = new BrowserMonitor();
     const contexts = new Map<Player, BrowserContext>();
     const players: Players = {
-      async create(name) {
+      async create(name, options = {}) {
+        const { expectedConsoleErrors = [], ...contextOptions } = options;
         // Die Projekt-Optionen (Gerät, Sprache, baseURL) gelten auch für zusätzliche Kontexte.
-        const context = await browser.newContext({ baseURL });
-        await monitor.watchContext(context, name);
+        const context = await browser.newContext({ baseURL, ...contextOptions });
+        await monitor.watchContext(context, name, expectedConsoleErrors);
         await context.addInitScript(installStageRecorder);
         const page = await context.newPage();
         const player = new Player(page, name);

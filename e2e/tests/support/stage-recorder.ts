@@ -2,7 +2,9 @@
  * Protokoll der Bühnen-Overlays im Browser (docs/09 §7): Mit `GAME_TIMING=fast` stehen Auflösung,
  * Zug-Ergebnis und Rundentafel nur 300 ms auf dem Schirm – zu kurz für zuverlässiges Polling. Ein
  * MutationObserver (Init-Skript, läuft vor dem App-Code) vermerkt deshalb jedes eingefügte Overlay
- * (`data-testid="overlay-…"`) mit Zeitpunkt, HUD-Fortschritt, Überschrift und Zeilenzahl.
+ * (`data-testid="overlay-…"`) mit Zeitpunkt, HUD-Fortschritt, Überschrift und Zeilenzahl – dazu den ersten
+ * gezeichneten Frame (Synchronität zweier Geräte, Szenario 12) und ob das Overlay mit einer Bewegung startet
+ * (reduzierte Bewegung, Szenario 9).
  */
 import type { Page } from "@playwright/test";
 
@@ -21,6 +23,16 @@ export interface StageEvent {
   strip: string;
   /** Auflösung: eine Antwort ist als richtig markiert */
   correctMarked: boolean;
+  /**
+   * Client-Zeit (ms, `performance.timeOrigin + performance.now()`) des ersten Animation-Frames nach dem
+   * Einfügen – der Moment, in dem das Overlay gezeichnet wird (Szenario 12: Synchronität); bis dahin `null`.
+   */
+  frameAt: number | null;
+  /**
+   * Elemente im Overlay, die beim Einfügen per Inline-Transform verschoben, skaliert oder gedreht sind (Start
+   * einer Bewegung, docs/09 §8). Bei reduzierter Bewegung muss das 0 sein – nur Überblendungen.
+   */
+  moving: number;
 }
 
 interface StageWindow {
@@ -33,8 +45,16 @@ export function installStageRecorder(): void {
   if (target.__qmStage) return;
   const events: StageEvent[] = [];
   target.__qmStage = events;
+  // Verschiebung/Skalierung/Drehung ungleich der Ruhelage („translateY(12px)“, „scale(0.8)“ …)
+  const displaced = (transform: string) =>
+    /translate[XYZ3d]*\((?!0(?:px)?(?:, ?0(?:px)?)*\))|scale[XYZ3d]*\((?!1(?:, ?1)*\))|rotate[XYZ3d]*\((?!0)/.test(
+      transform,
+    );
   const record = (element: Element) => {
-    events.push({
+    const moving = [element, ...element.querySelectorAll("[style]")].filter(
+      (node) => node instanceof HTMLElement && displaced(node.style.transform),
+    ).length;
+    const event: StageEvent = {
       testId: element.getAttribute("data-testid") ?? "",
       at: Date.now(),
       progress: document.querySelector('[data-testid="hud-progress"]')?.textContent?.trim() ?? "",
@@ -42,6 +62,12 @@ export function installStageRecorder(): void {
       rows: element.querySelectorAll('[data-testid="turn-summary-row"]').length,
       strip: document.querySelector('[data-testid="category-strip"]')?.textContent?.trim() ?? "",
       correctMarked: element.querySelector('[data-state="correct"]') !== null,
+      frameAt: null,
+      moving,
+    };
+    events.push(event);
+    requestAnimationFrame(() => {
+      event.frameAt = performance.timeOrigin + performance.now();
     });
   };
   const scan = (node: Node) => {

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:a11y": "playwright test --project=a11y-360 --project=a11y-430",
+    "test:sync": "playwright test --project=sync --no-deps",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

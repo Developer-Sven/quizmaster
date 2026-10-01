@@ -23,12 +23,16 @@ interface BenignConsoleError {
   url?: RegExp;
 }
 
+/** Absichtlich unbekannter Pfad für die 404-Seite (Szenario 9). */
+export const UNKNOWN_PAGE_PATH = "/e2e-unbekannte-seite";
+
 /**
- * Konsolenfehler, die keine App-Fehler sind: absichtliche 404-Seiten (ungültiger Code in der URL) und der
- * Hinweis des Browsers, wenn eine Seite neu lädt, während ihr WebSocket noch verbindet.
+ * Konsolenfehler, die keine App-Fehler sind: absichtliche 404-Seiten (ungültiger Code in der URL, unbekannter
+ * Pfad {@link UNKNOWN_PAGE_PATH}) und der Hinweis des Browsers, wenn eine Seite neu lädt, während ihr
+ * WebSocket noch verbindet.
  */
 const BENIGN_CONSOLE_ERRORS: readonly BenignConsoleError[] = [
-  { text: /the server responded with a status of 404/, url: /\/(j|lobby)\/[^/?#]+$/ },
+  { text: /the server responded with a status of 404/, url: /\/((j|lobby)\/[^/?#]+|e2e-unbekannte-seite)$/ },
   { text: /WebSocket is closed before the connection is established/ },
 ];
 
@@ -40,8 +44,12 @@ export class BrowserMonitor {
   /** Alle Konsolenmeldungen (für den Anhang am Test). */
   readonly console: string[] = [];
 
-  /** Überwacht alle Seiten eines Kontexts (vor dem Öffnen der ersten Seite aufrufen). */
-  async watchContext(context: BrowserContext, label: string): Promise<void> {
+  /**
+   * Überwacht alle Seiten eines Kontexts (vor dem Öffnen der ersten Seite aufrufen). `expectedErrors`: Konsolen-
+   * fehler, die der Test für diese Person absichtlich herbeiführt (z. B. abgebrochene Downloads) – sie landen
+   * im Protokoll, zählen aber nicht als Problem.
+   */
+  async watchContext(context: BrowserContext, label: string, expectedErrors: readonly RegExp[] = []): Promise<void> {
     await context.exposeBinding(CSP_BINDING, (_source, detail: unknown) => {
       this.problems.push({ kind: "csp", page: label, text: `securitypolicyviolation: ${String(detail)}` });
     });
@@ -51,18 +59,18 @@ export class BrowserMonitor {
         report?.(`${event.effectiveDirective} ${event.blockedURI} ${event.sourceFile}:${event.lineNumber}`);
       });
     }, CSP_BINDING);
-    context.on("page", (page) => this.watchPage(page, label));
+    context.on("page", (page) => this.watchPage(page, label, expectedErrors));
   }
 
-  private watchPage(page: Page, label: string): void {
-    page.on("console", (message) => this.onConsole(message, label));
+  private watchPage(page: Page, label: string, expectedErrors: readonly RegExp[]): void {
+    page.on("console", (message) => this.onConsole(message, label, expectedErrors));
     page.on("pageerror", (error) => {
       this.problems.push({ kind: "pageerror", page: label, text: `${error.name}: ${error.message}` });
     });
     page.on("crash", () => this.problems.push({ kind: "crash", page: label, text: "Seite abgestürzt" }));
   }
 
-  private onConsole(message: ConsoleMessage, label: string): void {
+  private onConsole(message: ConsoleMessage, label: string, expectedErrors: readonly RegExp[]): void {
     const text = message.text();
     const url = message.location().url;
     this.console.push(`[${label}] ${message.type()}: ${text}${url ? ` (${url})` : ""}`);
@@ -71,9 +79,9 @@ export class BrowserMonitor {
       return;
     }
     if (message.type() !== "error") return;
-    const benign = BENIGN_CONSOLE_ERRORS.some(
-      (rule) => rule.text.test(text) && (rule.url === undefined || rule.url.test(url)),
-    );
+    const benign =
+      BENIGN_CONSOLE_ERRORS.some((rule) => rule.text.test(text) && (rule.url === undefined || rule.url.test(url))) ||
+      expectedErrors.some((pattern) => pattern.test(text));
     if (!benign) this.problems.push({ kind: "console", page: label, text: `${text}${url ? ` (${url})` : ""}` });
   }
 }
