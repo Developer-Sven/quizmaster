@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { AppFooter } from "@/components/app/app-footer";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { CodeInput } from "@/components/ui/code-input";
 import { TextField } from "@/components/ui/text-field";
 import { de } from "@/i18n/de";
+import { rememberedOrDefaultName } from "@/lib/client/default-name";
 import {
   type ClientErrorCode,
   createErrorPlacement,
@@ -24,9 +26,13 @@ import {
 import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-realtime";
 import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
-import { readStoredName, writeStoredName } from "@/lib/client/storage";
+import { writeStoredName } from "@/lib/client/storage";
 import type { MaintenanceNotice } from "@/lib/server/maintenance";
+import { QrCodeIcon } from "@/lib/ui/icons";
 import { LOBBY_CODE_LENGTH } from "@/lib/ui/lobby-code";
+
+/** Scanner (Sheet, Kamera, ggf. jsqr) erst beim Antippen laden – die Startseite bleibt schlank (ADR-037). */
+const QrScannerSheet = dynamic(() => import("./qr-scanner-sheet").then((mod) => mod.QrScannerSheet), { ssr: false });
 
 /** Obergrenze des Namensfelds (NAME_INPUT_MAX_LENGTH; die Namensregeln prüft der Server). */
 const NAME_MAX_LENGTH = 64;
@@ -43,8 +49,9 @@ export interface StartScreenProps {
 }
 
 /**
- * Startseite (docs/09 §6): Wortmarke, Claim, Name (aus localStorage vorbefüllt), „Lobby erstellen“,
- * „oder“, Lobby-Code mit Auto-Beitritt bei 6 Zeichen, „Beitreten“, Footer-Link „Regeln“.
+ * Startseite (docs/09 §6, ADR-039): Wortmarke, Claim, Name (gemerkt bzw. „Gast-123456“), Trennlinie,
+ * „Lobby erstellen“, „oder“, Lobby-Code mit Auto-Beitritt bei 6 Zeichen (Enter ebenso), „QR-Code scannen“
+ * (Kamera, Sheet erst beim Antippen geladen), Footer-Link „Regeln“.
  * Impressum/Datenschutz bleiben bis zum Umzug auf eine eigene Domain weg (ADR-030).
  * PWA (docs/10): oben das Update-Banner (neue Version oder `UPDATE_REQUIRED`), über dem Footer die Zeile
  * „Als App installieren“ (nur nach dem ersten beendeten Spiel und wenn installierbar). Ohne Update steht dort der
@@ -62,6 +69,9 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
   // Allgemeine Fehler inline unter der jeweiligen Aktion (kein Toast: hält das Start-Bundle ohne Animationen).
   const [formError, setFormError] = useState<{ at: "create" | "join"; text: string } | null>(null);
   const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  /** Scanner-Sheet: einmal geladen bleibt es eingehängt (Schließ-Animation), `scanOpen` steuert die Kamera */
+  const [scanMounted, setScanMounted] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [updateRequired, setUpdateRequired] = useState(false);
   const updateAvailable = useUpdateAvailable();
   const solver = useTurnstile(turnstile);
@@ -71,8 +81,9 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
   useEffect(() => () => clientRef.current?.setTurnstileProvider(null), []);
 
   useEffect(() => {
-    const stored = readStoredName();
-    if (stored) setName((current) => current || stored);
+    // Gemerkter Name, sonst „Gast-123456“ (ADR-039) – gleich gemerkt, damit er beim nächsten Besuch gleich bleibt.
+    const initial = rememberedOrDefaultName();
+    setName((current) => current || initial);
     if (focus === "join") codeRef.current?.focus();
     else if (focus === "create") nameRef.current?.focus();
   }, [focus]);
@@ -199,6 +210,7 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
               maxLength={NAME_MAX_LENGTH}
               data-testid="start-name"
             />
+            <span aria-hidden="true" className="h-px bg-line" />
             <Button type="submit" variant="primary" block loading={busy === "create"} data-testid="start-create">
               {de.actions.createLobby}
             </Button>
@@ -211,7 +223,14 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
             <span aria-hidden="true" className="h-px flex-1 bg-line" />
           </div>
 
-          <div className="flex flex-col gap-4">
+          <form
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              join(code);
+            }}
+            className="flex flex-col gap-4"
+          >
             <CodeInput
               ref={codeRef}
               value={code}
@@ -226,23 +245,42 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
               disabled={busy !== null}
               name="code"
             />
+            <p role="status" data-testid="start-join-status" className="text-caption text-text-2 empty:hidden">
+              {busy === "join" ? de.start.joining : ""}
+            </p>
             <Button
               variant="secondary"
+              icon={QrCodeIcon}
               block
-              loading={busy === "join"}
-              onClick={() => join(code)}
-              data-testid="start-join"
+              disabled={busy !== null}
+              onClick={() => {
+                setScanMounted(true);
+                setScanOpen(true);
+              }}
+              data-testid="start-scan"
             >
-              {de.actions.join}
+              {de.start.scanQr}
             </Button>
             <FormError message={formError?.at === "join" ? formError.text : null} testId="start-join-error" />
-          </div>
+          </form>
           <TurnstileSlot solver={solver} />
         </div>
 
         <InstallRow />
         <AppFooter safeArea />
       </main>
+      {scanMounted ? (
+        <QrScannerSheet
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          onCode={(scanned) => {
+            setScanOpen(false);
+            setCode(scanned);
+            setCodeError(null);
+            join(scanned);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

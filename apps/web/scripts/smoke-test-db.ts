@@ -173,7 +173,7 @@ async function main(): Promise<void> {
     "x-frame-options": "DENY",
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-resource-policy": "same-origin",
-    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+    "permissions-policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
     "x-robots-tag": "noindex, nofollow",
   };
   for (const [name, value] of Object.entries(expectedHeaders)) {

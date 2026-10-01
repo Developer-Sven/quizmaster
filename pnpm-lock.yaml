@@ -242,6 +242,9 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+      jsqr:
+        specifier: 1.4.0
+        version: 1.4.0
       lucide-react:
         specifier: 1.48.0
         version: 1.48.0(react@19.3.0)
@@ -1971,6 +1974,9 @@ packages:
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
+
+  jsqr@1.4.0:
+    resolution: {integrity: sha512-dxLob7q65Xg2DvstYkRpkYtmKm2sPJ9oFhrhmudT1dZvNFFTlroai3AWSpLey/w5vMcLBXRgOJsbXpdN9HzU/A==}
 
   legacy-javascript@0.0.1:
     resolution: {integrity: sha512-lPyntS4/aS7jpuvOlitZDFifBCb4W8L/3QU0PLbUTUj+zYah8rfVjYic88yG7ZKTxhS5h9iz7duT8oUXKszLhg==}
@@ -4089,6 +4095,8 @@ snapshots:
   js-library-detector@6.7.0: {}
 
   json-schema-traverse@1.0.0: {}
+
+  jsqr@1.4.0: {}
 
   legacy-javascript@0.0.1: {}
 

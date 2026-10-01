@@ -27,9 +27,9 @@ export interface HeaderEvaluation {
   cspHeaders: number;
 }
 
-/** docs/06: `Permissions-Policy` – jede Fähigkeit gesperrt. */
+/** docs/06 + ADR-039: `Permissions-Policy` – alles gesperrt, Kamera nur für die eigene Seite (QR-Scan). */
 export const PERMISSIONS_POLICY = [
-  "camera=()",
+  "camera=(self)",
   "microphone=()",
   "geolocation=()",
   "payment=()",

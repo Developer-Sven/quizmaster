@@ -28,7 +28,7 @@ function pageHeaders(overrides: Record<string, string | null> = {}, https = true
     "strict-transport-security": https ? `max-age=${HSTS_MIN_MAX_AGE}; includeSubDomains` : null,
     "x-content-type-options": "nosniff",
     "referrer-policy": "strict-origin-when-cross-origin",
-    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+    "permissions-policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
     "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate, no-transform",
     "x-frame-options": "DENY",
     "cross-origin-opener-policy": "same-origin",
@@ -87,9 +87,11 @@ describe("evaluatePageHeaders", () => {
   });
 
   it("vergleicht Permissions-Policy unabhängig von Reihenfolge und Leerzeichen", () => {
-    const shuffled = "usb=(),camera=(), browsing-topics=(),geolocation=(), payment=(), microphone=()";
+    const shuffled = "usb=(),camera=(self), browsing-topics=(),geolocation=(), payment=(), microphone=()";
     expect(failed(pageHeaders({ "permissions-policy": shuffled }))).toEqual([]);
-    expect(failed(pageHeaders({ "permissions-policy": "camera=(), microphone=()" }))).toEqual(["permissions-policy"]);
+    expect(failed(pageHeaders({ "permissions-policy": "camera=(self), microphone=()" }))).toEqual([
+      "permissions-policy",
+    ]);
   });
 
   it("verlangt no-store und no-transform im Cache-Control des HTML", () => {

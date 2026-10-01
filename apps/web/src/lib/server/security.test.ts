@@ -185,7 +185,7 @@ describe("next.config.ts headers()", () => {
       "X-Frame-Options": "DENY",
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Resource-Policy": "same-origin",
-      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+      "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
     });
     expect(headersFor("/api/:path*")["Content-Security-Policy"]).toBe("default-src 'none'; frame-ancestors 'none'");
     expect(headersFor("/sw.js")).toEqual({

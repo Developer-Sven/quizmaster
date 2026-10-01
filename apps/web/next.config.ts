@@ -27,7 +27,7 @@ const SECURITY_HEADERS = [
   { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+    value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
   },
 ];
 

@@ -11,12 +11,13 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { TextField } from "@/components/ui/text-field";
 import { de } from "@/i18n/de";
+import { rememberedOrDefaultName } from "@/lib/client/default-name";
 import { type ClientErrorCode, errorText, joinErrorPlacement, turnstileFailureText } from "@/lib/client/errors";
 import { loadRealtimeClient, warmUpRealtimeClient } from "@/lib/client/load-realtime";
 import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
 import { reloadPage } from "@/lib/client/reload";
-import { readStoredName, writeStoredName } from "@/lib/client/storage";
+import { writeStoredName } from "@/lib/client/storage";
 import type { MaintenanceNotice } from "@/lib/server/maintenance";
 import { ChevronLeftIcon } from "@/lib/ui/icons";
 
@@ -57,8 +58,9 @@ export function JoinScreen({ code, displayCode, realtimeUrl, turnstile, maintena
   useEffect(() => () => clientRef.current?.setTurnstileProvider(null), []);
 
   useEffect(() => {
-    const stored = readStoredName();
-    if (stored) setName((current) => current || stored);
+    // Gemerkter Name, sonst „Gast-123456“ (ADR-039).
+    const initial = rememberedOrDefaultName();
+    setName((current) => current || initial);
   }, []);
 
   const showError = (errorCode: ClientErrorCode) => {
