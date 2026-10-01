@@ -7,7 +7,7 @@ import { lobbyPath } from "@/lib/client/paths";
 import { getPublicRuntimeConfig } from "@/lib/server/runtime-config";
 
 export const metadata: Metadata = {
-  title: `${de.lobby.title} – ${de.app.name}`,
+  title: de.lobby.title,
   robots: { index: false, follow: false },
 };
 

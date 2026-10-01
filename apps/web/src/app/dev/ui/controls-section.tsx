@@ -175,7 +175,7 @@ export function ControlsSection() {
           <ListRow icon={FlagIcon} onClick={() => {}} data-force="pressed">
             {de.report.title}
           </ListRow>
-          <ListRow>{de.start.rules}</ListRow>
+          <ListRow>{de.rules.title}</ListRow>
         </div>
       </Demo>
     </Section>

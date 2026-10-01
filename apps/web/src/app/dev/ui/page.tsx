@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Showcase } from "./showcase";
 
 export const metadata: Metadata = {
-  title: "Designsystem – quizmaster",
+  title: "Designsystem",
   robots: { index: false, follow: false },
 };
 

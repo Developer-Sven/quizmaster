@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OFFLINE_URL, SKIP_WAITING, SW_DEV_PARAM, SW_SCOPE, SW_URL } from "./protocol";
+import { OFFLINE_URL, RULES_URL, SKIP_WAITING, SW_DEV_PARAM, SW_SCOPE, SW_URL } from "./protocol";
 import {
   CACHE_LIMITS,
   CACHE_NAMES,
@@ -8,6 +8,7 @@ import {
   isCachedRoute,
   isNeverCached,
   isNextStatic,
+  isRulesPage,
   isStaticAsset,
   NAVIGATION_TIMEOUT_SECONDS,
   OFFLINE_ASSET_LIMIT,
@@ -43,10 +44,27 @@ describe("SW-Routing (docs/10 Strategien)", () => {
   });
 
   it("behandelt Navigationen mit NetworkFirst (3 s) – Startseite, PWA-Start, Lobby, Beitreten, Offline", () => {
-    for (const path of ["/", "/?source=pwa", "/?action=join", "/lobby/ABC234", "/j/ABC234", "/regeln", OFFLINE_URL]) {
+    for (const path of ["/", "/?source=pwa", "/?action=join", "/lobby/ABC234", "/j/ABC234", OFFLINE_URL]) {
       expect(classifyRequest(facts(path, { mode: "navigate" })), path).toBe("navigation");
     }
     expect(NAVIGATION_TIMEOUT_SECONDS).toBe(3);
+  });
+
+  it("hält die Regeln-Seite (Link der Offline-Seite) in einem eigenen Cache – nur genau /regeln als Navigation", () => {
+    expect(classifyRequest(facts(RULES_URL, { mode: "navigate" }))).toBe("rules");
+    expect(classifyRequest(facts(RULES_URL, { mode: "navigate" }), { dev: true })).toBe("rules");
+    expect(isCachedRoute("rules")).toBe(true);
+    expect(isRulesPage(new URL(RULES_URL, ORIGIN))).toBe(true);
+    // Andere Schreibweisen laufen über den Seiten-Cache – der Regeln-Cache hält nie mehr als einen Eintrag.
+    for (const path of ["/regeln?utm_source=x", "/regeln/", "/regeln/x", "/regelnx"]) {
+      expect(classifyRequest(facts(path, { mode: "navigate" })), path).toBe("navigation");
+      expect(isRulesPage(new URL(path, ORIGIN)), path).toBe(false);
+    }
+    // RSC-Abrufe (Client-Navigation), POST und fremde Origins beantwortet der SW nicht.
+    expect(classifyRequest(facts(`${RULES_URL}?_rsc=1x2y3`))).toBe("network");
+    expect(classifyRequest(facts(RULES_URL))).toBe("network");
+    expect(classifyRequest(facts(RULES_URL, { method: "POST", mode: "navigate" }))).toBe("network");
+    expect(classifyRequest(facts(RULES_URL, { mode: "navigate", sameOrigin: false }))).toBe("network");
   });
 
   it("cacht /_next/static/* mit CacheFirst (300 Einträge, 30 Tage)", () => {
@@ -143,13 +161,19 @@ describe("Aufräumen beim Aktivieren", () => {
       CACHE_NAMES.precache,
       CACHE_NAMES.nextStatic,
       CACHE_NAMES.pages,
+      CACHE_NAMES.rules,
       "qm-next-static-v0",
       "qm-pages-v0",
+      "qm-rules-v0",
       `serwist-precache-v2-${ORIGIN}/`,
       "other-app-cache",
       "workbox-runtime",
     ];
-    expect(outdatedCaches(names, Object.values(CACHE_NAMES))).toEqual(["qm-next-static-v0", "qm-pages-v0"]);
+    expect(outdatedCaches(names, Object.values(CACHE_NAMES))).toEqual([
+      "qm-next-static-v0",
+      "qm-pages-v0",
+      "qm-rules-v0",
+    ]);
   });
 });
 
@@ -158,6 +182,7 @@ describe("Gemeinsame SW-Konstanten", () => {
     expect(SW_URL).toBe("/sw.js");
     expect(SW_SCOPE).toBe("/");
     expect(OFFLINE_URL).toBe("/offline");
+    expect(RULES_URL).toBe("/regeln");
     expect(SKIP_WAITING).toBe("SKIP_WAITING");
     expect(SW_DEV_PARAM).toMatch(/^[a-z]+$/);
   });

@@ -4,7 +4,7 @@ import { GamePreview } from "./game-preview";
 import { isPreviewViewId, type PreviewPlayers } from "./sample-states";
 
 export const metadata: Metadata = {
-  title: "Spiel-Vorschau – quizmaster",
+  title: "Spiel-Vorschau",
   robots: { index: false, follow: false },
 };
 

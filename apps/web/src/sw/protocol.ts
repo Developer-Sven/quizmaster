@@ -12,6 +12,13 @@ export const SW_SCOPE = "/";
 /** Offline-Seite: beim Install vorab gecacht, Rückfall für Navigationen ohne Netz (docs/10). */
 export const OFFLINE_URL = "/offline";
 
+/**
+ * Regeln-Seite (docs/09 §6): Die Offline-Seite verlinkt sie – der SW wärmt sie deshalb beim Install in einem
+ * eigenen Cache vor und frischt sie bei jedem Aufruf auf (NetworkFirst), damit der Link ohne Netz nicht ins
+ * Leere führt. Auch Ziel des Links „Regeln“ (components/app/app-footer.tsx).
+ */
+export const RULES_URL = "/regeln";
+
 /** Nachrichtentyp, mit dem die Seite den wartenden SW aktiviert (serwist wertet genau diesen `type` aus). */
 export const SKIP_WAITING = "SKIP_WAITING";
 

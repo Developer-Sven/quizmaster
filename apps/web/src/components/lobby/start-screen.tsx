@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { AppFooter } from "@/components/app/app-footer";
 import { FormError } from "@/components/app/form-error";
 import { InstallRow } from "@/components/pwa/install-row";
 import { UpdateBanner } from "@/components/pwa/update-banner";
@@ -208,15 +208,7 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
         </div>
 
         <InstallRow />
-        <footer className="flex justify-center pt-4 pb-safe">
-          <Link
-            href="/regeln"
-            prefetch={false}
-            className="rounded-sm text-caption text-text-3 underline underline-offset-4"
-          >
-            {de.start.rules}
-          </Link>
-        </footer>
+        <AppFooter safeArea />
       </main>
     </div>
   );

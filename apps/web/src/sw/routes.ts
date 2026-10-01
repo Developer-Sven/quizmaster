@@ -5,6 +5,8 @@
  * | Anfrage                                   | Route          | Strategie                                  |
  * |-------------------------------------------|----------------|--------------------------------------------|
  * | `/api/*`, `/socket.io/*`                  | `never-cache`  | nie cachen – der SW antwortet nicht        |
+ * | Navigation zu genau `/regeln`             | `rules`        | NetworkFirst 3 s, eigener Cache (beim      |
+ * |                                           |                | Install vorgewärmt), Rückfall `/offline`   |
  * | Navigationen (HTML)                       | `navigation`   | NetworkFirst 3 s, Rückfall `/offline`      |
  * | `/_next/static/*`                         | `next-static`  | CacheFirst, 300 Einträge, 30 Tage          |
  * | Schriften, Icons, Sounds, Flaggen-SVGs    | `static-asset` | CacheFirst, 200 Einträge, 60 Tage          |
@@ -12,9 +14,13 @@
  *
  * „Der SW antwortet nicht“ heißt: kein `respondWith`, der Browser lädt direkt aus dem Netz und nichts landet
  * in einem Cache – NetworkOnly ohne Umweg über den Worker (wichtig für Socket.IO-Long-Polling).
+ *
+ * Die Regeln-Seite hat einen eigenen Cache, weil die Offline-Seite sie verlinkt: Im Seiten-Cache (20 Einträge,
+ * 7 Tage) würden Lobby-Aufrufe sie verdrängen – der Link „Regeln“ führte ohne Netz dann wieder zur Offline-Seite.
  */
+import { RULES_URL } from "./protocol";
 
-export type SwRoute = "never-cache" | "navigation" | "next-static" | "static-asset" | "network";
+export type SwRoute = "never-cache" | "rules" | "navigation" | "next-static" | "static-asset" | "network";
 
 /** Was die Regeln von einer Anfrage brauchen (entspricht den Feldern von Request/serwist-Matcher). */
 export interface RequestFacts {
@@ -49,6 +55,8 @@ export const CACHE_NAMES = {
   nextStatic: "qm-next-static-v1",
   assets: "qm-assets-v1",
   pages: "qm-pages-v1",
+  /** genau ein Eintrag: die Regeln-Seite (ohne Ablauf – wird bei jedem Aufruf und jedem Install erneuert) */
+  rules: "qm-rules-v1",
 } as const;
 
 /** Präfix aller eigenen Caches – nur sie räumt der SW beim Aktivieren ab. */
@@ -64,7 +72,7 @@ export const CACHE_LIMITS = {
 /** Netzwerk-Frist für Navigationen, danach Cache (docs/10). */
 export const NAVIGATION_TIMEOUT_SECONDS = 3;
 
-/** Höchstens so viele Dateien der Offline-Seite werden beim Install vorgewärmt. */
+/** Höchstens so viele Dateien je vorgewärmter Seite (Offline, Regeln) werden beim Install gecacht. */
 export const OFFLINE_ASSET_LIMIT = 64;
 
 function matchesPath(pathname: string, base: string): boolean {
@@ -86,26 +94,34 @@ export function isStaticAsset(pathname: string): boolean {
   return ASSET_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || FONT_EXTENSION.test(pathname);
 }
 
+/**
+ * Die Regeln-Seite genau unter ihrer Adresse – ohne Query (z. B. `?utm_…`): So hält ihr Cache immer nur einen
+ * Eintrag; andere Schreibweisen laufen wie jede Navigation über den Seiten-Cache.
+ */
+export function isRulesPage(url: URL): boolean {
+  return url.pathname === RULES_URL && url.search === "";
+}
+
 /** Ordnet eine Anfrage genau einer Route zu (Reihenfolge = Vorrang, siehe Tabelle oben). */
 export function classifyRequest(request: RequestFacts, options: RouteOptions = {}): SwRoute {
   if (request.method !== "GET" || !request.sameOrigin) return "network";
   const { pathname } = request.url;
   if (isNeverCached(pathname)) return "never-cache";
-  if (request.mode === "navigate") return "navigation";
+  if (request.mode === "navigate") return isRulesPage(request.url) ? "rules" : "navigation";
   if (isNextStatic(pathname)) return options.dev ? "network" : "next-static";
   if (isStaticAsset(pathname)) return "static-asset";
   return "network";
 }
 
 /** Routen, für die der SW eine Cache-Strategie anwendet; alle anderen beantwortet er nicht. */
-export function isCachedRoute(route: SwRoute): route is "navigation" | "next-static" | "static-asset" {
-  return route === "navigation" || route === "next-static" || route === "static-asset";
+export function isCachedRoute(route: SwRoute): route is "rules" | "navigation" | "next-static" | "static-asset" {
+  return route === "rules" || route === "navigation" || route === "next-static" || route === "static-asset";
 }
 
 /**
- * `/_next/static/…`-Verweise aus dem HTML der Offline-Seite (Skripte, CSS, vorgeladene Schriften, Chunks im
- * RSC-Payload) – sie werden beim Install vorab gecacht, damit `/offline` ohne Netz vollständig rendert.
- * Nur eigene, relative Pfade; Duplikate und Escape-Reste fallen weg.
+ * `/_next/static/…`-Verweise aus dem HTML einer vorgewärmten Seite (Offline, Regeln: Skripte, CSS, vorgeladene
+ * Schriften, Chunks im RSC-Payload) – sie werden beim Install vorab gecacht, damit die Seite ohne Netz
+ * vollständig rendert. Nur eigene, relative Pfade; Duplikate und Escape-Reste fallen weg.
  */
 export function extractStaticAssetUrls(html: string, limit = OFFLINE_ASSET_LIMIT): string[] {
   const found = new Set<string>();

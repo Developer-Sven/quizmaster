@@ -7,7 +7,7 @@ import { joinPath } from "@/lib/client/paths";
 import { getPublicRuntimeConfig } from "@/lib/server/runtime-config";
 
 export const metadata: Metadata = {
-  title: `${de.actions.join} – ${de.app.name}`,
+  title: de.actions.join,
   robots: { index: false, follow: false },
 };
 

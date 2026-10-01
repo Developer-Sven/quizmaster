@@ -3,6 +3,7 @@
 import { formatGameEstimate, type PublicLobbyState, type SettingsUpdate } from "@quizmaster/shared";
 import { type ReactNode, useState } from "react";
 import { ActionBarNote } from "@/components/app/action-bar";
+import { AppFooter } from "@/components/app/app-footer";
 import { AppHeader, HeaderTitle } from "@/components/app/app-header";
 import { AppShell } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,8 @@ export interface LobbyViewProps {
 /**
  * Lobby (Phase `lobby`, docs/09 §6): Kopfzeile mit Verlassen (Dialog) und Einstellungen (nur Host),
  * Code + Kopieren/Teilen + QR, Spielerliste, Zusammenfassung „3 Runden · 3 Fragen je Kat.“ /
- * „27 Fragen · ca. 9 Min.“; Aktionsleiste: Host „Spiel starten“ (ab 2 Verbundenen), sonst „Warte auf Mia …“.
+ * „27 Fragen · ca. 9 Min.“, darunter der Link „Regeln“ (neuer Tab); Aktionsleiste: Host „Spiel starten“ (ab 2
+ * Verbundenen), sonst „Warte auf Mia …“.
  */
 export function LobbyView({
   lobby,
@@ -142,6 +144,8 @@ export function LobbyView({
             <p>{de.lobby.settingsSummary(rounds, questionsPerCategory)}</p>
             <p>{formatGameEstimate(rounds, Math.max(players.length, 1), questionsPerCategory)}</p>
           </div>
+          {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach 30 s Trennung entfernt. */}
+          <AppFooter newTab />
         </div>
       </AppShell>
       {isHost ? (
