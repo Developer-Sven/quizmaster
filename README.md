@@ -292,12 +292,13 @@ Prüfungen (ein Worker, keine Wiederholung – jede Wiederholung legte weitere G
    Tippzeit eines Menschen; Zwischenzeiten TTFB, FCP, „bedienbar“ (Namensfeld hydriert) und Klick → Lobby.
 2. **Spiel zu zweit:** ein zweiter Kontext (iPhone 15, Chromium) tritt per `/j/<code>` bei, der Host stellt
    1 Runde × 1 Frage je Kategorie ein und startet. Wer dran ist, wählt die erste Kategorie; beide antworten immer mit
-   der ersten Antwort (der echte Katalog ist unbekannt), bis bei beiden das Spielende steht. Danach verlassen beide
-   die Lobby.
+   der ersten Antwort (der echte Katalog ist unbekannt), bis bei beiden das Spielende steht. Danach geht es
+   automatisch zurück in die Lobby (Karte „Letztes Spiel“), und beide verlassen sie.
 3. **Browser:** über den ganzen Lauf 0 CSP-Verstöße (Event `securitypolicyviolation` und Konsole „Refused to …“),
    0 Konsolenfehler, 0 Seitenfehler.
 4. **axe** (WCAG 2.2 AA + Best Practices, dazu die Layout-Regeln aus docs/09 §13) auf Start, Beitreten, Lobby
-   (Host und Gast), Spielende (Host und Gast) und der Startseite nach dem Spiel – ohne Befunde jeder Schwere.
+   (Host und Gast), Spielende (Host und Gast), Lobby nach dem Spiel und der Startseite danach – ohne Befunde jeder
+   Schwere.
 5. **Installierbarkeit** auf `/`: `Page.getInstallabilityErrors` leer, Manifest ohne Meldungen von Chromium,
    Manifest und Icons erreichbar, Service Worker `activated` und steuert die Seite.
 6. **Sicherheits-Header** der Startseite (docs/06): CSP mit Nonce und `'strict-dynamic'`, ohne `'unsafe-inline'`/
