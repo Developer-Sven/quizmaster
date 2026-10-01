@@ -27,6 +27,8 @@ export interface Timings {
   readonly turnSummaryMs: number;
   /** Rundentafel (Phase `round_board`). */
   readonly roundBoardMs: number;
+  /** Ergebnis (Phase `game_over`); danach automatisch zurück in die Lobby (ADR-038). */
+  readonly gameOverMs: number;
   /** Reconnect-Frist in der Lobby. */
   readonly reconnectLobbyMs: number;
   /** Reconnect-Frist im Spiel; danach gilt die Person als „Aufgegeben“. */
@@ -49,6 +51,7 @@ export const TIMINGS = {
     revealMs: 3_500,
     turnSummaryMs: 4_000,
     roundBoardMs: 6_000,
+    gameOverMs: 5_000,
     reconnectLobbyMs: 30_000,
     reconnectGameMs: 90_000,
     hostHandoverMs: 30_000,
@@ -65,6 +68,7 @@ export const TIMINGS = {
     revealMs: 300,
     turnSummaryMs: 300,
     roundBoardMs: 300,
+    gameOverMs: 5_000,
     reconnectLobbyMs: 2_000,
     reconnectGameMs: 5_000,
     hostHandoverMs: 2_000,

@@ -22,6 +22,7 @@ describe("Timings (docs/05 §Timings)", () => {
       revealMs: [3_500, 300],
       turnSummaryMs: [4_000, 300],
       roundBoardMs: [6_000, 300],
+      gameOverMs: [5_000, 5_000],
       reconnectLobbyMs: [30_000, 2_000],
       reconnectGameMs: [90_000, 5_000],
       hostHandoverMs: [30_000, 2_000],

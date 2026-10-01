@@ -2,11 +2,20 @@
 
 import type { SettingsUpdate } from "@quizmaster/shared";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
 import { inviteLink } from "@/lib/client/paths";
 import { useOrigin } from "@/lib/client/use-origin";
-import { selectIsHost, selectLobby, selectSelfId, useGameStore } from "@/stores/game-store";
+import {
+  gameActions,
+  selectCategories,
+  selectIsHost,
+  selectLastGame,
+  selectLobby,
+  selectSelfId,
+  useGameStore,
+} from "@/stores/game-store";
+import { LastGameCard } from "./last-game-card";
 import { LobbyView } from "./lobby-view";
 import { useLobbyActions } from "./use-lobby-actions";
 
@@ -27,6 +36,12 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
   const actions = useLobbyActions(realtimeUrl);
   const [starting, setStarting] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const lastGame = useGameStore(selectLastGame);
+  const categories = useGameStore(selectCategories);
+  // Nach einem Neuladen in der Lobby: die Karte „Letztes Spiel“ aus dem Tab-Speicher wiederherstellen (ADR-038).
+  useEffect(() => {
+    gameActions.restoreLastGame(code);
+  }, [code]);
   if (!lobby) return null;
   const inviteUrl = origin ? inviteLink(origin, code) : "";
 
@@ -72,6 +87,11 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
       displayCode={displayCode}
       inviteUrl={inviteUrl}
       banner={<StatusBanners />}
+      lastGame={
+        lastGame !== null && lastGame.code === lobby.code ? (
+          <LastGameCard lastGame={lastGame} categories={categories} realtimeUrl={realtimeUrl} />
+        ) : null
+      }
       starting={starting}
       leaving={leaving}
       devBots={devBots}

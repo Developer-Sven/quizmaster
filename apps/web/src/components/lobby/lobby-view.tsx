@@ -26,6 +26,8 @@ export interface LobbyViewProps {
   inviteUrl: string;
   /** Banner unter der Kopfzeile (Wartung, Update) */
   banner?: ReactNode;
+  /** Karte „Letztes Spiel“ nach einem Spiel (ADR-038), unter der Spielerliste */
+  lastGame?: ReactNode;
   starting?: boolean;
   leaving?: boolean;
   /** Dev-Bots erlaubt (DEV_BOTS_ENABLED) – nur für den Host sichtbar */
@@ -49,7 +51,8 @@ export interface LobbyViewProps {
  * Lobby (Phase `lobby`, docs/09 §6): Kopfzeile mit Verlassen (Dialog) und Einstellungen (nur Host),
  * Code + Kopieren/Teilen + QR, Spielerliste, Zusammenfassung „3 Runden · 3 Fragen je Kat.“ /
  * „27 Fragen · ca. 9 Min.“, darunter der Link „Regeln“ (neuer Tab); Aktionsleiste: Host „Spiel starten“ (ab 2
- * Verbundenen), sonst „Warte auf Mia …“.
+ * Verbundenen), sonst „Warte auf Mia …“. Nach einem Spiel unter der Spielerliste die Karte „Letztes Spiel“
+ * (ADR-038).
  */
 export function LobbyView({
   lobby,
@@ -58,6 +61,7 @@ export function LobbyView({
   displayCode,
   inviteUrl,
   banner,
+  lastGame = null,
   starting = false,
   leaving = false,
   devBots = false,
@@ -133,6 +137,7 @@ export function LobbyView({
             defaultQrOpen={defaultQrOpen}
           />
           <PlayerList players={players} maxPlayers={maxPlayers} selfId={selfId} canKick={isHost} onKick={onKick} />
+          {lastGame}
           {isHost && devBots && onAddBot ? (
             <div className="flex">
               <Button variant="ghost" size="compact" icon={PlusIcon} onClick={onAddBot} data-testid="lobby-add-bot">

@@ -55,6 +55,42 @@ function write(key: string, value: string | null): void {
   }
 }
 
+/** Letztes Spielende dieses Tabs (sessionStorage) – öffentlicher Zustand, keine Geheimnisse (ADR-038). */
+const LAST_GAME_KEY = "qm.lastGame";
+
+function sessionStore(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage;
+  } catch (error) {
+    reportStorageProblem(error);
+    return null;
+  }
+}
+
+/** Gespeichertes letztes Spielende (JSON) oder `null`; Prüfung übernimmt `lib/client/last-game.ts`. */
+export function readStoredLastGame(): string | null {
+  const store = sessionStore();
+  if (!store) return null;
+  try {
+    return store.getItem(LAST_GAME_KEY);
+  } catch (error) {
+    reportStorageProblem(error);
+    return null;
+  }
+}
+
+export function writeStoredLastGame(json: string | null): void {
+  const store = sessionStore();
+  if (!store) return;
+  try {
+    if (json === null) store.removeItem(LAST_GAME_KEY);
+    else store.setItem(LAST_GAME_KEY, json);
+  } catch (error) {
+    reportStorageProblem(error);
+  }
+}
+
 /** Obergrenze für gespeicherte Namen (entspricht NAME_INPUT_MAX_LENGTH, Prüfung macht der Server). */
 const NAME_STORE_MAX = 64;
 

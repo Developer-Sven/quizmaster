@@ -119,4 +119,52 @@ describe("Rückblick, Bewertung, Meldung", () => {
     expect(guest.contractViolations).toEqual([]);
     for (const client of [host, guest, outsider]) client.close();
   });
+  it("nach der automatischen Rückkehr in die Lobby: Rückblick und Bewertung nur für Mitspielende (ADR-038)", async () => {
+    const host = await connectGuest(server, { guestDoc: true });
+    const guest = await connectGuest(server, { guestDoc: true });
+    const late = await connectGuest(server, { guestDoc: true });
+    const code = await createLobby(host, "Mia");
+    await joinLobby(guest, code, "Ben");
+    await host.emit("lobby:update-settings", { rounds: 1, questionsPerCategory: 1 });
+    const players = [autoPlay(server, host, code), autoPlay(server, guest, code)];
+    const over = waitForPhase(host, "game_over", 60_000);
+    expect((await host.emit("lobby:start", {})).ok).toBe(true);
+    await over;
+    for (const player of players) player.stop();
+    const back = waitForPhase(guest, "lobby", 30_000);
+    await back;
+    const actor = actorOf(server, code);
+    expect(actor.state.phase).toBe("lobby");
+    expect(actor.state.lastGame?.endedAt).not.toBeNull();
+
+    // Mitspielende sehen die Fragen weiter und dürfen bewerten.
+    const review = await guest.emit("game:review", {});
+    expect(review.ok).toBe(true);
+    if (!review.ok) return;
+    expect(review.data).toHaveLength(2);
+    const first = review.data[0];
+    if (first === undefined) throw new Error("Rückblick leer");
+    expect(await guest.emit("question:rate", { questionId: first.questionId, value: 1 })).toEqual({
+      ok: true,
+      data: null,
+    });
+
+    // Später Beigetretene nicht – weder Rückblick noch Bewertung oder Meldung.
+    await joinLobby(late, code, "Lea");
+    expect(await late.emit("game:review", {})).toMatchObject({ ok: false, error: { code: "INVALID_PHASE" } });
+    expect(await late.emit("question:rate", { questionId: first.questionId, value: -1 })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_OPTION" },
+    });
+    expect(await late.emit("question:report", { questionId: first.questionId, reason: "falsch" })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_OPTION" },
+    });
+
+    // Neues Spiel aus der Lobby: der alte Rückblick ist weg.
+    const intro = waitForPhase(host, "intro", 10_000);
+    expect((await host.emit("lobby:start", {})).ok).toBe(true);
+    await intro;
+    expect(await guest.emit("game:review", {})).toMatchObject({ ok: false, error: { code: "INVALID_PHASE" } });
+  });
 });

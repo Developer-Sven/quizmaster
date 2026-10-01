@@ -114,17 +114,6 @@ export function myChoiceFor(
 }
 
 /**
- * Ist „Fragen ansehen“ offen? Das Sheet gehört zu genau einem Spielende (`phaseStartedAt` der Phase
- * `game_over`, `openedFor`): Nach einer Revanche öffnet es sich beim nächsten Spielende nicht von selbst.
- */
-export function reviewSheetOpen(
-  openedFor: number | null,
-  state: Pick<PublicLobbyState, "phase" | "phaseStartedAt">,
-): boolean {
-  return openedFor !== null && state.phase === "game_over" && state.phaseStartedAt === openedFor;
-}
-
-/**
  * Wie viele verbundene aktive Personen noch antworten müssen („Warte auf 2 weitere …“) – ohne die
  * eigene Person. Getrennte zählen nicht (die frühe Auflösung wartet nicht auf sie, docs/05 §Phasen).
  */

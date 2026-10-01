@@ -11,7 +11,7 @@
  * | Host, Sieger:in                         | CrownIcon          |
  * | Code kopieren / Link teilen             | CopyIcon / Share2Icon |
  * | QR-Code / Link                          | QrCodeIcon / LinkIcon |
- * | Spiel starten / Revanche                | PlayIcon / RotateCcwIcon |
+ * | Spiel starten                           | PlayIcon           |
  * | Fragen ansehen / Melden                 | ListChecksIcon / FlagIcon |
  * | Bewertung                               | ThumbsUpIcon / ThumbsDownIcon |
  * | Entfernen                               | UserRoundXIcon     |
@@ -27,7 +27,6 @@
  * | App installieren / Aktualisieren        | SmartphoneIcon / RefreshCwIcon |
  * | geantwortet / ausgewählt                | CheckIcon          |
  * | hat aufgegeben (Toast)                  | LogOutIcon         |
- * | iOS-Teilen (Install-Anleitung)          | ShareIcon          |
  * | aufklappen / zuklappen (auch Sheet zu)  | ChevronDownIcon / ChevronUpIcon |
  *
  * Größen: 16 / 20 / 24 / 32 / 40 / 48 px, in Avatar-Badges 12 / 14 px ({@link ICON_SIZE}).
@@ -56,10 +55,8 @@ export {
   PlusIcon,
   QrCodeIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
   Settings2Icon,
   Share2Icon,
-  ShareIcon,
   SmartphoneIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,

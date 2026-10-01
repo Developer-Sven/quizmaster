@@ -12,6 +12,7 @@ import {
   findPlayer,
   gameParticipants,
 } from "../../lib/client/game-view";
+import type { RankingEntry } from "../ui/ranking-list";
 
 type GameResults = NonNullable<PublicLobbyState["results"]>;
 
@@ -67,4 +68,22 @@ export function stageAnnouncement(
       : null;
   }
   return announcementFor(state, selfId, catalog);
+}
+
+/** Ranglisten-Einträge mit Name und Farbe aus den Personen des Spiels (auch Aufgegebene). */
+export function rankingEntries(results: GameResults, participants: readonly PublicPlayer[]): RankingEntry[] {
+  return results.ranking.flatMap((entry) => {
+    const player = findPlayer(participants, entry.playerId);
+    if (!player) return [];
+    return [
+      {
+        playerId: entry.playerId,
+        place: entry.place,
+        name: player.name,
+        color: player.color,
+        score: entry.score,
+        status: entry.status,
+      },
+    ];
+  });
 }

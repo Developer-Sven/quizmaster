@@ -24,6 +24,7 @@ import {
   mergeCategories,
   missingCategoryIds,
 } from "../lib/client/game-view";
+import { type LastGameSnapshot, loadLastGame, nextLastGame, saveLastGame } from "../lib/client/last-game";
 import { inferTimingMode, reconnectGraceMs } from "../lib/client/phase-clock";
 
 /**
@@ -107,6 +108,8 @@ export interface GameStoreState {
   maintenance: boolean;
   /** `UPDATE_REQUIRED` – Banner „Neue Version verfügbar“ */
   updateRequired: boolean;
+  /** Letztes Spielende dieser Lobby für die Karte „Letztes Spiel“ (ADR-038) */
+  lastGame: LastGameSnapshot | null;
 }
 
 const INITIAL_CONNECTION: ConnectionState = {
@@ -139,6 +142,7 @@ function initialState(): GameStoreState {
     announcement: null,
     maintenance: false,
     updateRequired: false,
+    lastGame: null,
   };
 }
 
@@ -160,6 +164,7 @@ function lobbyReset(): Partial<GameStoreState> {
     categories: EMPTY_CATALOG,
     toasts: [],
     announcement: null,
+    lastGame: null,
   };
 }
 
@@ -199,6 +204,14 @@ export const gameActions = {
     useGameStore.setState(lobbyReset());
   },
 
+  /** Nach einem Neuladen in der Lobby: das gemerkte letzte Spielende dieser Lobby wiederherstellen (ADR-038). */
+  restoreLastGame(code: string): void {
+    const state = useGameStore.getState();
+    if (state.lastGame !== null || state.code !== code) return;
+    const restored = loadLastGame(code);
+    if (restored !== null) useGameStore.setState({ lastGame: restored });
+  },
+
   /**
    * Übernimmt einen `lobby:state`-Snapshot. Verworfen werden Zustände einer fremden Lobby und solche mit
    * kleinerer `rev` als der zuletzt gesehenen (docs/05) – außer direkt nach einer Wiederaufnahme.
@@ -230,9 +243,13 @@ export const gameActions = {
         ? state.pendingPick
         : null;
 
+    const lastGame = nextLastGame(state.lastGame, next, state.self?.playerId ?? null);
+    if (lastGame !== state.lastGame) saveLastGame(lastGame);
+
     useGameStore.setState({
       code: next.code,
       lobby: next,
+      lastGame,
       lastRev: next.rev,
       acceptNextState: false,
       toasts,
@@ -463,4 +480,8 @@ export function selectConnectionOverlayVisible(state: GameStoreState): boolean {
   const { status, fatal } = state.connection;
   if (fatal || state.exit || (state.code === null && !state.lobby)) return false;
   return status === "reconnecting" || status === "offline";
+}
+
+export function selectLastGame(state: GameStoreState): LastGameSnapshot | null {
+  return state.lastGame;
 }

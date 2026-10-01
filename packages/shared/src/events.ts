@@ -148,11 +148,11 @@ export const CLIENT_EVENTS = {
   "game:review": clientEvent({
     payload: emptyPayload,
     ack: reviewListSchema,
-    allowed: "Phase game_over",
+    allowed: "Mitspielende, Phase game_over bzw. danach lobby (letztes Spiel, ADR-038)",
     requiresMembership: true,
     hostOnly: false,
     devOnly: false,
-    phases: ["game_over"],
+    phases: ["game_over", "lobby"],
   }),
   "game:rematch": clientEvent({
     payload: emptyPayload,

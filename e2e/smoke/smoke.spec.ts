@@ -65,9 +65,12 @@ async function axeScreen(smoke: SmokeFixture, person: SmokePerson, screen: strin
   });
 }
 
-/** Spielende: „Lobby verlassen“ in der Aktionsleiste und bestätigen → Startseite. */
+/**
+ * Nach dem Spiel „Lobby verlassen“ und bestätigen → Startseite. Der Button heißt am Spielende (Aktionsleiste) und
+ * in der Lobby (Kopfzeile) gleich – nach 5 s geht es automatisch zurück in die Lobby (ADR-038).
+ */
 async function leaveAfterGame(person: SmokePerson): Promise<void> {
-  await person.page.getByTestId("game-over-leave").click();
+  await person.page.getByRole("button", { name: "Lobby verlassen" }).click();
   const dialog = person.page.getByRole("alertdialog", { name: "Lobby verlassen?" });
   await dialog.getByRole("button", { name: "Verlassen" }).click();
   await person.page.waitForURL((url) => url.pathname === "/");
@@ -171,6 +174,14 @@ test(FLOW_TITLE, async ({ smoke }, testInfo) => {
       });
       await axeScreen(smoke, host, "spielende-host", testInfo);
       await axeScreen(smoke, guest, "spielende-gast", testInfo);
+      await test.step("automatisch zurück in die Lobby, Karte „Letztes Spiel“ (ADR-038)", async () => {
+        for (const person of [host, guest]) {
+          await expect(person.page.getByTestId("lobby-last-game"), `${person.name}: Letztes Spiel`).toBeVisible({
+            timeout: 15_000,
+          });
+        }
+      });
+      await axeScreen(smoke, host, "lobby-nach-spiel", testInfo);
       await test.step("beide verlassen die Lobby", async () => {
         for (const person of [guest, host]) {
           await leaveAfterGame(person);

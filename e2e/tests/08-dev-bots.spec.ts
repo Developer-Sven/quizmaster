@@ -37,6 +37,7 @@ test("Host allein gegen 3 Dev-Bots bis zum Spielende", async ({ players }) => {
     ).toBe(true);
   }
   await expect(host.page.getByRole("list", { name: "Podest" })).toBeVisible();
-  // Bots zählen als verbunden: Revanche ist möglich.
-  await expect(host.page.getByRole("button", { name: "Revanche" })).toBeEnabled();
+  // Nach dem Ergebnis zurück in die Lobby (ADR-038); Bots zählen als verbunden: die nächste Runde ist möglich.
+  await expect(host.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
+  await expect(host.page.getByRole("button", { name: "Spiel starten" })).toBeEnabled();
 });

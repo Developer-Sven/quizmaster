@@ -235,7 +235,10 @@ test("Update-Banner erscheint nicht während des Spiels, erst ab Spielende", asy
   await expect(banner).toContainText("Neue Version verfügbar");
   if (!updateRouted) await mia.page.context().unroute("**/sw.js");
   await Promise.all([mia.page.waitForEvent("load"), banner.getByRole("button", { name: "Aktualisieren" }).click()]);
-  await expect(mia.gameScreen).toHaveAttribute("data-phase", "game_over");
+  // Nach dem Neuladen: noch das Ergebnis oder schon zurück in der Lobby (nach 5 s automatisch, ADR-038).
+  await expect(
+    mia.page.locator('[data-testid="game-screen"][data-phase="game_over"], [data-testid="lobby-screen"]'),
+  ).toBeVisible();
   await expect.poll(() => waitingWorkerState(mia.page)).toBeNull();
   await expect(banner).toHaveCount(0);
 });

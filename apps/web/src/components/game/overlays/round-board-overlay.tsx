@@ -4,14 +4,7 @@ import type { BoardRow, PublicPlayer } from "@quizmaster/shared";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { de } from "../../../i18n/de";
-import {
-  type CategoryCatalog,
-  categoryVisual,
-  duelSides,
-  firstRowOfRound,
-  pointsUntilRound,
-  rankChanges,
-} from "../../../lib/client/game-view";
+import { type CategoryCatalog, duelSides, firstRowOfRound } from "../../../lib/client/game-view";
 import { cx } from "../../../lib/ui/cx";
 import { ArrowDownIcon, ArrowUpIcon } from "../../../lib/ui/icons";
 import { squareResult } from "../../../lib/ui/results";
@@ -19,9 +12,13 @@ import { Avatar } from "../../ui/avatar";
 import { Board, type BoardPlayer, type BoardRowData, fillDelayMs } from "../../ui/board";
 import { CategoryBadge } from "../../ui/category-badge";
 import { ResultSquare } from "../../ui/result-square";
+import { boardPlayers, boardRowsUntil } from "../board-data";
 import { CHOREOGRAPHY, enterMotion, momentAhead, PANEL_FROM, remainingDelayMs } from "../choreography";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
+
+/** Weiter hier exportiert (bestehende Importe); die reinen Funktionen liegen in ../board-data.ts. */
+export { boardPlayers, boardRowsUntil } from "../board-data";
 
 export interface RoundBoardOverlayProps {
   board: readonly BoardRow[];
@@ -43,35 +40,6 @@ export interface RoundBoardOverlayProps {
  * sofort gefüllt – ein Nachholen der ganzen Füll-Animation wäre eine Wiederholung.
  */
 const BOARD_FILL_LATE_MS = 200;
-
-/** Tafelzeilen bis einschließlich Runde `round` mit Kategorie-Darstellung. */
-export function boardRowsUntil(board: readonly BoardRow[], round: number, categories: CategoryCatalog): BoardRowData[] {
-  return board
-    .filter((row) => row.round <= round)
-    .map((row, position) => ({
-      key: `${row.round}-${row.pickerId}-${position}`,
-      category: categoryVisual(categories, row.categoryId),
-      results: row.results,
-    }));
-}
-
-/** Personen der Tafel mit Summe, Status und Platzwechsel (Pfeil hoch/runter) nach Runde `round`. */
-export function boardPlayers(
-  board: readonly BoardRow[],
-  participants: readonly PublicPlayer[],
-  round: number,
-): BoardPlayer[] {
-  const points = pointsUntilRound(board, round);
-  const changes = rankChanges(board, participants, round);
-  return participants.map((player) => ({
-    id: player.id,
-    name: player.name,
-    color: player.color,
-    score: points.get(player.id) ?? 0,
-    resigned: player.status === "resigned",
-    rankChange: changes[player.id] ?? null,
-  }));
-}
 
 /**
  * Rundentafel (Phase `round_board`, 6 s, docs/09 §7.8): Vollbild-Panel „Runde 1 von 3“; 2 Personen im

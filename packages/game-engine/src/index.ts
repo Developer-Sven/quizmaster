@@ -88,7 +88,14 @@ export { toPrivateState, toPublicState } from "./projection.ts";
 export { computeOutcome, computeResults, type RankingInput } from "./ranking.ts";
 export { buildGameDoc, buildGameStats } from "./records.ts";
 export { type CreateLobbyResult, createLobby, type ReduceResult, type Rejection, reduce } from "./reducer.ts";
-export { findShownQuestion, type ReviewContext, reviewQuestionIds, toReviewItems } from "./review.ts";
+export {
+  findShownQuestion,
+  finishedGame,
+  playedFinishedGame,
+  type ReviewContext,
+  reviewQuestionIds,
+  toReviewItems,
+} from "./review.ts";
 export {
   assertRngRange,
   chance,

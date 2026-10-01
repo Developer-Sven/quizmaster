@@ -3,27 +3,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InstallRow } from "./install-row";
 import {
-  FIRST_GAME_KEY,
+  EARLY_INSTALL_CAPTURE_SCRIPT,
   type InstallFacts,
   installMethod,
   installStateForTests,
-  isIosAddToHomeScreenCapable,
   isStandaloneDisplay,
-  markFirstGameFinished,
   promptInstall,
   resetInstallStateForTests,
   startInstallCapture,
 } from "./install-state";
 
 const UA = {
-  iphoneSafari:
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1",
-  iphoneChrome:
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.122 Mobile/15E148 Safari/604.1",
-  ipadDesktop:
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-  iphoneInstagram:
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 390.0.0.0.0",
   androidChrome:
     "Mozilla/5.0 (Linux; Android 15; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
 } as const;
@@ -31,44 +21,23 @@ const UA = {
 const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
   standalone: false,
   installed: false,
-  firstGameFinished: true,
   canPrompt: false,
-  iosAddToHomeScreen: false,
   ...overrides,
 });
 
-describe("installMethod (docs/10 Installations-Erlebnis)", () => {
-  it("bietet erst nach dem ersten beendeten Spiel etwas an", () => {
-    expect(installMethod(facts({ firstGameFinished: false, canPrompt: true }))).toBeNull();
-    expect(installMethod(facts({ firstGameFinished: false, iosAddToHomeScreen: true }))).toBeNull();
+describe("installMethod (ADR-040)", () => {
+  it("nur wo der Browser direkt installieren kann – sofort, ohne erst ein Spiel zu beenden", () => {
+    expect(installMethod(facts({ canPrompt: true }))).toBe("prompt");
+    expect(installMethod(facts())).toBeNull();
   });
 
   it("blendet die Zeile aus, wenn die App installiert ist oder als App läuft", () => {
     expect(installMethod(facts({ standalone: true, canPrompt: true }))).toBeNull();
-    expect(installMethod(facts({ standalone: true, iosAddToHomeScreen: true }))).toBeNull();
     expect(installMethod(facts({ installed: true, canPrompt: true }))).toBeNull();
-  });
-
-  it("Android/Chromium: Installationsdialog, iOS: Anleitung, sonst nichts (nicht installierbar)", () => {
-    expect(installMethod(facts({ canPrompt: true }))).toBe("prompt");
-    expect(installMethod(facts({ iosAddToHomeScreen: true }))).toBe("ios-guide");
-    expect(installMethod(facts())).toBeNull();
   });
 });
 
 describe("Plattform-Erkennung", () => {
-  it("erkennt iPhone, iPad (auch mit Desktop-Kennung) und andere iOS-Browser", () => {
-    expect(isIosAddToHomeScreenCapable(UA.iphoneSafari, 5)).toBe(true);
-    expect(isIosAddToHomeScreenCapable(UA.iphoneChrome, 5)).toBe(true);
-    expect(isIosAddToHomeScreenCapable(UA.ipadDesktop, 5)).toBe(true);
-  });
-
-  it("schließt Mac, Android und In-App-Browser aus", () => {
-    expect(isIosAddToHomeScreenCapable(UA.ipadDesktop, 0)).toBe(false);
-    expect(isIosAddToHomeScreenCapable(UA.androidChrome, 5)).toBe(false);
-    expect(isIosAddToHomeScreenCapable(UA.iphoneInstagram, 5)).toBe(false);
-  });
-
   it("erkennt den Standalone-Modus über Display-Mode oder navigator.standalone (iOS)", () => {
     const none = () => false;
     expect(isStandaloneDisplay(none, undefined)).toBe(false);
@@ -130,22 +99,26 @@ describe("Install-Zustand im Browser", () => {
     resetInstallStateForTests();
   });
 
-  it("markFirstGameFinished merkt sich das Spielende dauerhaft und ist idempotent", async () => {
-    const stop = startInstallCapture(fake);
-    expect(installStateForTests().firstGameFinished).toBe(false);
-    markFirstGameFinished();
-    markFirstGameFinished();
-    expect(fake.storage.get(FIRST_GAME_KEY)).toBe("1");
-    await Promise.resolve();
-    expect(installStateForTests().firstGameFinished).toBe(true);
+  it("übernimmt ein schon vor der Hydration abgefangenes Event (Inline-Skript im Root-Layout)", async () => {
+    const { event, prompt } = installPromptEvent("accepted");
+    const early = fake as FakeWindow & { __qmInstallPrompt?: Event | null };
+    early.__qmInstallPrompt = event;
+    const stop = startInstallCapture(early);
+    expect(installStateForTests()).toMatchObject({ ready: true, canPrompt: true });
+    expect(early.__qmInstallPrompt).toBeNull();
+    await expect(promptInstall()).resolves.toBe("accepted");
+    expect(prompt).toHaveBeenCalledOnce();
     stop();
   });
 
-  it("liest den Merker beim nächsten Besuch aus localStorage", () => {
-    fake.storage.set(FIRST_GAME_KEY, "1");
-    const stop = startInstallCapture(fake);
-    expect(installStateForTests()).toMatchObject({ ready: true, firstGameFinished: true, iosAddToHomeScreen: false });
-    stop();
+  it("das Inline-Skript fängt das Event ab, bevor React lädt (ohne Mini-Infobar)", () => {
+    const target = new EventTarget() as EventTarget & { __qmInstallPrompt?: Event | null };
+    new Function("window", EARLY_INSTALL_CAPTURE_SCRIPT)(target);
+    expect(target.__qmInstallPrompt).toBeNull();
+    const { event } = installPromptEvent("accepted");
+    target.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(target.__qmInstallPrompt).toBe(event);
   });
 
   it("fängt beforeinstallprompt ab (kein Mini-Infobar) und löst später den Dialog aus", async () => {
@@ -192,13 +165,6 @@ describe("Install-Zustand im Browser", () => {
     stop();
     fake.dispatchEvent(installPromptEvent("accepted").event);
     expect(installStateForTests().canPrompt).toBe(false);
-  });
-
-  it("erkennt iOS als Plattform mit Anleitung", () => {
-    vi.stubGlobal("window", new FakeWindow(UA.iphoneSafari, 5));
-    const stop = startInstallCapture(window);
-    expect(installStateForTests().iosAddToHomeScreen).toBe(true);
-    stop();
   });
 });
 

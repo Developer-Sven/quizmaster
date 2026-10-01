@@ -1,7 +1,8 @@
 /**
  * Szenario 2 (docs/11): komplettes Spiel mit 3 Personen (`GAME_TIMING=fast`, 2 Runden, 2 Fragen pro
  * Kategorie): jede Person wählt einmal pro Runde, Auflösung, Zug-Ergebnis, Rundentafel, Endstand,
- * „Fragen ansehen“ mit Bewertung (und Melden), Revanche.
+ * danach automatisch zurück in die Lobby (ADR-038): Karte „Letztes Spiel“ mit Ergebnis und „Fragen ansehen“
+ * (Bewertung, Melden), nächste Runde per „Spiel starten“.
  */
 
 import { expect, test } from "./support/fixtures.ts";
@@ -15,7 +16,7 @@ const PLAYERS = 3;
 const TURNS = ROUNDS * PLAYERS;
 const QUESTIONS = TURNS * QUESTIONS_PER_CATEGORY;
 
-test("komplettes Spiel mit 3 Personen bis zur Revanche", async ({ players }) => {
+test("komplettes Spiel mit 3 Personen, zurück in die Lobby und nächste Runde", async ({ players }) => {
   const mia = await players.create("Mia");
   const ben = await players.create("Ben");
   const lea = await players.create("Lea");
@@ -89,7 +90,18 @@ test("komplettes Spiel mit 3 Personen bis zur Revanche", async ({ players }) => 
   await expect(history).toHaveAttribute("aria-expanded", "true");
   await expect(ben.page.getByRole("table")).toBeVisible();
 
-  // --- „Fragen ansehen“: alle Fragen, Bewerten, Melden -------------------------------------------------------
+  // --- Nach dem Ergebnis automatisch zurück in die Lobby (ADR-038): Karte „Letztes Spiel“ ----------------------
+  for (const player of all) {
+    await expect(player.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
+  }
+  await ben.page.getByRole("button", { name: "Ergebnis ansehen" }).click();
+  const resultSheet = ben.page.getByRole("dialog", { name: "Ergebnis" });
+  await expect(resultSheet.getByTestId("last-game-result")).toBeVisible();
+  await expect(resultSheet.getByRole("table")).toBeVisible();
+  await resultSheet.getByRole("button", { name: "Schließen" }).click();
+  await expect(resultSheet).toBeHidden();
+
+  // --- „Fragen ansehen“ aus der Lobby: alle Fragen, Bewerten, Melden ----------------------------------------
   await ben.page.getByRole("button", { name: "Fragen ansehen" }).click();
   const review = ben.page.getByRole("dialog", { name: "Fragen ansehen" });
   const items = review.getByTestId("review-item");
@@ -124,9 +136,9 @@ test("komplettes Spiel mit 3 Personen bis zur Revanche", async ({ players }) => 
   ).toBeVisible();
   await reopened.getByRole("button", { name: "Schließen" }).click();
 
-  // --- Revanche: gleiche Einstellungen, Punkte zurück auf 0, alle wieder im Spiel ---------------------------
-  await expect(ben.page.getByTestId("game-over-waiting")).toHaveText("Warte auf Mia …");
-  await mia.page.getByRole("button", { name: "Revanche" }).click();
+  // --- Nächste Runde aus der Lobby: gleiche Einstellungen, Punkte zurück auf 0, alle wieder im Spiel ----------
+  await expect(ben.page.getByTestId("lobby-waiting")).toHaveText("Warte auf Mia …");
+  await mia.page.getByRole("button", { name: "Spiel starten" }).click();
   for (const player of all) {
     await expect(player.hudProgress).toHaveText(/^Runde 1\/2 · Zug 1\/3$/);
     await expect(player.stripPlayers).toHaveCount(PLAYERS);

@@ -12,6 +12,8 @@ import {
   currentQuestion,
   currentTurn,
   findShownQuestion,
+  finishedGame,
+  playedFinishedGame,
   reviewQuestionIds,
   toPrivateState,
   toPublicState,
@@ -156,5 +158,31 @@ describe("Rückblick, Bewertung und Meldung", () => {
       expect(item.correct).toBe(question?.correct);
       expect(item.answers[item.correct]).toBe(sim.catalog.docs.get(question?.questionId ?? "")?.answers[0]);
     }
+  });
+
+  it("nach der Rückkehr in die Lobby: Rückblick und Bewertung des letzten Spiels nur für Mitspielende (ADR-038)", () => {
+    const sim = lobbyWith(2, 0, { seed: "review-lobby", timing: "fast" });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.playToEnd();
+    const hostId = sim.playerId(sim.host);
+    const firstInstance = sim.state.game?.turns[0]?.questions[0]?.instanceId ?? "";
+    const before = toReviewItems(sim.state, hostId, { ratings: new Map(), reported: new Set() });
+    sim.advance(sim.state.phaseEndsAt === null ? 0 : sim.state.phaseEndsAt - sim.now);
+    expect(sim.state.phase).toBe("lobby");
+    expect(finishedGame(sim.state)?.gameId).toBe(sim.state.lastGame?.gameId);
+    expect(toReviewItems(sim.state, hostId, { ratings: new Map(), reported: new Set() })).toEqual(before);
+    expect(reviewQuestionIds(sim.state)).toHaveLength(2);
+    expect(findShownQuestion(sim.state, firstInstance)).not.toBeNull();
+    // Später Beigetretene haben das Spiel nicht gesehen.
+    const late = sim.join("Neu");
+    const lateId = sim.playerId(late);
+    expect(playedFinishedGame(sim.state, hostId)).toBe(true);
+    expect(playedFinishedGame(sim.state, lateId)).toBe(false);
+    expect(() => toReviewItems(sim.state, lateId, { ratings: new Map(), reported: new Set() })).toThrow(ProtocolError);
+    // Neues Spiel: kein Rückblick mehr auf das alte.
+    sim.ok({ type: "START", guestId: sim.host });
+    expect(finishedGame(sim.state)).toBeNull();
+    expect(() => toReviewItems(sim.state, hostId, { ratings: new Map(), reported: new Set() })).toThrow(ProtocolError);
   });
 });

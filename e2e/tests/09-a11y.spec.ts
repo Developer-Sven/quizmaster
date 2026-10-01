@@ -280,10 +280,15 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     await expect(mia.page.getByTestId("game-over-headline")).toHaveText("Gewonnen");
     await expect(ben.page.getByTestId("game-over-headline")).toHaveText("Verloren");
 
-    const history = ben.page.getByRole("button", { name: "Spielverlauf" });
-    await history.click();
-    await expect(history).toHaveAttribute("aria-expanded", "true");
+    // --- Nach dem Ergebnis (5 s) zurück in der Lobby: Karte „Letztes Spiel“ (ADR-038) ---------------------
+    await expect(ben.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
+    await checkScreen(ben.page, "lobby-nach-spiel", testInfo);
+    await ben.page.getByRole("button", { name: "Ergebnis ansehen" }).click();
+    const resultSheet = ben.page.getByRole("dialog", { name: "Ergebnis" });
+    await expect(resultSheet.getByRole("table")).toBeVisible();
     await checkScreen(ben.page, "spielverlauf", testInfo);
+    await resultSheet.getByRole("button", { name: "Schließen" }).click();
+    await expect(resultSheet).toBeHidden();
 
     await ben.page.getByRole("button", { name: "Fragen ansehen" }).click();
     const review = ben.page.getByRole("dialog", { name: "Fragen ansehen" });
@@ -328,8 +333,11 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     await expect(mia.page.getByTestId("game-over-headline")).toHaveText("Gewonnen");
     await expect(ben.page.getByTestId("game-over-headline")).toHaveText("Platz 2");
     await expect(lea.page.getByTestId("game-over-headline")).toHaveText("Platz 3");
-    await checkPhase(mia, "game-over", "spielende-3p", testInfo);
-    await checkPhase(lea, "game-over", "spielende-3p-platz-3", testInfo);
+    // Das Ergebnis steht 5 s (ADR-038): beide Prüfungen parallel.
+    await Promise.all([
+      checkPhase(mia, "game-over", "spielende-3p", testInfo),
+      checkPhase(lea, "game-over", "spielende-3p-platz-3", testInfo),
+    ]);
 
     // Gegenprobe zum Test mit reduzierter Bewegung: Mit normaler Bewegung starten Overlays verschoben bzw.
     // skaliert (z. B. Avatare im Intro, Podest) – der Detektor des Stage-Recorders erkennt das.

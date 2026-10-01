@@ -219,6 +219,11 @@ export interface LobbyState {
   seq: number;
   timers: PendingTimer[];
   game: GameState | null;
+  /**
+   * Zuletzt beendetes Spiel, nachdem die Lobby nach dem Ergebnis automatisch zurück in `lobby` gewechselt ist
+   * (ADR-038): nur für Rückblick, Bewerten und Melden der Mitspielenden – nie projiziert, nicht im Snapshot.
+   */
+  lastGame?: GameState | null;
   /** Gesetzt, sobald die Lobby geschlossen ist (danach werden alle Commands abgelehnt). */
   closed: { at: number; reason: CloseReason } | null;
 }

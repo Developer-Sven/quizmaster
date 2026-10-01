@@ -9,15 +9,12 @@ import { de } from "@/i18n/de";
 import {
   type CategoryCatalog,
   categoryVisual,
-  connectedCount,
   findPlayer,
   gameParticipants,
-  hostPlayer,
   isRunningPhase,
 } from "@/lib/client/game-view";
 import { type StageKind, stageAt, stageBoundaries } from "@/lib/client/phase-clock";
 import { cx } from "@/lib/ui/cx";
-import { ListChecksIcon, RotateCcwIcon } from "@/lib/ui/icons";
 import { DURATION_MS } from "@/lib/ui/tokens";
 import type { PendingAnswer, PendingPick } from "@/stores/game-store";
 import { type CategoryArrival, CategoryStrip } from "./category-strip";
@@ -43,14 +40,11 @@ export interface GameHandlers {
   /** nach Bestätigung „Spiel verlassen?“ (= Aufgeben) */
   onResign: () => void;
   onToggleSound: () => void;
-  onRematch: () => void;
   /** nach Bestätigung „Lobby verlassen?“ (Spielende) */
   onLeave: () => void;
-  onOpenReview: () => void;
 }
 
 export interface GameBusy {
-  rematch?: boolean;
   leave?: boolean;
   resign?: boolean;
 }
@@ -193,14 +187,7 @@ function GameScreenContent({
           phaseStartedAt={lobby.phaseStartedAt}
         />
       </div>
-      <GameOverActions
-        lobby={lobby}
-        isHost={self?.isHost === true}
-        busy={busy}
-        handlers={handlers}
-        onLeave={() => setLeaveOpen(true)}
-        inFlow={compact}
-      />
+      <GameOverActions onLeave={() => setLeaveOpen(true)} inFlow={compact} />
     </div>
   ) : null;
 
@@ -279,58 +266,23 @@ function GameScreenContent({
 }
 
 interface GameOverActionsProps {
-  lobby: PublicLobbyState;
-  isHost: boolean;
-  busy: GameBusy;
-  handlers: GameHandlers;
   onLeave: () => void;
   /** niedriger Viewport: Leiste im Dokumentfluss statt unten klebend */
   inFlow: boolean;
 }
 
 /**
- * Aktionsleiste am Spielende (docs/09 §6): Host „Revanche“ (primary), sonst „Warte auf Mia …“; darunter
- * „Fragen ansehen“ (secondary) und „Lobby verlassen“ (ghost), beide kompakt (44, Trefferfläche 48) und
- * nebeneinander, sobald sie in eine Zeile passen – die Leiste nimmt dem Ergebnis so weniger Höhe.
+ * Aktionsleiste am Spielende (ADR-038): Das Ergebnis steht `gameOverMs` (5 s), danach geht es für alle
+ * automatisch zurück in die Lobby – dort liegen Ergebnis und „Fragen ansehen“ als Karte „Letztes Spiel“, und der
+ * Host startet die nächste Runde. Hier nur der Hinweis und „Lobby verlassen“ (ghost, kompakt).
  */
-function GameOverActions({ lobby, isHost, busy, handlers, onLeave, inFlow }: GameOverActionsProps) {
-  const host = hostPlayer(lobby.players);
+function GameOverActions({ onLeave, inFlow }: GameOverActionsProps) {
   const bar = (
     <ActionBar>
-      {isHost ? (
-        <Button
-          variant="primary"
-          icon={RotateCcwIcon}
-          block
-          disabled={connectedCount(lobby.players) < 2}
-          loading={busy.rematch}
-          onClick={handlers.onRematch}
-          data-testid="game-over-rematch"
-        >
-          {de.actions.rematch}
-        </Button>
-      ) : (
-        <ActionBarNote testId="game-over-waiting">{host ? de.lobby.waitingFor(host.name) : null}</ActionBarNote>
-      )}
-      <div className="flex flex-wrap gap-3">
-        <div className="grow">
-          <Button
-            variant="secondary"
-            size="compact"
-            icon={ListChecksIcon}
-            block
-            onClick={handlers.onOpenReview}
-            data-testid="game-over-review"
-          >
-            {de.actions.reviewQuestions}
-          </Button>
-        </div>
-        <div className="grow">
-          <Button variant="ghost" size="compact" block onClick={onLeave} data-testid="game-over-leave">
-            {de.actions.leaveLobby}
-          </Button>
-        </div>
-      </div>
+      <ActionBarNote testId="game-over-returning">{de.result.backToLobbySoon}</ActionBarNote>
+      <Button variant="ghost" size="compact" block onClick={onLeave} data-testid="game-over-leave">
+        {de.actions.leaveLobby}
+      </Button>
     </ActionBar>
   );
   // Die Leiste klebt sonst (sticky) am unteren Rand des scrollenden Screens – bei niedriger Höhe deckte sie

@@ -134,7 +134,7 @@ const STRICT_ALLOWED: Record<string, Record<string, { max: number; reason: strin
       reason: "useServerNow: frische Serverzeit, sobald Grenzen oder Offset wechseln (ADR-020)",
     },
   },
-  "components/game/live-game.tsx": {
+  "components/game/live-review-sheet.tsx": {
     EffectSetState: { max: 1, reason: "„Fragen ansehen“: Ladezustand bei jedem (erneuten) Laden zurücksetzen" },
   },
   "components/game/use-choreography.ts": {

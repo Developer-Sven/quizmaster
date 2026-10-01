@@ -321,16 +321,18 @@ describe("Lobby schließen", () => {
     expect(sim.effectsOf("closeLobby", from)).toEqual([{ type: "closeLobby", reason: "idle" }]);
   });
 
-  it("2 h nach Spielende → geschlossen", () => {
+  it("nach Spielende zurück in der Lobby: 30 min ohne Aktivität → geschlossen (ADR-038)", () => {
     const sim = lobbyWith(2, 0, { timing: "fast" });
     sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });
     sim.ok({ type: "START", guestId: sim.host });
     sim.playToEnd();
-    const endedAt = sim.state.game?.endedAt ?? 0;
-    sim.advance(endedAt + LOBBY_LIFETIME.afterGameCloseMs - sim.now - 1);
+    sim.advance(sim.state.phaseEndsAt === null ? 0 : sim.state.phaseEndsAt - sim.now);
+    expect(sim.state.phase).toBe("lobby");
+    const backAt = sim.now;
+    sim.advance(backAt + LOBBY_LIFETIME.idleCloseMs - sim.now - 1);
     expect(sim.state.closed).toBeNull();
     sim.advance(1);
-    expect(sim.state.closed?.reason).toBe("after_game");
+    expect(sim.state.closed?.reason).toBe("idle");
   });
 });
 

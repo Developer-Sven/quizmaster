@@ -12,8 +12,8 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   FlagIcon,
+  ListChecksIcon,
   PlayIcon,
-  RotateCcwIcon,
   Settings2Icon,
   Share2Icon,
   SmartphoneIcon,
@@ -69,8 +69,8 @@ export function ControlsSection() {
               </Button>
             </Demo>
             <Demo label="kompakt 44">
-              <Button variant={variant} size="compact" icon={RotateCcwIcon}>
-                {de.actions.rematch}
+              <Button variant={variant} size="compact" icon={ListChecksIcon}>
+                {de.actions.reviewQuestions}
               </Button>
             </Demo>
           </div>

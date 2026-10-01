@@ -568,17 +568,15 @@ describe("Randfälle", () => {
     expect(sim.respond()).toEqual({ ok: true, state: before, effects: [] });
   });
 
-  it("nach Spielende: Frist abgelaufen oder entfernt → nicht in der Revanche, Ergebnis bleibt sichtbar", () => {
+  it("nach Spielende: Entfernte sind raus, Ergebnis bleibt bis zur Rückkehr sichtbar, Revanche im Ergebnis-Fenster", () => {
     const sim = lobbyWith(4, 0, { seed: "after-game" });
     sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });
     sim.ok({ type: "START", guestId: sim.host });
     sim.playToEnd();
     const [, ben = "", lea = "", tom = ""] = sim.guests;
     const results = toPublicState(sim.state).results;
-    sim.ok({ type: "DISCONNECT", guestId: ben });
-    sim.advance(T.reconnectGameMs);
-    expect(sim.state.players.find((player) => player.guestId === ben)?.left).toBe(true);
-    expect(errorCode(sim.dispatch({ type: "RECONNECT", guestId: ben }))).toBe("LOBBY_NOT_FOUND");
+    expect(sim.state.phaseEndsAt).toBe(sim.now + T.gameOverMs);
+    sim.ok({ type: "LEAVE", guestId: ben });
     const from = sim.effects.length;
     sim.ok({ type: "KICK", guestId: sim.host, targetPlayerId: sim.playerId(lea) });
     expect(sim.effectsOf("kick", from)).toHaveLength(1);
@@ -587,6 +585,51 @@ describe("Randfälle", () => {
     sim.ok({ type: "REMATCH", guestId: sim.host });
     expect(sim.state.players.map((player) => player.guestId)).toEqual([sim.host, tom]);
     expect(errorCode(sim.dispatch({ type: "RECONNECT", guestId: lea }))).toBe("KICKED");
+  });
+
+  it("nach gameOverMs automatisch zurück in die Lobby (ADR-038): gleiche Einstellungen, letztes Spiel bleibt", () => {
+    const sim = lobbyWith(3, 0, { seed: "back-to-lobby" });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 2 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.playToEnd();
+    const [, ben = "", lea = ""] = sim.guests;
+    const finished = sim.state.game;
+    sim.ok({ type: "LEAVE", guestId: lea });
+    sim.advance(T.gameOverMs - 1);
+    expect(sim.state.phase).toBe("game_over");
+    sim.advance(1);
+    expect(sim.state.phase).toBe("lobby");
+    expect(sim.state.phaseEndsAt).toBeNull();
+    expect(sim.state.game).toBeNull();
+    expect(sim.state.lastGame?.gameId).toBe(finished?.gameId);
+    expect(sim.state.lastActivityAt).toBe(sim.now);
+    expect(sim.state.settings.questionsPerCategory).toBe(2);
+    expect(sim.state.players.map((player) => player.guestId)).toEqual([sim.host, ben]);
+    expect(sim.state.players.every((player) => player.status === "active" && !player.left)).toBe(true);
+    // Lobby wie gewohnt: Projektion ohne Spieldaten, neue Personen dürfen beitreten, Host startet neu.
+    const view = toPublicState(sim.state);
+    expect(view.results).toBeNull();
+    expect(view.board).toEqual([]);
+    expect(view.order).toBeNull();
+    expect(view.players.every((player) => player.score === 0)).toBe(true);
+    sim.join("Neu");
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 2 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    expect(sim.state.phase).toBe("intro");
+    expect(sim.state.lastGame).toBeNull();
+  });
+
+  it("zurück in die Lobby: ist der Host ausgeschieden, übernimmt die am längsten anwesende Person", () => {
+    const sim = lobbyWith(3, 0, { seed: "host-left" });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.playToEnd();
+    const [mia = "", ben = ""] = sim.guests;
+    sim.ok({ type: "LEAVE", guestId: mia });
+    sim.advance(T.gameOverMs);
+    expect(sim.state.phase).toBe("lobby");
+    expect(sim.state.hostPlayerId).toBe(sim.playerId(ben));
+    expect(sim.state.players.some((player) => player.guestId === mia)).toBe(false);
   });
 });
 
@@ -631,8 +674,9 @@ describe("Anfragen an die Shell: Frist (Watchdog)", () => {
     );
     expect(sim.state.game?.pending?.kind).toBe("questions");
     sim.advance(60_000);
-    expect(sim.state.phase).toBe("game_over");
-    expect(sim.state.game?.endReason).toBe("load_failed");
+    // Spielende (load_failed) und nach `gameOverMs` automatisch zurück in die Lobby (ADR-038).
+    expect(sim.state.phase).toBe("lobby");
+    expect(sim.state.lastGame?.endReason).toBe("load_failed");
     expect(sim.timers.size).toBe(sim.state.timers.length);
   });
 

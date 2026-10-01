@@ -35,8 +35,8 @@ export const de = {
     join: "Beitreten",
     startGame: "Spiel starten",
     done: "Fertig",
-    rematch: "Revanche",
     reviewQuestions: "Fragen ansehen",
+    showResult: "Ergebnis ansehen",
     leaveLobby: "Lobby verlassen",
     toStart: "Zur Startseite",
     retry: "Erneut versuchen",
@@ -59,12 +59,30 @@ export const de = {
     privacy: "Datenschutz",
     /** Name fehlt beim Erstellen oder Beitreten */
     nameRequired: "Gib deinen Namen ein.",
-    /** „Beitreten“ mit weniger als 6 Zeichen */
+    /** Enter im Code-Feld mit weniger als 6 Zeichen */
     codeIncomplete: "Gib den ganzen Code ein.",
+    /** Status unter dem Code-Feld während des Auto-Beitritts (ADR-039) */
+    joining: "Trete bei …",
+    scanQr: "QR-Code scannen",
+  },
+
+  /** QR-Code einer Lobby mit der Kamera scannen (ADR-039) */
+  scan: {
+    title: "QR-Code scannen",
+    preview: "Kamerabild",
+    starting: "Kamera startet …",
+    hint: "Halte die Kamera auf den QR-Code der Lobby.",
+    foreign: "Dieser QR-Code gehört zu keiner Lobby.",
+    denied: "Kein Zugriff auf die Kamera. Erlaube ihn in den Einstellungen des Browsers.",
+    noCamera: "Keine Kamera gefunden.",
+    unsupported: "Hier lässt sich nicht scannen. Gib den Code ein.",
+    failed: "Die Kamera ließ sich nicht starten.",
   },
 
   lobby: {
     title: "Lobby",
+    /** Karte nach einem Spiel: Ergebnis und Fragen des letzten Spiels (ADR-038) */
+    lastGame: "Letztes Spiel",
     players: (count: number, max: number) => `Spieler ${count}/${max}`,
     waitingFor: (name: string) => `Warte auf ${name} …`,
     /** Zusammenfassung der Einstellungen, z. B. „3 Runden · 3 Fragen je Kat.“ */
@@ -154,6 +172,10 @@ export const de = {
     resigned: "Aufgegeben",
     history: "Spielverlauf",
     podium: "Podest",
+    /** Titel des Ergebnis-Sheets in der Lobby (Karte „Letztes Spiel“, ADR-038) */
+    title: "Ergebnis",
+    /** Spielende: danach automatisch zurück in die Lobby (ADR-038) */
+    backToLobbySoon: "Gleich geht es zurück in die Lobby …",
     ranking: "Rangliste",
     points: (points: number) => `${points} ${plural(points, "Punkt", "Punkte")}`,
   },
@@ -208,10 +230,6 @@ export const de = {
 
   pwa: {
     install: "Als App installieren",
-    /** iOS-Anleitungs-Sheet (docs/10): „Teilen“ → „Zum Home-Bildschirm“ */
-    iosInstallTitle: "Als App installieren",
-    iosInstallShare: "Tippe auf „Teilen“.",
-    iosInstallHomeScreen: "Wähle „Zum Home-Bildschirm“.",
     updateAvailable: "Neue Version verfügbar",
     update: "Aktualisieren",
     offline: "Du bist offline.",

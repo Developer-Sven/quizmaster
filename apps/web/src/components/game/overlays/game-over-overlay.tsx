@@ -5,7 +5,7 @@ import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { useEffect, useId, useRef, useState } from "react";
 import { de } from "../../../i18n/de";
-import { type CategoryCatalog, duelSides, findPlayer } from "../../../lib/client/game-view";
+import { type CategoryCatalog, duelSides } from "../../../lib/client/game-view";
 import { claimGroupFocus } from "../../../lib/client/keyboard";
 import { elapsedMs } from "../../../lib/client/phase-clock";
 import { cx } from "../../../lib/ui/cx";
@@ -16,7 +16,8 @@ import { Avatar } from "../../ui/avatar";
 import { Board } from "../../ui/board";
 import { Button } from "../../ui/button";
 import { Podium } from "../../ui/podium";
-import { type RankingEntry, RankingList } from "../../ui/ranking-list";
+import { RankingList } from "../../ui/ranking-list";
+import { boardPlayers, boardRowsUntil } from "../board-data";
 import {
   CHOREOGRAPHY,
   enterMotion,
@@ -26,10 +27,9 @@ import {
   REDUCED_FADE_MS,
   sideOffset,
 } from "../choreography";
-import { resultHeadline } from "../results";
+import { rankingEntries, resultHeadline } from "../results";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
-import { boardPlayers, boardRowsUntil } from "./round-board-overlay";
 
 type GameResults = NonNullable<PublicLobbyState["results"]>;
 
@@ -56,23 +56,6 @@ export interface GameOverOverlayProps {
   phaseStartedAt: number;
   /** Vorschau: Tafel anfangs aufgeklappt */
   defaultBoardOpen?: boolean;
-}
-
-function rankingEntries(results: GameResults, participants: readonly PublicPlayer[]): RankingEntry[] {
-  return results.ranking.flatMap((entry) => {
-    const player = findPlayer(participants, entry.playerId);
-    if (!player) return [];
-    return [
-      {
-        playerId: entry.playerId,
-        place: entry.place,
-        name: player.name,
-        color: player.color,
-        score: entry.score,
-        status: entry.status,
-      },
-    ];
-  });
 }
 
 /**

@@ -121,9 +121,7 @@ function PreviewGame({ scene }: { scene: Extract<PreviewScene, { kind: "game" }>
           onAnswer: (questionId: string, choice: AnswerIndex) => setPendingAnswer({ questionId, choice }),
           onResign: noop,
           onToggleSound: () => setSoundOn((on) => !on),
-          onRematch: noop,
           onLeave: noop,
-          onOpenReview: () => setReviewOpen(true),
         }}
       />
       <ReviewSheet

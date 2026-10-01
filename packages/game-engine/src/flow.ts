@@ -50,7 +50,7 @@ export function startGame(state: LobbyState, tx: Tx): LobbyState {
   };
   const players = state.players.map((player) => ({ ...player, status: "active" as const }));
   requestPersist(tx, "game_started");
-  return enterPhase({ ...state, players, game }, "intro", tx, { endsAt: tx.now + tx.timings.introMs });
+  return enterPhase({ ...state, players, game, lastGame: null }, "intro", tx, { endsAt: tx.now + tx.timings.introMs });
 }
 
 /** Position der nächsten aktiven Person in der Reihenfolge nach `afterIndex`, sonst `null`. */
@@ -205,9 +205,25 @@ export function onPhaseTimeout(state: LobbyState, tx: Tx): LobbyState {
       return afterReveal(state, tx);
     case "round_board":
       return afterRoundBoard(state, tx);
+    case "game_over":
+      return returnToLobby(state, tx);
     default:
       return state;
   }
+}
+
+/**
+ * Nach dem Ergebnis automatisch zurück in die Lobby (ADR-038): Ausgeschiedene verlassen sie, alle anderen sind
+ * wieder aktiv, die Einstellungen bleiben. Das beendete Spiel bleibt als `lastGame` für Rückblick, Bewerten und
+ * Melden; ein neues Spiel startet der Host wie gewohnt aus der Lobby. Ist der Host ausgeschieden, übernimmt
+ * `ensureHost` (lifecycle.ts) beim Normalisieren.
+ */
+export function returnToLobby(state: LobbyState, tx: Tx): LobbyState {
+  const players = members(state).map((player) => ({ ...player, status: "active" as const }));
+  requestPersist(tx, "players");
+  return enterPhase({ ...state, players, lastGame: state.game, game: null, lastActivityAt: tx.now }, "lobby", tx, {
+    endsAt: null,
+  });
 }
 
 /** Beendet das Spiel mit Ergebnis (`game_over`) und liefert games-Dokument + Statistik an die Shell. */
@@ -228,7 +244,8 @@ export function finishGame(state: LobbyState, reason: GameEndReason, tx: Tx): Lo
     pending: null,
     results,
   }));
-  const next = enterPhase(ended, "game_over", tx, { endsAt: null });
+  // Ergebnis für `gameOverMs`, danach automatisch zurück in die Lobby (ADR-038, Timeout → returnToLobby).
+  const next = enterPhase(ended, "game_over", tx, { endsAt: tx.now + tx.timings.gameOverMs });
   tx.effects.push({ type: "gameFinished", game: buildGameDoc(next), stats: buildGameStats(next) });
   requestPersist(tx, "game_over");
   return next;

@@ -302,7 +302,8 @@ function restartPhase(state: LobbyState, from: Phase, tx: Tx, graceMs: number): 
       return [enterPhase(state, "lobby", tx, { endsAt: null }), "none"];
     case "game_over": {
       // Beginn der Phase = Spielende (sonst spielte der Client die Siegerehrung erneut ab).
-      const over = enterPhase(state, "game_over", tx, { endsAt: null });
+      // Nach dem Neustart steht das Ergebnis noch einmal `gameOverMs`, dann geht es zurück in die Lobby (ADR-038).
+      const over = enterPhase(state, "game_over", tx, { endsAt: now + timings.gameOverMs });
       return [{ ...over, phaseStartedAt: state.game?.endedAt ?? now }, "none"];
     }
     case "intro":

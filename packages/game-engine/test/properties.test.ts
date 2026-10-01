@@ -40,6 +40,8 @@ const ALLOWED = new Set([
   "round_board>category_pick",
   "round_board>game_over",
   "game_over>intro",
+  // nach `gameOverMs` automatisch zurück in die Lobby (ADR-038)
+  "game_over>lobby",
   ...RUNNING.map((phase) => `${phase}>game_over`),
 ]);
 
