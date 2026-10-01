@@ -6,7 +6,7 @@ import type { PublicPlayer, ReviewItem } from "@quizmaster/shared";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReviewRow } from "./review-sheet";
+import { ReviewRow, reviewStatusAfterError } from "./review-sheet";
 
 const noop = () => {};
 
@@ -53,5 +53,17 @@ describe("Fragen ansehen: Melden", () => {
     expect(button).not.toMatch(/opacity-/);
     expect(button).toContain("size-11");
     expect(button).toMatch(/<svg[^>]*width="24"[^>]*class="lucide lucide-flag/);
+  });
+});
+
+describe("Fragen ansehen: Laden abgelehnt", () => {
+  it("INVALID_PHASE (Spiel dem Server nicht mehr bekannt, etwa nach Neustart) → nicht mehr abrufbar, ohne Wiederholen", () => {
+    expect(reviewStatusAfterError("INVALID_PHASE")).toBe("unavailable");
+  });
+
+  it("andere Fehler bleiben Fehler mit „Erneut versuchen“", () => {
+    expect(reviewStatusAfterError("INTERNAL")).toBe("error");
+    expect(reviewStatusAfterError("RATE_LIMITED")).toBe("error");
+    expect(reviewStatusAfterError("NETWORK")).toBe("error");
   });
 });

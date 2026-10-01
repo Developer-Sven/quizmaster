@@ -10,6 +10,7 @@ import {
 } from "@quizmaster/shared";
 import { useState } from "react";
 import { de, errorPresentations } from "../../i18n/de";
+import type { ClientErrorCode } from "../../lib/client/errors";
 import { type CategoryCatalog, categoryVisual, pickersByAnswer } from "../../lib/client/game-view";
 import { cx } from "../../lib/ui/cx";
 import {
@@ -30,7 +31,13 @@ import { ListRow } from "../ui/list-row";
 import { Sheet } from "../ui/sheet";
 import { Skeleton } from "../ui/skeleton";
 
-export type ReviewStatus = "loading" | "ready" | "error";
+/** `unavailable`: Der Server hat das Spiel nicht mehr (z. B. nach einem Neustart, ADR-038) – Wiederholen hilft nicht. */
+export type ReviewStatus = "loading" | "ready" | "error" | "unavailable";
+
+/** Zustand nach einem abgelehnten `game:review`: Phase passt nicht mehr → nicht mehr abrufbar, sonst Fehler. */
+export function reviewStatusAfterError(code: ClientErrorCode): ReviewStatus {
+  return code === "INVALID_PHASE" ? "unavailable" : "error";
+}
 
 export interface ReviewSheetProps {
   open: boolean;
@@ -107,6 +114,8 @@ export function ReviewSheet({
           <Skeleton shape="text" />
           <Skeleton shape="block" />
         </div>
+      ) : status === "unavailable" ? (
+        <EmptyState icon={ListChecksIcon} message={de.review.unavailable} />
       ) : status === "error" ? (
         <EmptyState
           icon={TriangleAlertIcon}

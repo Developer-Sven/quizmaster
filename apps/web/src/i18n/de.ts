@@ -214,6 +214,7 @@ export const de = {
     correctAnswer: "Richtige Antwort",
     yourAnswer: "Deine Antwort",
     empty: "Noch keine Fragen gespielt.",
+    unavailable: "Die Fragen dieses Spiels sind nicht mehr abrufbar.",
   },
 
   report: {

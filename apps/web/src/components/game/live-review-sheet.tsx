@@ -9,7 +9,7 @@ import { actionErrorPlacement } from "@/lib/client/errors";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
 import { gameActions, selectCategories, selectLobby, selectSelf, useGameStore } from "@/stores/game-store";
 import { loadOverlay } from "./overlays/loaders";
-import type { ReviewStatus } from "./review-sheet";
+import { type ReviewStatus, reviewStatusAfterError } from "./review-sheet";
 
 // Gleicher Loader wie preloadOverlays() (ein Chunk, beim Betreten der Lobby vorgeladen).
 const ReviewSheet = dynamic(() => loadOverlay("reviewSheet").then((mod) => mod.ReviewSheet), { ssr: false });
@@ -53,7 +53,7 @@ export function LiveReviewSheet({ open, realtimeUrl, onClose, players, selfId }:
         setItems(result.data);
         setStatus("ready");
       } else {
-        setStatus("error");
+        setStatus(reviewStatusAfterError(result.code));
         if (actionErrorPlacement(result.code) === "resync") client.resync();
       }
     });
