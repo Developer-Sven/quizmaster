@@ -55,6 +55,12 @@ export interface ToastEntry {
 export interface PendingAnswer {
   questionId: string;
   choice: AnswerIndex;
+  /**
+   * `true`: kein Ack (Zeitüberschreitung, Trennung) – ob der Server die Antwort hat, klärt erst der nächste
+   * `lobby:self` (nach `lobby:resume`). Kennt er sie nicht, wird sie wieder freigegeben (sonst bliebe sie
+   * fälschlich „eingeloggt“ und die Person könnte nicht erneut antworten). `false`: vom Server bestätigt.
+   */
+  unconfirmed?: boolean;
 }
 
 export interface PendingPick {
@@ -212,11 +218,29 @@ export const gameActions = {
     return true;
   },
 
-  /** Übernimmt `lobby:self` (nur für die aktuelle Lobby). */
+  /**
+   * Übernimmt `lobby:self` (nur für die aktuelle Lobby) und gleicht eine unbestätigte Antwort ab: Der Server
+   * ist autoritativ – kennt er sie nicht, kam sie nie an. Läuft die Frage noch, gibt es einen Hinweis zum
+   * erneuten Tippen; sonst zeigt die Auflösung „keine Antwort“.
+   */
   applyPrivateState(self: PrivatePlayerState): void {
     const state = useGameStore.getState();
     if (state.exit) return;
-    useGameStore.setState({ self });
+    const pending = state.pendingAnswer;
+    if (pending?.unconfirmed !== true) {
+      useGameStore.setState({ self });
+      return;
+    }
+    if (self.myAnswer?.questionId === pending.questionId) {
+      useGameStore.setState({ self, pendingAnswer: { ...pending, unconfirmed: false } });
+      return;
+    }
+    const stillOpen = state.lobby?.phase === "question" && state.lobby.question?.id === pending.questionId;
+    useGameStore.setState({
+      self,
+      pendingAnswer: null,
+      toasts: stillOpen ? withToast(state.toasts, "error", de.game.answerNotReceived) : state.toasts,
+    });
   },
 
   /** Server-Hinweis (`notice`). HOST_CHANGED/PLAYER_LEFT ergeben sich aus dem Zustandsvergleich. */
@@ -322,6 +346,15 @@ export const gameActions = {
 
   setPendingAnswer(pending: PendingAnswer | null): void {
     useGameStore.setState({ pendingAnswer: pending });
+  },
+
+  /** `game:answer` ohne Ack (`NETWORK`): Antwort bis zum nächsten `lobby:self` als unbestätigt markieren. */
+  answerUnconfirmed(questionId: string): void {
+    useGameStore.setState((state) =>
+      state.pendingAnswer?.questionId === questionId
+        ? { pendingAnswer: { ...state.pendingAnswer, unconfirmed: true } }
+        : {},
+    );
   },
 
   setPendingPick(pending: PendingPick | null): void {

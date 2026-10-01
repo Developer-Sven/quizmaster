@@ -13,7 +13,7 @@ import {
   type Repositories,
 } from "@quizmaster/db";
 import type { Db, MongoClient } from "mongodb";
-import type { WebEnv } from "../../env";
+import { isDevOrTestDatabase, type WebEnv } from "../../env";
 
 export const WEB_APP_NAME = "quizmaster-web";
 
@@ -30,7 +30,7 @@ export interface WebData {
  * `next start` setzt immer production.
  */
 export function allowInsecureDatabaseTransport(dbName: string): boolean {
-  return dbName.endsWith("_dev") || dbName.endsWith("_test");
+  return isDevOrTestDatabase(dbName);
 }
 
 export interface ConnectWebDataOptions {

@@ -25,9 +25,13 @@ export default async function LobbyPage({ params }: LobbyPageProps) {
   if (!code) notFound();
   if (raw !== code) redirect(lobbyPath(code));
   const config = await getPublicRuntimeConfig();
-  // Dev-Bots nur, wenn der Realtime-Server sie erlaubt (docs/05 §Dev-Bots; in Produktion nie gesetzt).
-  const devBots = process.env.DEV_BOTS_ENABLED === "true";
+  // Dev-Bots nur, wenn auch der Realtime-Server sie erlaubt (docs/05 §Dev-Bots; zod-validiert, nie in Produktion).
   return (
-    <LobbyEntry code={code} displayCode={displayLobbyCode(code)} realtimeUrl={config.realtimeUrl} devBots={devBots} />
+    <LobbyEntry
+      code={code}
+      displayCode={displayLobbyCode(code)}
+      realtimeUrl={config.realtimeUrl}
+      devBots={config.devBots}
+    />
   );
 }

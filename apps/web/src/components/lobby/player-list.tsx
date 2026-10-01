@@ -5,7 +5,6 @@ import { useId, useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { PlayerRow } from "@/components/ui/player-row";
 import { de } from "@/i18n/de";
-import { clientTexts } from "@/lib/client/texts";
 
 export interface PlayerListProps {
   players: readonly PublicPlayer[];
@@ -40,10 +39,10 @@ export function PlayerList({ players, maxPlayers, selfId, canKick, onKick }: Pla
       </ul>
       <Dialog
         open={target !== null}
-        title={clientTexts.lobby.kickTitle(target?.name ?? "")}
-        description={clientTexts.lobby.kickDescription(target?.name ?? "")}
-        confirmLabel={clientTexts.lobby.kickConfirm}
-        cancelLabel={clientTexts.lobby.cancel}
+        title={de.dialogs.kick.title(target?.name ?? "")}
+        description={de.dialogs.kick.description(target?.name ?? "")}
+        confirmLabel={de.dialogs.kick.confirm}
+        cancelLabel={de.dialogs.kick.cancel}
         onConfirm={() => {
           if (target) onKick(target.id);
           setTarget(null);

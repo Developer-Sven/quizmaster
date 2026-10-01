@@ -4,10 +4,10 @@
  * benötigte Felder“; ADR-021), kurz im Prozess gecacht – davor cacht das CDN (s-maxage=300).
  */
 import { USER_READ_MAX_TIME_MS } from "@quizmaster/db";
+import { type PublicCategory, publicCategorySchema } from "@quizmaster/shared";
 import type { CategoryDoc } from "@quizmaster/shared/documents";
 import type { Collection } from "mongodb";
 import type { Logger } from "pino";
-import { type PublicCategory, publicCategorySchema } from "./api-schemas";
 
 export const CATEGORIES_CACHE_MS = 30_000;
 

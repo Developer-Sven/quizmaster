@@ -9,6 +9,7 @@ const KEYS = {
   sound: "qm.sound",
   membership: "qm.lobby",
   categories: "qm.categories",
+  session: "qm.session",
 } as const;
 
 let warned = false;
@@ -86,6 +87,19 @@ export function readMembership(): string | null {
 
 export function writeMembership(code: string | null): void {
   write(KEYS.membership, code);
+}
+
+/**
+ * Merker „diese Person hat (wahrscheinlich) ein gültiges Session-Cookie“ – nur ein Hinweis, kein Geheimnis
+ * (das Cookie selbst ist HttpOnly). Damit holt der Client beim Wiederkommen direkt ein Ticket, statt vorher
+ * `POST /api/session` aufzurufen; beim ersten Besuch legt er die Session ohne fehlschlagenden Ticket-Versuch an.
+ */
+export function readSessionHint(): boolean {
+  return read(KEYS.session) === "1";
+}
+
+export function writeSessionHint(known: boolean): void {
+  write(KEYS.session, known ? "1" : null);
 }
 
 /** Gespeicherte Kategorie-Darstellungen einer Lobby als JSON-Text (Prüfung beim Einlesen, siehe categories.ts). */

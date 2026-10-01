@@ -144,6 +144,31 @@ describe("Texte (docs/09 §11)", () => {
     expect(spokenCategoryName("Essen & Trinken")).toBe("Essen und Trinken");
   });
 
+  it("enthält auch die früheren Client-Zusatztexte (Start, Lobby, Entfernen-Dialog, Spiel, Review)", () => {
+    expect([de.start.nameRequired, de.start.codeIncomplete]).toEqual([
+      "Gib deinen Namen ein.",
+      "Gib den ganzen Code ein.",
+    ]);
+    expect([de.lobby.codeCopied, de.lobby.linkCopied, de.lobby.copyFailed, de.lobby.addBot]).toEqual([
+      "Code kopiert.",
+      "Link kopiert.",
+      "Kopieren nicht möglich.",
+      "Bot hinzufügen",
+    ]);
+    expect(de.lobby.inviteText("ABC 234")).toBe("Tritt meiner Lobby bei: ABC 234");
+    expect(de.dialogs.kick.title("Ben")).toBe("Ben entfernen?");
+    expect(de.dialogs.kick.description("Ben")).toBe("Ben kann dieser Lobby nicht wieder beitreten.");
+    expect([de.dialogs.kick.confirm, de.dialogs.kick.cancel]).toEqual(["Entfernen", "Abbrechen"]);
+    expect(de.announcements.roundPickSelf(2, 3)).toBe("Runde 2 von 3. Wähle eine Kategorie.");
+    expect([de.a11y.playerStrip, de.game.unknownCategory, de.review.empty]).toEqual([
+      "Spielstand",
+      "Kategorie",
+      "Noch keine Fragen gespielt.",
+    ]);
+    expect(de.game.answerNotReceived).toBe("Deine Antwort kam nicht an. Tippe noch einmal.");
+    expect(de.pages.notFound).toBe("Seite nicht gefunden.");
+  });
+
   it("nennt alle fünf Meldegründe und den Wartungstext mit Rückfall", () => {
     expect(REPORT_REASONS.map((reason) => de.report.reasons[reason])).toEqual([
       "Falsch",

@@ -10,7 +10,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { de } from "@/i18n/de";
 import { connectedCount, hostPlayer } from "@/lib/client/game-view";
-import { clientTexts } from "@/lib/client/texts";
 import { ChevronLeftIcon, PlayIcon, PlusIcon, Settings2Icon } from "@/lib/ui/icons";
 import { InvitePanel } from "./invite-panel";
 import { PlayerList } from "./player-list";
@@ -135,7 +134,7 @@ export function LobbyView({
           {isHost && devBots && onAddBot ? (
             <div className="flex">
               <Button variant="ghost" size="compact" icon={PlusIcon} onClick={onAddBot} data-testid="lobby-add-bot">
-                {clientTexts.lobby.addBot}
+                {de.lobby.addBot}
               </Button>
             </div>
           ) : null}

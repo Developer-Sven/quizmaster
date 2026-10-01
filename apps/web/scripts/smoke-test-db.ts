@@ -264,19 +264,29 @@ async function main(): Promise<void> {
       health.headers.get("cache-control") === "no-store",
   );
 
-  // --- Rate-Limit Session (IP 10 / 10 min, Mongo-Store) ---
+  // --- Rate-Limit Session (IP 10 / 10 min, Mongo-Store) – zählt nur NEUE Sessions ---
+  let reusedOk = true;
+  for (let i = 0; i < 12; i++) {
+    const response = await post("/api/session", { cookie: `kd_sid=${cookie?.value ?? ""}` });
+    reusedOk &&= response.status === 200;
+    await response.text();
+  }
+  check("Weiterverwenden zählt nicht gegen das Anlege-Limit (12× 200)", reusedOk);
   let limited: Response | undefined;
   for (let i = 0; i < 12 && limited === undefined; i++) {
-    const response = await post("/api/session", { cookie: `kd_sid=${cookie?.value ?? ""}` });
+    const response = await post("/api/session");
     if (response.status === 429) limited = response;
     else await response.text();
   }
   const retryAfter = Number(limited?.headers.get("retry-after"));
   check(
-    "Session-Limit → 429 mit Retry-After",
+    "Session-Limit (neue Gäste) → 429 mit Retry-After",
     limited !== undefined && retryAfter > 0 && retryAfter <= 600,
     `Retry-After ${retryAfter}`,
   );
+  const stillReused = await post("/api/session", { cookie: `kd_sid=${cookie?.value ?? ""}` });
+  check("Bestehende Session bleibt trotz ausgeschöpftem Anlege-Limit nutzbar", stillReused.status === 200);
+  await stillReused.text();
   check(
     "Rate-Limit-Zähler im Mongo-Store (Test-Präfix)",
     (await db.db.collection(`${db.prefix}rateLimits`).countDocuments()) > 0,

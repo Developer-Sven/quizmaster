@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { myChoiceFor } from "../lib/client/game-view";
 import { testLobby, testPlayer, testQuestion, testSelf } from "../lib/client/test-support";
 import {
   gameActions,
@@ -71,6 +72,57 @@ describe("optimistische Antwort und Wahl", () => {
       testLobby({ rev: 3, phase: "question", question: testQuestion({ id: "q2", index: 2 }) }),
     );
     expect(state().pendingAnswer).toBeNull();
+  });
+
+  it("gibt eine unbestätigte Antwort frei, wenn lobby:self sie nicht kennt – mit Hinweis, solange die Frage läuft", () => {
+    const question = testQuestion({ id: "q1" });
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", question }));
+    gameActions.applyPrivateState(testSelf("p1"));
+    gameActions.setPendingAnswer({ questionId: "q1", choice: 1 });
+    // Kein Ack (NETWORK): ob der Server sie hat, klärt erst der nächste lobby:self (nach resume).
+    gameActions.answerUnconfirmed("q1");
+    expect(myChoiceFor(question, state().self, state().pendingAnswer)).toBe(1);
+    gameActions.applyPrivateState(testSelf("p1", { myAnswer: null }));
+    expect(state().pendingAnswer).toBeNull();
+    expect(myChoiceFor(question, state().self, state().pendingAnswer)).toBeNull();
+    expect(state().toasts.map((toast) => [toast.kind, toast.text])).toEqual([
+      ["error", "Deine Antwort kam nicht an. Tippe noch einmal."],
+    ]);
+  });
+
+  it("behält eine unbestätigte Antwort, die der Server doch bekommen hat", () => {
+    const question = testQuestion({ id: "q1" });
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", question }));
+    gameActions.setPendingAnswer({ questionId: "q1", choice: 3 });
+    gameActions.answerUnconfirmed("q1");
+    gameActions.applyPrivateState(testSelf("p1", { myAnswer: { questionId: "q1", choice: 3 } }));
+    expect(state().pendingAnswer).toEqual({ questionId: "q1", choice: 3, unconfirmed: false });
+    expect(myChoiceFor(question, state().self, state().pendingAnswer)).toBe(3);
+    // Spätere lobby:self ohne Antwort geben eine bestätigte Antwort nicht mehr frei.
+    gameActions.applyPrivateState(testSelf("p1", { myAnswer: null }));
+    expect(state().pendingAnswer?.choice).toBe(3);
+    expect(state().toasts).toEqual([]);
+  });
+
+  it("lässt eine laufende Antwort (Ack ausstehend) trotz lobby:self ohne Antwort eingeloggt", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", question: testQuestion({ id: "q1" }) }));
+    gameActions.setPendingAnswer({ questionId: "q1", choice: 0 });
+    gameActions.applyPrivateState(testSelf("p1", { myAnswer: null }));
+    expect(state().pendingAnswer).toEqual({ questionId: "q1", choice: 0 });
+    // Ein verspätetes NETWORK einer anderen Frage ändert nichts.
+    gameActions.answerUnconfirmed("q0");
+    expect(state().pendingAnswer?.unconfirmed).toBeUndefined();
+  });
+
+  it("gibt eine unbestätigte Antwort nach Fristende ohne Hinweis frei (Auflösung zeigt „keine Antwort“)", () => {
+    const question = testQuestion({ id: "q1" });
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "question", question }));
+    gameActions.setPendingAnswer({ questionId: "q1", choice: 2 });
+    gameActions.answerUnconfirmed("q1");
+    gameActions.applyPublicState(testLobby({ rev: 2, phase: "reveal", question }));
+    gameActions.applyPrivateState(testSelf("p1", { myAnswer: null }));
+    expect(state().pendingAnswer).toBeNull();
+    expect(state().toasts).toEqual([]);
   });
 
   it("behält die eigene Wahl nur in derselben Kategoriewahl", () => {

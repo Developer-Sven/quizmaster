@@ -37,17 +37,19 @@ describe("Session und Ticket", () => {
     vi.unstubAllGlobals();
   });
 
-  it("legt die Session einmal pro Seite an (POST /api/session mit {})", async () => {
+  it("teilt gleichzeitige Aufrufe (ein POST /api/session mit {}), danach fragt ein Aufruf neu", async () => {
     fetchMock.mockResolvedValue(jsonResponse(201, { created: true }));
-    await ensureSession();
-    await ensureSession();
+    await Promise.all([ensureSession(), ensureSession()]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("/api/session");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe("{}");
-    await ensureSession({ force: true });
+    await ensureSession();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Ein Turnstile-Token wird nie mit einer laufenden Anfrage ohne Token zusammengelegt.
+    await Promise.all([ensureSession(), ensureSession({ turnstileToken: "tok" })]);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("versucht es nach einem Fehler erneut und meldet den Code", async () => {

@@ -1,19 +1,10 @@
 /**
- * Vorladen der Spiel-Overlays (docs/07 §Code-Splitting): Sie liegen in eigenen Chunks (`dynamic()` in
- * der Stage) und werden beim Betreten der Lobby alle geladen, damit im Spiel nichts nachgeladen wird.
+ * Vorladen der Spiel-Overlays (docs/07 §Code-Splitting): Sie liegen in eigenen Chunks und werden beim
+ * Betreten der Lobby alle geladen, damit im Spiel nichts nachgeladen wird. Dieselben Loader nutzt `dynamic()`
+ * in Stage und LiveGame (`loaders.ts`) – nur so trifft das Vorladen genau die Chunks des Spiels.
  * Das `ConnectionOverlay` gehört ins Haupt-Bundle und fehlt hier bewusst.
  */
-const loaders = [
-  () => import("./intro-overlay"),
-  () => import("./category-pick-overlay"),
-  () => import("./category-reveal-overlay"),
-  () => import("./question-overlay"),
-  () => import("./answer-reveal-overlay"),
-  () => import("./turn-summary-overlay"),
-  () => import("./round-board-overlay"),
-  () => import("./game-over-overlay"),
-  () => import("../review-sheet"),
-] as const;
+import { overlayLoaders } from "./loaders";
 
 let started = false;
 
@@ -21,7 +12,7 @@ let started = false;
 export function preloadOverlays(): void {
   if (started) return;
   started = true;
-  for (const load of loaders) {
+  for (const load of Object.values(overlayLoaders)) {
     load().catch((error: unknown) => {
       console.warn("Overlay konnte nicht vorgeladen werden:", error instanceof Error ? error.name : "unbekannt");
     });

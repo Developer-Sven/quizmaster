@@ -2,9 +2,8 @@
  * Öffentliche GET-Endpunkte: `GET /api/categories` (spielbare Kategorien, CDN-cachebar, IP 60/min) und
  * `GET /api/health` (nur `{ ok }`, IP 60/min, no-store; 503 wenn die Datenbank nicht antwortet).
  */
-import type { HealthResponse } from "@quizmaster/shared";
+import type { CategoriesResponse, HealthResponse } from "@quizmaster/shared";
 import { NextResponse } from "next/server";
-import type { CategoriesResponse } from "../api-schemas";
 import { noStoreJson, retryAfterSeconds } from "../http";
 import { clientAddress } from "../request-guards";
 import { consumeRateLimit } from "./common";

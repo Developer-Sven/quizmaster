@@ -7,18 +7,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { TURNSTILE_TEST_SECRET_KEYS } from "../../env";
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-/**
- * Offizielle Test-Secrets von Cloudflare (immer gültig / immer ungültig / „bereits verwendet“). Siteverify
- * meldet dafür einen Platzhalter-Hostnamen – die Hostname-Prüfung entfällt nur für diese Schlüssel.
- */
-export const TURNSTILE_TEST_SECRET_KEYS: readonly string[] = [
-  "1x0000000000000000000000000000000AA",
-  "2x0000000000000000000000000000000AA",
-  "3x0000000000000000000000000000000AA",
-];
 
 /** Tokens sind 300 s gültig – so lange merken wir verbrauchte Tokens lokal. */
 export const TURNSTILE_TOKEN_TTL_MS = 300_000;
@@ -70,6 +61,8 @@ export function createTurnstileVerifier(options: TurnstileVerifierOptions): Turn
   const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
   const timeoutMs = options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
+  // Cloudflare-Test-Secrets (env.ts, nur mit *_dev/*_test-DB erlaubt) melden einen Platzhalter-Hostnamen –
+  // die Hostname-Prüfung entfällt nur für sie.
   const checkHostname = !TURNSTILE_TEST_SECRET_KEYS.includes(options.secretKey);
   const allowed = new Set(options.allowedHostnames.map((host) => host.toLowerCase()));
   /** Verbrauchte Tokens (sha256) → Ablaufzeitpunkt. */

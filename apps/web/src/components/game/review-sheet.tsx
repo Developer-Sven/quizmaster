@@ -19,7 +19,6 @@ import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { de, errorPresentations } from "@/i18n/de";
 import { type CategoryCatalog, categoryVisual, pickersByAnswer } from "@/lib/client/game-view";
-import { clientTexts } from "@/lib/client/texts";
 import { cx } from "@/lib/ui/cx";
 import {
   CircleCheckIcon,
@@ -119,7 +118,7 @@ export function ReviewSheet({
           }
         />
       ) : items.length === 0 ? (
-        <EmptyState icon={ListChecksIcon} message={clientTexts.review.empty} />
+        <EmptyState icon={ListChecksIcon} message={de.review.empty} />
       ) : (
         <ol data-testid="review-list" className="flex flex-col">
           {items.map((item) => (

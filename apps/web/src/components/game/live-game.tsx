@@ -8,6 +8,7 @@ import { StatusBanners } from "@/components/app/status-banners";
 import { useLobbyActions } from "@/components/lobby/use-lobby-actions";
 import { de } from "@/i18n/de";
 import { actionErrorPlacement } from "@/lib/client/errors";
+import { reviewSheetOpen } from "@/lib/client/game-view";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
 import { writeStoredSoundOn } from "@/lib/client/storage";
 import {
@@ -22,12 +23,14 @@ import {
   useGameStore,
 } from "@/stores/game-store";
 import { GameScreen } from "./game-screen";
+import { overlayLoaders } from "./overlays/loaders";
 import type { ReviewStatus } from "./review-sheet";
 
 /** Wartezeit vor dem zweiten Versuch nach TOO_EARLY (Uhrenabgleich minimal ungenau). */
 const TOO_EARLY_RETRY_MS = 150;
 
-const ReviewSheet = dynamic(() => import("./review-sheet").then((mod) => mod.ReviewSheet), { ssr: false });
+// Gleicher Loader wie preloadOverlays() (ein Chunk, beim Betreten der Lobby vorgeladen).
+const ReviewSheet = dynamic(() => overlayLoaders.reviewSheet().then((mod) => mod.ReviewSheet), { ssr: false });
 
 export interface LiveGameProps {
   realtimeUrl: string;
@@ -44,7 +47,8 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
   const syncGeneration = useGameStore(selectSyncGeneration);
   const soundOn = useGameStore(selectSoundOn);
   const actions = useLobbyActions(realtimeUrl);
-  const [reviewOpen, setReviewOpen] = useState(false);
+  /** `phaseStartedAt` des Spielendes, zu dem „Fragen ansehen“ geöffnet wurde (sonst `null`) */
+  const [reviewFor, setReviewFor] = useState<number | null>(null);
   const [busy, setBusy] = useState<{ rematch?: boolean; leave?: boolean; resign?: boolean }>({});
   if (!lobby) return null;
 
@@ -69,8 +73,15 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
       result = await client.emit("game:answer", { questionId, choice });
     }
     if (result.ok) return;
-    // Ohne Ack (kam evtl. an) oder bereits beantwortet bleibt sie eingeloggt – `lobby:self` klärt es.
-    if (result.code === "NETWORK" || result.code === "ALREADY_ANSWERED") return;
+    // Bereits beantwortet: Der Server hat eine Antwort – sie bleibt eingeloggt, `lobby:self` zeigt welche.
+    if (result.code === "ALREADY_ANSWERED") return;
+    if (result.code === "NETWORK") {
+      // Kein Ack: kam vielleicht nie an. Bis `lobby:self` es klärt (nach dem Reconnect bzw. sofort per
+      // Resync) bleibt sie eingeloggt; kennt der Server sie nicht, wird sie wieder freigegeben.
+      gameActions.answerUnconfirmed(questionId);
+      client.resync();
+      return;
+    }
     // Nicht angenommen: wieder freigeben (still synchronisieren bzw. Hinweis).
     gameActions.setPendingAnswer(null);
     actions.fail(result.code);
@@ -111,13 +122,13 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
           },
           onRematch: () => void rematch(),
           onLeave: () => void leave("leave"),
-          onOpenReview: () => setReviewOpen(true),
+          onOpenReview: () => setReviewFor(lobby.phaseStartedAt),
         }}
       />
       <LiveReviewSheet
-        open={reviewOpen && lobby.phase === "game_over"}
+        open={reviewSheetOpen(reviewFor, lobby)}
         realtimeUrl={realtimeUrl}
-        onClose={() => setReviewOpen(false)}
+        onClose={() => setReviewFor(null)}
       />
     </>
   );

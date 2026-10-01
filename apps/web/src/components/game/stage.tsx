@@ -17,36 +17,28 @@ import { type StageKind, stageAt, stageBoundaries } from "@/lib/client/phase-clo
 import { useServerNow } from "@/lib/client/use-server-clock";
 import { MotionProvider } from "@/lib/ui/motion";
 import type { PendingAnswer, PendingPick } from "@/stores/game-store";
+import { overlayLoaders } from "./overlays/loaders";
 
-// Overlays in eigenen Chunks (docs/07); preloadOverlays() lädt sie beim Betreten der Lobby vor.
-const IntroOverlay = dynamic(() => import("./overlays/intro-overlay").then((mod) => mod.IntroOverlay), {
+// Overlays in eigenen Chunks (docs/07) – über dieselben Loader, die preloadOverlays() beim Betreten der Lobby
+// aufruft (ein Chunk je Overlay, im Spiel wird nichts nachgeladen).
+const IntroOverlay = dynamic(() => overlayLoaders.intro().then((mod) => mod.IntroOverlay), { ssr: false });
+const CategoryPickOverlay = dynamic(() => overlayLoaders.categoryPick().then((mod) => mod.CategoryPickOverlay), {
   ssr: false,
 });
-const CategoryPickOverlay = dynamic(
-  () => import("./overlays/category-pick-overlay").then((mod) => mod.CategoryPickOverlay),
-  { ssr: false },
-);
-const CategoryRevealOverlay = dynamic(
-  () => import("./overlays/category-reveal-overlay").then((mod) => mod.CategoryRevealOverlay),
-  { ssr: false },
-);
-const QuestionOverlay = dynamic(() => import("./overlays/question-overlay").then((mod) => mod.QuestionOverlay), {
+const CategoryRevealOverlay = dynamic(() => overlayLoaders.categoryReveal().then((mod) => mod.CategoryRevealOverlay), {
   ssr: false,
 });
-const AnswerRevealOverlay = dynamic(
-  () => import("./overlays/answer-reveal-overlay").then((mod) => mod.AnswerRevealOverlay),
-  { ssr: false },
-);
-const TurnSummaryOverlay = dynamic(
-  () => import("./overlays/turn-summary-overlay").then((mod) => mod.TurnSummaryOverlay),
-  { ssr: false },
-);
-const RoundBoardOverlay = dynamic(() => import("./overlays/round-board-overlay").then((mod) => mod.RoundBoardOverlay), {
+const QuestionOverlay = dynamic(() => overlayLoaders.question().then((mod) => mod.QuestionOverlay), { ssr: false });
+const AnswerRevealOverlay = dynamic(() => overlayLoaders.answerReveal().then((mod) => mod.AnswerRevealOverlay), {
   ssr: false,
 });
-const GameOverOverlay = dynamic(() => import("./overlays/game-over-overlay").then((mod) => mod.GameOverOverlay), {
+const TurnSummaryOverlay = dynamic(() => overlayLoaders.turnSummary().then((mod) => mod.TurnSummaryOverlay), {
   ssr: false,
 });
+const RoundBoardOverlay = dynamic(() => overlayLoaders.roundBoard().then((mod) => mod.RoundBoardOverlay), {
+  ssr: false,
+});
+const GameOverOverlay = dynamic(() => overlayLoaders.gameOver().then((mod) => mod.GameOverOverlay), { ssr: false });
 
 export interface StageProps {
   lobby: PublicLobbyState;

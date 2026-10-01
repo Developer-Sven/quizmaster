@@ -1,8 +1,8 @@
 import { createTestDatabase, type TestDatabase } from "@quizmaster/db/testing";
+import { categoriesResponseSchema } from "@quizmaster/shared";
 import type { CategoryDoc } from "@quizmaster/shared/documents";
 import { MongoClient } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { categoriesResponseSchema } from "../api-schemas";
 import { createServerContext, type ServerContext } from "../context";
 import { createHealthProbe } from "../health";
 import { createLogger } from "../logger";

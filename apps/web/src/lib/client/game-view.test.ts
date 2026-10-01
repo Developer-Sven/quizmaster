@@ -20,6 +20,7 @@ import {
   questionAnswerStates,
   rankChanges,
   revealAnswerStates,
+  reviewSheetOpen,
   summarizeTurn,
 } from "./game-view";
 import { testLobby, testPlayer, testQuestion, testRow, testSelf } from "./test-support";
@@ -183,6 +184,16 @@ describe("Spielende", () => {
       ],
     };
     expect(duelOutcome(resigned, "p1")).toBe("lost");
+  });
+
+  it("„Fragen ansehen“ gehört zu genau einem Spielende – nach einer Revanche öffnet es sich nicht von selbst", () => {
+    const firstGameOver = testLobby({ phase: "game_over", phaseStartedAt: 50_000 });
+    expect(reviewSheetOpen(null, firstGameOver)).toBe(false);
+    expect(reviewSheetOpen(50_000, firstGameOver)).toBe(true);
+    // Revanche: neues Spiel läuft – das Sheet ist zu …
+    expect(reviewSheetOpen(50_000, testLobby({ phase: "intro", phaseStartedAt: 60_000 }))).toBe(false);
+    // … und bleibt es auch beim nächsten Spielende, obwohl es beim ersten offen war.
+    expect(reviewSheetOpen(50_000, testLobby({ phase: "game_over", phaseStartedAt: 90_000 }))).toBe(false);
   });
 });
 

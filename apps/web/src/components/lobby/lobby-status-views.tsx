@@ -28,6 +28,24 @@ export function LobbyExitView({ exit }: { exit: LobbyExit }) {
 }
 
 /**
+ * Verbunden, aber auch nach längerer Zeit kein Lobby-Zustand (z. B. `lobby:resume` scheitert dauerhaft):
+ * allgemeiner Hinweis und „Erneut versuchen“ (Neuladen) statt eines endlosen Skeletons (docs/09 Regel 11).
+ */
+export function LobbyStalledView() {
+  return (
+    <ErrorView
+      testId="lobby-stalled"
+      message={errorText("INTERNAL")}
+      action={
+        <Button variant="primary" block onClick={reloadPage}>
+          {de.actions.retry}
+        </Button>
+      }
+    />
+  );
+}
+
+/**
  * Endgültiger Verbindungsfehler (Sitzung abgelaufen, gesperrt, veraltete Version): Hinweis und Neuladen
  * („Aktualisieren“ bei UPDATE_REQUIRED, sonst „Erneut versuchen“).
  */

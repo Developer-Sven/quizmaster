@@ -2,12 +2,12 @@
  * Bausteine, die mehrere Handler teilen: Rate-Limit verbrauchen, Session aus dem Cookie lesen, Session-Cookie
  * (neu) setzen, Turnstile-Token prüfen. Alle Ablehnungen als `ApiError` mit festem Code.
  */
-import { type RateLimitScope, SESSION_COOKIE, type SessionClaims } from "@quizmaster/shared";
+import type { RateLimitScope, SessionClaims } from "@quizmaster/shared";
 import type { NextRequest, NextResponse } from "next/server";
 import type { ServerContext } from "../context";
 import { ApiError } from "../http";
 import type { WebEndpoint } from "../rate-limit";
-import { sessionCookie, signSessionToken, verifySessionToken } from "../tokens";
+import { sessionCookie, sessionCookieName, signSessionToken, verifySessionToken } from "../tokens";
 
 export const nowSeconds = (ms: number) => Math.floor(ms / 1_000);
 
@@ -26,13 +26,16 @@ export async function consumeRateLimit(
   throw new ApiError("SERVER_BUSY", "Rate-Limit nicht prüfbar");
 }
 
-/** Gültige Session-Claims aus dem Cookie `kd_sid` oder `null` (fehlt, abgelaufen, manipuliert). */
+/**
+ * Gültige Session-Claims aus dem Session-Cookie (`__Host-kd_sid` bei https, sonst `kd_sid`, ADR-033) oder
+ * `null` (fehlt, abgelaufen, manipuliert, falscher Name).
+ */
 export async function readSession(
   request: NextRequest,
   ctx: ServerContext,
   nowSec: number,
 ): Promise<SessionClaims | null> {
-  const token = request.cookies.get(SESSION_COOKIE.name)?.value;
+  const token = request.cookies.get(sessionCookieName(ctx.env.httpsOrigin))?.value;
   if (token === undefined) return null;
   return verifySessionToken(token, ctx.env.sessionSecret, nowSec);
 }

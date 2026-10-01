@@ -4,7 +4,6 @@ import { de } from "@/i18n/de";
 import { actionErrorPlacement, type ClientErrorCode, errorText } from "@/lib/client/errors";
 import { getRealtimeClient, type RealtimeClient } from "@/lib/client/realtime-client";
 import { copyText, shareOrCopy } from "@/lib/client/share";
-import { clientTexts } from "@/lib/client/texts";
 import { gameActions } from "@/stores/game-store";
 
 export interface LobbyActions {
@@ -31,14 +30,14 @@ export function useLobbyActions(realtimeUrl: string): LobbyActions {
 
   const copyCode = async (code: string) => {
     const copied = await copyText(code);
-    if (copied) gameActions.showToast("info", clientTexts.lobby.codeCopied);
-    else gameActions.showToast("error", clientTexts.lobby.copyFailed);
+    if (copied) gameActions.showToast("info", de.lobby.codeCopied);
+    else gameActions.showToast("error", de.lobby.copyFailed);
   };
 
   const shareInvite = async (displayCode: string, url: string) => {
-    const outcome = await shareOrCopy({ title: de.app.name, text: clientTexts.lobby.inviteText(displayCode), url });
-    if (outcome === "copied") gameActions.showToast("info", clientTexts.lobby.linkCopied);
-    else if (outcome === "failed") gameActions.showToast("error", clientTexts.lobby.copyFailed);
+    const outcome = await shareOrCopy({ title: de.app.name, text: de.lobby.inviteText(displayCode), url });
+    if (outcome === "copied") gameActions.showToast("info", de.lobby.linkCopied);
+    else if (outcome === "failed") gameActions.showToast("error", de.lobby.copyFailed);
   };
 
   return { client, fail, copyCode, shareInvite };

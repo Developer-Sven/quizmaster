@@ -69,21 +69,39 @@ describe("Start-Checks (instrumentation → runWebStartupChecks)", () => {
   it("entfernter Host ohne TLS bei einer Nicht-Dev/Test-Datenbank → Exit 1 (fail-closed), Passwort nie im Log", async () => {
     const { lines, logger, exit } = capture();
     const uri = "mongodb://nutzer:supergeheim@db.example.invalid:27017/?replicaSet=rs0";
-    const env = parseWebEnv(
-      testEnvSource({
-        MONGODB_URI: uri,
-        MONGODB_DB: "quizmaster",
-        TURNSTILE_SITE_KEY: TURNSTILE_TEST.siteKey,
-        TURNSTILE_SECRET_KEY: TURNSTILE_TEST.secretKey,
-      }),
-    );
+    const env = parseWebEnv(testEnvSource({ MONGODB_URI: uri, MONGODB_DB: "quizmaster" }));
     await expect(runWebStartupChecks({ logger, exit, env: () => env })).rejects.toThrow(ExitCalled);
     const text = lines.join("");
     expect(text).toContain("TLS_REQUIRED");
-    expect(text).toContain("Cloudflare-Testschlüssel");
     expect(text).not.toContain("supergeheim");
     expect(text).not.toContain("nutzer");
     await closeMongoClient(createMongoClient(uri, { appName: WEB_APP_NAME, maxPoolSize: 10 }));
+  });
+
+  it("Turnstile-Testschlüssel außerhalb von *_dev/*_test → Exit 1 (fatal) noch vor der Datenbank", async () => {
+    const testKeys = { TURNSTILE_SITE_KEY: TURNSTILE_TEST.siteKey, TURNSTILE_SECRET_KEY: TURNSTILE_TEST.secretKey };
+    // 1. über die Env-Regel (so startet der echte Prozess: getWebEnv → parseWebEnv)
+    const viaEnv = capture();
+    const fromSource = () => parseWebEnv(testEnvSource({ ...testKeys, MONGODB_DB: "quizmaster" }));
+    await expect(runWebStartupChecks({ logger: viaEnv.logger, exit: viaEnv.exit, env: fromSource })).rejects.toThrow(
+      ExitCalled,
+    );
+    expect(viaEnv.exit).toHaveBeenCalledWith(1);
+    expect(viaEnv.lines.join("")).toContain("TURNSTILE_SECRET_KEY");
+
+    // 2. Verteidigung in der Tiefe: auch eine anders entstandene Env bricht ab – ohne DB-Verbindung.
+    const direct = capture();
+    const base = parseWebEnv(testEnvSource({ ...testKeys, MONGODB_URI: "mongodb://db.example.invalid:27017/" }));
+    const forged = { ...base, mongodbDb: "quizmaster" };
+    await expect(runWebStartupChecks({ logger: direct.logger, exit: direct.exit, env: () => forged })).rejects.toThrow(
+      ExitCalled,
+    );
+    expect(direct.exit).toHaveBeenCalledWith(1);
+    const text = direct.lines.join("");
+    expect(text).toContain("Cloudflare-Testschlüssel");
+    expect(text).toContain('"level":60');
+    expect(text).not.toContain("MongoDB-Start-Check");
+    expect(text).not.toContain(TURNSTILE_TEST.secretKey);
   });
 
   it("TLS-Ausnahme nur für *_dev und *_test – nie an NODE_ENV gekoppelt", () => {

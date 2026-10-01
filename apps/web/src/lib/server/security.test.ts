@@ -209,6 +209,7 @@ describe("getPublicRuntimeConfig / publicRuntimeConfigFrom (ADR-023)", () => {
     expect(config).toEqual({
       realtimeUrl: "http://localhost:3121",
       turnstile: { enabled: true, siteKey: TURNSTILE_TEST.siteKey },
+      devBots: false,
     });
     const text = JSON.stringify(config);
     for (const secret of [...Object.values(TEST_SECRETS), TURNSTILE_TEST.secretKey, "mongodb://"]) {
@@ -220,10 +221,16 @@ describe("getPublicRuntimeConfig / publicRuntimeConfigFrom (ADR-023)", () => {
     expect(publicRuntimeConfigFrom(testEnv({ REALTIME_URL: "" }))).toEqual({
       realtimeUrl: "",
       turnstile: { enabled: false, siteKey: null },
+      devBots: false,
     });
     expect(publicRuntimeConfigFrom(testEnv({ TURNSTILE_SITE_KEY: TURNSTILE_TEST.siteKey })).turnstile.siteKey).toBe(
       null,
     );
+  });
+
+  it("liefert devBots aus der validierten Env (DEV_BOTS_ENABLED, nur Dev/Test)", () => {
+    expect(publicRuntimeConfigFrom(testEnv({ DEV_BOTS_ENABLED: "true" })).devBots).toBe(true);
+    expect(publicRuntimeConfigFrom(testEnv({ DEV_BOTS_ENABLED: "false" })).devBots).toBe(false);
   });
 });
 

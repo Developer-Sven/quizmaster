@@ -20,10 +20,14 @@ export interface PublicRuntimeConfig {
      */
     siteKey: string | null;
   };
+  /** „Bot hinzufügen“ anbieten (`DEV_BOTS_ENABLED`, nur Dev/Test – Realtime registriert `dev:add-bot` ebenso). */
+  devBots: boolean;
 }
 
 /** Reine Ableitung aus der Env (testbar, ohne Next-Kontext). */
-export function publicRuntimeConfigFrom(env: Pick<WebEnv, "realtimeUrl" | "turnstile">): PublicRuntimeConfig {
+export function publicRuntimeConfigFrom(
+  env: Pick<WebEnv, "realtimeUrl" | "turnstile" | "devBots">,
+): PublicRuntimeConfig {
   const configured = env.turnstile.siteKey !== undefined && env.turnstile.secretKey !== undefined;
   return {
     realtimeUrl: env.realtimeUrl,
@@ -31,16 +35,17 @@ export function publicRuntimeConfigFrom(env: Pick<WebEnv, "realtimeUrl" | "turns
       enabled: env.turnstile.enabled,
       siteKey: configured ? (env.turnstile.siteKey ?? null) : null,
     },
+    devBots: env.devBots,
   };
 }
 
 /**
- * Öffentliche Laufzeit-Konfiguration – nur in Server-Komponenten/Route-Handlern aufrufen. Markiert die
- * Route als dynamisch (`connection()`): Werte kommen immer aus der Laufzeit-Env, nie aus dem Build.
+ * Öffentliche Laufzeit-Konfiguration – nur in Server-Komponenten/Route-Handlern aufrufen. Wartet auf den
+ * Request (`await connection()`, Next-CSP-Leitfaden): Werte kommen immer aus der Laufzeit-Env, nie aus dem
+ * Build, und die Seite wird nie statisch vorgerendert (Nonce-CSP, ADR-008).
  */
-export function getPublicRuntimeConfig(): PublicRuntimeConfig {
-  // Im Prerender (Build) bricht connection() synchron ab → Route wird dynamisch; zur Laufzeit ein No-op.
-  void connection();
+export async function getPublicRuntimeConfig(): Promise<PublicRuntimeConfig> {
+  await connection();
   return publicRuntimeConfigFrom(getWebEnv());
 }
 

@@ -1,11 +1,14 @@
 /**
  * Realtime-Client (docs/05 §Verbindung, §Reconnect; docs/10 §App-Gefühl): eine Socket.IO-Verbindung pro
- * Seite (Singleton), `auth` als Funktion – jeder Verbindungsversuch holt ein frisches Ticket (vorher
- * einmal die Gast-Session sicherstellen). Ablehnungen des Servers werden je Code behandelt:
- * `UNAUTHORIZED` → still neu anmelden (einmal), `UPDATE_REQUIRED` → Banner, Sperre → Hinweis,
- * vorübergehende Codes → Neuversuch mit Backoff (≤ 5 s). Nach jedem (Re-)Connect: Uhrenabgleich und
- * `lobby:resume { code }` → Server schickt `lobby:state` + `lobby:self`. Alle Server-Payloads werden mit den
- * gemeinsamen zod-Schemas geprüft, bevor sie in den Store gehen.
+ * Seite (Singleton), `auth` als Funktion – jeder Verbindungsversuch holt ein frisches Ticket. Die Gast-Session
+ * (`POST /api/session`) wird nur angelegt, wenn nötig: beim ersten Besuch (kein Session-Merker) oder wenn das
+ * Ticket 401 liefert. Ablehnungen des Servers werden je Code behandelt: `UNAUTHORIZED` → still neu anmelden
+ * (einmal), `UPDATE_REQUIRED` → Banner, Sperre → Hinweis, vorübergehende Codes → Neuversuch mit Backoff
+ * (≤ 5 s bzw. Retry-After, höchstens 30 s); wartende Aktionen erfahren RATE_LIMITED, SERVER_BUSY und
+ * TOO_MANY_CONNECTIONS sofort. Nach jedem (Re-)Connect: Uhrenabgleich und `lobby:resume { code }` → Server
+ * schickt `lobby:state` + `lobby:self`. Alle Server-Payloads werden mit den gemeinsamen zod-Schemas geprüft,
+ * bevor sie in den Store gehen; passt ein Zustand nicht, synchronisiert der Client einmal neu und zeigt danach
+ * „Neue Version verfügbar“ statt still einzufrieren.
  *
  * Nur im Browser verwenden (Lobby-/Spielseiten; die Startseite lädt dieses Modul erst bei Bedarf).
  */
@@ -31,9 +34,15 @@ import type { z } from "zod";
 import { gameActions, type LobbyExit, useGameStore } from "../../stores/game-store";
 import { parseStoredCategories, serializeCategories } from "./categories";
 import { createClockSync } from "./clock-sync";
-import { type ClientErrorCode, connectFailure, parseConnectErrorCode, resumeFailure } from "./errors";
+import {
+  type ClientErrorCode,
+  connectFailure,
+  parseConnectErrorCode,
+  parseConnectErrorRetryAfterMs,
+  resumeFailure,
+} from "./errors";
 import { ApiError, ensureSession, fetchTicket } from "./session";
-import { readStoredCategories, writeMembership, writeStoredCategories } from "./storage";
+import { readSessionHint, readStoredCategories, writeMembership, writeStoredCategories } from "./storage";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -95,11 +104,35 @@ const RETRY_BASE_MS = 1_000;
 /** Backoff höchstens 5 s (docs/05 §Reconnect). */
 const RETRY_MAX_MS = 5_000;
 const RESUME_RETRY_MS = 2_000;
+/** Wartezeiten des Servers (Retry-After bis 10 min) für den automatischen Neuversuch deckeln. */
+const MAX_REJECTION_RETRY_MS = 30_000;
+
+/**
+ * Vorübergehende Ablehnungen, die wartende Aktionen sofort erfahren – mit eigenem Text statt nach 10 s nur
+ * „Verbindung unterbrochen“. Der Client versucht es trotzdem im Hintergrund weiter.
+ */
+const SURFACED_REJECTIONS: ReadonlySet<ClientErrorCode> = new Set<ClientErrorCode>([
+  "RATE_LIMITED",
+  "SERVER_BUSY",
+  "TOO_MANY_CONNECTIONS",
+]);
 
 /** Backoff mit Streuung: 1 s, 2 s, 4 s, 5 s … (jeweils 50–100 %). */
 export function retryDelayMs(attempt: number, random: () => number = Math.random): number {
   const base = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, attempt));
   return Math.round(base * (0.5 + random() * 0.5));
+}
+
+/** Neuversuch nach einer Ablehnung: Wartezeit des Servers, höchstens 30 s; ohne Angabe der normale Backoff. */
+export function rejectionRetryDelayMs(retryAfterMs: number | undefined): number | undefined {
+  return retryAfterMs === undefined ? undefined : Math.min(Math.max(0, retryAfterMs), MAX_REJECTION_RETRY_MS);
+}
+
+/** Meldet ein Zustand eine neuere Protokollversion als dieser Client (Client veraltet → neu laden)? */
+function newerProtocol(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  const version = (payload as { protocolVersion?: unknown }).protocolVersion;
+  return typeof version === "number" && version > PROTOCOL_VERSION;
 }
 
 const ackSchemas = new Map<ClientEventName, z.ZodType>();
@@ -148,14 +181,14 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
   let resumeTimer: ReturnType<typeof setTimeout> | null = null;
   let resumeInFlight = false;
+  /** Letzte vorübergehende Ablehnung seit dem letzten Verbindungsaufbau (Ergebnis für wartende Aktionen). */
+  let lastRejection: ClientErrorCode | null = null;
+  /** Schemawidrige Zustände in Folge je Event: der erste löst einen Resync aus, der zweite „Neue Version“. */
+  const invalidStreak = { "lobby:state": 0, "lobby:self": 0 };
   const waiters = new Set<(result: ClientErrorCode | null) => void>();
 
+  /** `POST /api/session` (bei TURNSTILE_REQUIRED einmal mit Turnstile-Token). */
   async function sessionReady(): Promise<void> {
-    if (forceNewSession) {
-      forceNewSession = false;
-      await ensureSession({ force: true });
-      return;
-    }
     try {
       await ensureSession();
     } catch (error) {
@@ -166,17 +199,24 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     }
   }
 
-  /** Session sicherstellen, dann ein Ticket holen (bei UNAUTHORIZED einmal mit neuer Session). */
+  /**
+   * Ticket holen – mit Session-Merker direkt (empfohlener Ablauf der Web-API, kein `POST /api/session` bei jedem
+   * Seitenaufruf), ohne Merker bzw. nach einer Neuanmeldung erst die Session. 401 → einmal Session, dann erneut.
+   */
   async function obtainTicket(): Promise<string> {
-    await sessionReady();
+    if (forceNewSession || !readSessionHint()) {
+      forceNewSession = false;
+      await sessionReady();
+    }
     const token = turnstileNeeded && turnstileProvider ? await turnstileProvider() : null;
     try {
       return await fetchTicket(token);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       if (error.code === "UNAUTHORIZED" && !reauthAttempted) {
+        // Kein gültiges Session-Cookie (abgelaufen, gelöscht, Gast entfernt): einmal neu anlegen.
         reauthAttempted = true;
-        await ensureSession({ force: true });
+        await sessionReady();
         return fetchTicket(token);
       }
       if (error.code === "TURNSTILE_REQUIRED" && turnstileProvider && !token) {
@@ -244,6 +284,20 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     resolveWaiters(code);
   }
 
+  /**
+   * Vorübergehende Ablehnung (Session, Ticket oder Handshake): merken, wartende Aktionen bei RATE_LIMITED,
+   * SERVER_BUSY und TOO_MANY_CONNECTIONS sofort informieren und später erneut versuchen (≤ 30 s).
+   */
+  function rejected(code: ClientErrorCode, retryAfterMs: number | undefined): void {
+    gameActions.connectionLost(Date.now());
+    if (code !== "NETWORK") {
+      gameActions.connectionRejected(code);
+      lastRejection = code;
+      if (SURFACED_REJECTIONS.has(code)) resolveWaiters(code);
+    }
+    scheduleReconnect(rejectionRetryDelayMs(retryAfterMs));
+  }
+
   /** Ticket/Session nicht erhältlich: endgültige Codes beenden, alles andere später erneut versuchen. */
   function onTicketFailure(error: unknown): void {
     const code: ClientErrorCode = error instanceof ApiError ? error.code : "INTERNAL";
@@ -257,13 +311,11 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
       return;
     }
     socket.disconnect();
-    gameActions.connectionLost(Date.now());
-    if (code !== "NETWORK") gameActions.connectionRejected(code);
-    scheduleReconnect(error instanceof ApiError ? error.retryAfterMs : undefined);
+    rejected(code, error instanceof ApiError ? error.retryAfterMs : undefined);
   }
 
   /** Server hat den Verbindungsaufbau mit Code abgelehnt (Socket ist danach inaktiv). */
-  function onRejected(code: ErrorCode): void {
+  function onRejected(code: ErrorCode, retryAfterMs: number | undefined): void {
     switch (connectFailure(code)) {
       case "reauth":
         if (reauthAttempted) {
@@ -286,9 +338,7 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
         fail(code);
         return;
       case "retry":
-        gameActions.connectionRejected(code);
-        gameActions.connectionLost(Date.now());
-        scheduleReconnect();
+        rejected(code, retryAfterMs);
         return;
     }
   }
@@ -355,9 +405,27 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     return lobbyCode !== null || entriesInFlight > 0;
   }
 
+  /**
+   * Server-Zustand passt nicht zum Schema (z. B. neues Feld nach einem Realtime-Deploy, ADR-025, oder ein
+   * Projektionsfehler): nicht still einfrieren. Neueres Protokoll → sofort „Neue Version verfügbar“; sonst
+   * einmal neu synchronisieren – passt auch der nächste Zustand nicht, ebenso (Neuladen holt den Client).
+   */
+  function onInvalidState(event: keyof typeof invalidStreak, payload: unknown, error: z.ZodError): void {
+    console.error(`${event} verworfen (Schema):`, issuePaths(error));
+    if (!inLobbyContext()) return;
+    if (newerProtocol(payload)) {
+      fail("UPDATE_REQUIRED");
+      return;
+    }
+    invalidStreak[event] += 1;
+    if (invalidStreak[event] === 1) void resume();
+    else fail("UPDATE_REQUIRED");
+  }
+
   socket.on("connect", () => {
     reauthAttempted = false;
     turnstileNeeded = false;
+    lastRejection = null;
     retryAttempt = 0;
     clearRetry();
     gameActions.connected();
@@ -377,7 +445,7 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
   socket.on("connect_error", (error) => {
     const code = parseConnectErrorCode(error, isErrorCode);
     if (code !== null && !socket.active) {
-      onRejected(code);
+      onRejected(code, parseConnectErrorRetryAfterMs(error));
       return;
     }
     // Transportfehler: Socket.IO versucht es selbst erneut (Backoff bis 5 s).
@@ -387,18 +455,20 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
   socket.on("lobby:state", (payload) => {
     const parsed = publicLobbyStateSchema.safeParse(payload);
     if (!parsed.success) {
-      console.error("lobby:state verworfen (Schema):", issuePaths(parsed.error));
+      onInvalidState("lobby:state", payload, parsed.error);
       return;
     }
+    invalidStreak["lobby:state"] = 0;
     if (inLobbyContext()) gameActions.applyPublicState(parsed.data);
   });
 
   socket.on("lobby:self", (payload) => {
     const parsed = privatePlayerStateSchema.safeParse(payload);
     if (!parsed.success) {
-      console.error("lobby:self verworfen (Schema):", issuePaths(parsed.error));
+      onInvalidState("lobby:self", payload, parsed.error);
       return;
     }
+    invalidStreak["lobby:self"] = 0;
     if (inLobbyContext()) gameActions.applyPrivateState(parsed.data);
   });
 
@@ -466,7 +536,8 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
         waiters.delete(finish);
         resolve(result);
       };
-      const timer = setTimeout(() => finish("NETWORK"), timeoutMs);
+      // Zeitablauf: die letzte vorübergehende Ablehnung (z. B. INTERNAL) ist aussagekräftiger als „NETWORK“.
+      const timer = setTimeout(() => finish(lastRejection ?? "NETWORK"), timeoutMs);
       waiters.add(finish);
     });
   }

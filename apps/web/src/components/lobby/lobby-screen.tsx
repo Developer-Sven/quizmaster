@@ -13,7 +13,10 @@ import { readMembership, readStoredSoundOn } from "@/lib/client/storage";
 import { gameActions, selectCategoriesMissing, selectExit, selectPhase, useGameStore } from "@/stores/game-store";
 import { LiveLobby } from "./live-lobby";
 import { LobbyLoadingView } from "./lobby-loading-view";
-import { LobbyExitView, LobbyFatalView } from "./lobby-status-views";
+import { LobbyExitView, LobbyFatalView, LobbyStalledView } from "./lobby-status-views";
+
+/** So lange darf es verbunden ohne Lobby-Zustand dauern, bevor statt des Skeletons ein Hinweis erscheint. */
+const STATE_WAIT_MS = 15_000;
 
 export interface LobbyScreenProps {
   /** normalisierter, gültiger Code aus der Route */
@@ -37,10 +40,13 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   const exit = useGameStore(selectExit);
   const phase = useGameStore(selectPhase);
   const fatal = useGameStore((state) => state.connection.fatal);
+  const connected = useGameStore((state) => state.connection.status === "connected");
   const categoriesMissing = useGameStore(selectCategoriesMissing);
   // Beim Betreten gemerkt: war diese Person hier schon Mitglied? (entscheidet über „nicht gefunden“ vs. Beitreten)
   const [memberAtEntry, setMemberAtEntry] = useState<boolean | null>(null);
   const [sawState, setSawState] = useState(false);
+  const [stalled, setStalled] = useState(false);
+  const waitingForState = phase === null && exit === null && fatal === null && connected;
 
   useEffect(() => {
     setMemberAtEntry(readMembership() === code);
@@ -54,6 +60,17 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   useEffect(() => {
     if (phase !== null) setSawState(true);
   }, [phase]);
+
+  // Verbunden, aber kein Zustand (Resync scheitert dauerhaft): nach 15 s Hinweis statt endlosem Skeleton.
+  // Der Client versucht es im Hintergrund weiter – kommt der Zustand doch noch, verschwindet der Hinweis.
+  useEffect(() => {
+    if (!waitingForState) return;
+    const timer = window.setTimeout(() => setStalled(true), STATE_WAIT_MS);
+    return () => {
+      window.clearTimeout(timer);
+      setStalled(false);
+    };
+  }, [waitingForState]);
 
   // Kategorien früherer Züge unbekannt (z. B. neuer Tab mitten im Spiel): einmal die öffentliche Liste laden.
   useEffect(() => {
@@ -77,7 +94,7 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   if (fatal) content = <LobbyFatalView code={fatal} />;
   else if (toJoin) content = <LobbyLoadingView />;
   else if (exit) content = <LobbyExitView exit={exit} />;
-  else if (phase === null) content = <LobbyLoadingView />;
+  else if (phase === null) content = stalled ? <LobbyStalledView /> : <LobbyLoadingView />;
   else if (phase === "lobby") {
     content = <LiveLobby code={code} displayCode={displayCode} realtimeUrl={realtimeUrl} devBots={devBots} />;
   } else content = <LiveGame realtimeUrl={realtimeUrl} />;

@@ -52,6 +52,10 @@ export const de = {
     rules: "Regeln",
     imprint: "Impressum",
     privacy: "Datenschutz",
+    /** Name fehlt beim Erstellen oder Beitreten */
+    nameRequired: "Gib deinen Namen ein.",
+    /** „Beitreten“ mit weniger als 6 Zeichen */
+    codeIncomplete: "Gib den ganzen Code ein.",
   },
 
   lobby: {
@@ -73,6 +77,13 @@ export const de = {
     qrCodeAlt: "QR-Code zum Beitreten",
     settings: "Einstellungen",
     kick: (name: string) => `${name} entfernen`,
+    codeCopied: "Code kopiert.",
+    linkCopied: "Link kopiert.",
+    copyFailed: "Kopieren nicht möglich.",
+    /** Text beim Teilen des Einladungslinks (Web Share API) */
+    inviteText: (formattedCode: string) => `Tritt meiner Lobby bei: ${formattedCode}`,
+    /** Nur mit DEV_BOTS_ENABLED (docs/05 §Dev-Bots) */
+    addBot: "Bot hinzufügen",
   },
 
   settings: {
@@ -112,6 +123,10 @@ export const de = {
     roundBoardTitle: (round: number, rounds: number) => `Runde ${round} von ${rounds}`,
     /** Gesamtstand im Duell, z. B. „5 : 4“ */
     duelScore: (left: number, right: number) => `${left} : ${right}`,
+    /** Kategorie ohne bekannte Darstellung (z. B. nach einem Neuladen mitten im Spiel) */
+    unknownCategory: "Kategorie",
+    /** Toast: Die getippte Antwort kam (Verbindung weg) nie beim Server an – die Frage läuft aber noch */
+    answerNotReceived: "Deine Antwort kam nicht an. Tippe noch einmal.",
   },
 
   result: {
@@ -139,6 +154,13 @@ export const de = {
       confirm: "Verlassen",
       cancel: "Bleiben",
     },
+    /** Host entfernt eine Person aus der Lobby */
+    kick: {
+      title: (name: string) => `${name} entfernen?`,
+      description: (name: string) => `${name} kann dieser Lobby nicht wieder beitreten.`,
+      confirm: "Entfernen",
+      cancel: "Abbrechen",
+    },
   },
 
   connection: {
@@ -153,6 +175,7 @@ export const de = {
     reported: "Bereits gemeldet",
     correctAnswer: "Richtige Antwort",
     yourAnswer: "Deine Antwort",
+    empty: "Noch keine Fragen gespielt.",
   },
 
   report: {
@@ -221,12 +244,16 @@ export const de = {
     boardTotal: "Summe",
     placeColumn: "Platz",
     pointsColumn: "Punkte",
+    /** Name des Spielerstreifens im Spiel */
+    playerStrip: "Spielstand",
   },
 
   /** Ansagen der `aria-live`-Region im HUD (docs/09 §7 „Screenreader“) */
   announcements: {
     roundPick: (round: number, rounds: number, name: string) =>
       `Runde ${round} von ${rounds}. ${name} wählt eine Kategorie.`,
+    /** wenn die eigene Person wählt */
+    roundPickSelf: (round: number, rounds: number) => `Runde ${round} von ${rounds}. Wähle eine Kategorie.`,
     categoryQuestion: (category: string, index: number, total: number) =>
       `${spokenCategoryName(category)}. Frage ${index} von ${total}.`,
     correct: "Richtig. Plus 1 Punkt.",

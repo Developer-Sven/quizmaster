@@ -1,12 +1,13 @@
 /**
- * Gast-Session (Cookie `kd_sid`) und Realtime-Ticket als JWT HS256 (docs/05 §Verbindung, docs/06
- * §Identität, ADR-006). Die guestId steht nur im `sub` – nie in Payloads an andere Clients.
+ * Gast-Session (Cookie `kd_sid` bzw. `__Host-kd_sid`, ADR-033) und Realtime-Ticket als JWT HS256 (docs/05
+ * §Verbindung, docs/06 §Identität, ADR-006). Die guestId steht nur im `sub` – nie in Payloads an andere Clients.
  *
- * Schlüssel-Vertrag mit apps/realtime: Der HMAC-Schlüssel ist die UTF-8-Bytefolge des Secret-Strings
- * (`new TextEncoder().encode(REALTIME_TICKET_SECRET)`), kein Base64-Decode (`hmacKey`).
+ * Schlüssel-Vertrag mit apps/realtime: Der HMAC-Schlüssel ist die UTF-8-Bytefolge des Secret-Strings, kein
+ * Base64-Decode – gebildet nur über `hmacKeyFromSecret` aus `@quizmaster/shared` (`hmacKey`).
  */
 import { randomBytes } from "node:crypto";
 import {
+  hmacKeyFromSecret,
   REALTIME_TICKET,
   type RealtimeTicketClaims,
   realtimeTicketClaimsSchema,
@@ -22,7 +23,7 @@ export const SESSION_TOKEN_MAX_LENGTH = 2_048;
 
 /** HMAC-Schlüssel aus einem Secret (UTF-8-Bytes des Strings) – identisch in Web und Realtime. */
 export function hmacKey(secret: string): Uint8Array {
-  return new TextEncoder().encode(secret);
+  return hmacKeyFromSecret(secret);
 }
 
 export interface SignedSession {
@@ -67,10 +68,23 @@ export function needsRenewal(claims: SessionClaims, nowSec: number): boolean {
   return claims.exp - nowSec < SESSION_COOKIE.renewBelowSec;
 }
 
-/** Cookie-Attribute: HttpOnly; Secure bei https-APP_ORIGIN (Produktion); SameSite=Lax; Path=/. */
+/** Name des Session-Cookies bei https-APP_ORIGIN (Produktion, ADR-033). */
+export const SECURE_SESSION_COOKIE_NAME = `__Host-${SESSION_COOKIE.name}`;
+
+/**
+ * Name des Session-Cookies (ADR-033): bei https-APP_ORIGIN `__Host-kd_sid` – Browser nehmen ein solches Cookie
+ * nur mit Secure, `Path=/` und ohne `Domain` an, eine Geschwister-Subdomain kann es also weder setzen noch
+ * überschreiben (Cookie-Injection, Session-Fixation). Bei http (Dev/Test) bleibt `kd_sid`. Lesen und Setzen
+ * nutzen beide diesen Namen; ein Cookie unter dem jeweils anderen Namen gilt als „keine Session“.
+ */
+export function sessionCookieName(secure: boolean): string {
+  return secure ? SECURE_SESSION_COOKIE_NAME : SESSION_COOKIE.name;
+}
+
+/** Cookie-Attribute: HttpOnly; Secure bei https-APP_ORIGIN (Produktion); SameSite=Lax; Path=/; nie Domain. */
 export function sessionCookie(token: string, secure: boolean) {
   return {
-    name: SESSION_COOKIE.name,
+    name: sessionCookieName(secure),
     value: token,
     httpOnly: true,
     secure,

@@ -16,7 +16,6 @@ import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
 import { reloadPage } from "@/lib/client/reload";
 import { readStoredName, writeStoredName } from "@/lib/client/storage";
-import { clientTexts } from "@/lib/client/texts";
 import { ChevronLeftIcon } from "@/lib/ui/icons";
 
 const NAME_MAX_LENGTH = 64;
@@ -65,7 +64,7 @@ export function JoinScreen({ code, displayCode, realtimeUrl }: JoinScreenProps) 
     if (busy) return;
     const trimmed = name.trim();
     if (!trimmed) {
-      setNameError(clientTexts.start.nameRequired);
+      setNameError(de.start.nameRequired);
       nameRef.current?.focus();
       return;
     }

@@ -21,7 +21,6 @@ import { lobbyPath } from "@/lib/client/paths";
 import type { RealtimeClient } from "@/lib/client/realtime-client";
 import { reloadPage } from "@/lib/client/reload";
 import { readStoredName, writeStoredName } from "@/lib/client/storage";
-import { clientTexts } from "@/lib/client/texts";
 import { LOBBY_CODE_LENGTH } from "@/lib/ui/lobby-code";
 
 /** Obergrenze des Namensfelds (NAME_INPUT_MAX_LENGTH; die Namensregeln prüft der Server). */
@@ -76,7 +75,7 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   const requireName = (): string | null => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setNameError(clientTexts.start.nameRequired);
+      setNameError(de.start.nameRequired);
       nameRef.current?.focus();
       return null;
     }
@@ -124,7 +123,7 @@ export function StartScreen({ realtimeUrl, focus = null }: StartScreenProps) {
   const join = (value: string) => {
     if (busy) return;
     if (value.length < LOBBY_CODE_LENGTH) {
-      setCodeError(clientTexts.start.codeIncomplete);
+      setCodeError(de.start.codeIncomplete);
       codeRef.current?.focus();
       return;
     }

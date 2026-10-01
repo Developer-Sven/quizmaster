@@ -82,7 +82,10 @@ export function setCookies(response: Response): ParsedCookie[] {
   });
 }
 
-/** Wert des Session-Cookies einer Antwort (oder `undefined`). */
-export function sessionCookieOf(response: Response): string | undefined {
-  return setCookies(response).find((cookie) => cookie.name === "kd_sid")?.value;
+/** Name des Session-Cookies bei http-APP_ORIGIN (Tests) und bei https (Produktion, ADR-033). */
+export const SESSION_COOKIE_NAMES = { http: "kd_sid", https: "__Host-kd_sid" } as const;
+
+/** Wert des Session-Cookies einer Antwort (oder `undefined`); Standard: Name bei http-APP_ORIGIN. */
+export function sessionCookieOf(response: Response, name: string = SESSION_COOKIE_NAMES.http): string | undefined {
+  return setCookies(response).find((cookie) => cookie.name === name)?.value;
 }

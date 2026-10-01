@@ -1,12 +1,14 @@
 /**
- * Gast-Session und Realtime-Tickets (docs/05 §Verbindung 1, ADR-006): `POST /api/session` legt das
- * HttpOnly-Cookie an bzw. erneuert es (einmal pro Seitenaufruf), `POST /api/realtime/ticket` liefert ein
- * 60-s-Ticket für jeden Verbindungsversuch. Fehler kommen als `{ error: { code } }` (docs/06) und werden
- * zu `ApiError` mit Protokoll-Code; `NETWORK` = keine Antwort.
+ * Gast-Session und Realtime-Tickets (docs/05 §Verbindung 1, ADR-006): `POST /api/realtime/ticket` liefert ein
+ * 60-s-Ticket für jeden Verbindungsversuch; `POST /api/session` legt das HttpOnly-Cookie nur an, wenn nötig
+ * (erster Besuch ohne Merker oder Ticket → 401) – empfohlener Ablauf der Web-API: Ticket zuerst, bei 401
+ * Session. Fehler kommen als `{ error: { code } }` (docs/06) und werden zu `ApiError` mit Protokoll-Code;
+ * `NETWORK` = keine Antwort.
  */
 import { type ErrorCode, isErrorCode, ticketResponseSchema } from "@quizmaster/shared";
 import { z } from "zod";
 import type { ClientErrorCode } from "./errors";
+import { writeSessionHint } from "./storage";
 
 export class ApiError extends Error {
   readonly code: ClientErrorCode;
@@ -76,32 +78,43 @@ function turnstileBody(token: string | null | undefined): Record<string, unknown
   return token ? { turnstileToken: token } : {};
 }
 
-let session: Promise<void> | null = null;
+let pending: Promise<void> | null = null;
 
 /**
- * Stellt die Gast-Session sicher: einmal pro Seitenaufruf `POST /api/session` (danach geteilt).
- * `force` erneuert sie (z. B. nach `UNAUTHORIZED`). Nach einem Fehler darf der nächste Aufruf neu versuchen.
+ * `POST /api/session`: legt die Gast-Session an bzw. bestätigt eine bestehende (das Server-Limit 10/10 min zählt
+ * nur neue Gäste). Gleichzeitige Aufrufe teilen sich eine Anfrage (ein mitgegebenes Turnstile-Token sendet
+ * immer neu); ist sie abgeschlossen, fragt der nächste Aufruf erneut. Erfolg setzt den Session-Merker.
  */
-export function ensureSession(options: { force?: boolean; turnstileToken?: string | null } = {}): Promise<void> {
-  if (session && !options.force && !options.turnstileToken) return session;
-  const request = postJson("/api/session", turnstileBody(options.turnstileToken)).then(() => undefined);
-  session = request;
-  request.catch(() => {
-    // Fehler behandelt der Aufrufer (er bekommt dasselbe Promise); hier nur den Merker freigeben.
-    if (session === request) session = null;
+export function ensureSession(options: { turnstileToken?: string | null } = {}): Promise<void> {
+  if (pending && !options.turnstileToken) return pending;
+  const request = postJson("/api/session", turnstileBody(options.turnstileToken)).then(() => {
+    writeSessionHint(true);
   });
+  pending = request;
+  const release = () => {
+    if (pending === request) pending = null;
+  };
+  // Fehler behandelt der Aufrufer (er bekommt dasselbe Promise); hier nur den Merker freigeben.
+  request.then(release, release);
   return request;
 }
 
-/** Holt ein frisches Realtime-Ticket (JWT, 60 s, einmalig). */
+/** Holt ein frisches Realtime-Ticket (JWT, 60 s, einmalig); 401 = kein gültiges Session-Cookie (Merker weg). */
 export async function fetchTicket(turnstileToken?: string | null): Promise<string> {
-  const data = await postJson("/api/realtime/ticket", turnstileBody(turnstileToken));
+  let data: unknown;
+  try {
+    data = await postJson("/api/realtime/ticket", turnstileBody(turnstileToken));
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "UNAUTHORIZED") writeSessionHint(false);
+    throw error;
+  }
   const parsed = ticketResponseSchema.safeParse(data);
   if (!parsed.success) throw new ApiError("INTERNAL", 200);
+  writeSessionHint(true);
   return parsed.data.ticket;
 }
 
-/** Nur für Tests: Merker der Session zurücksetzen. */
+/** Nur für Tests: laufende Session-Anfrage vergessen. */
 export function resetSessionForTests(): void {
-  session = null;
+  pending = null;
 }

@@ -3,8 +3,8 @@
 import type { PublicPlayer } from "@quizmaster/shared";
 import { Avatar } from "@/components/ui/avatar";
 import { ScorePill } from "@/components/ui/score-pill";
+import { de } from "@/i18n/de";
 import { playersSelfFirst } from "@/lib/client/game-view";
-import { clientTexts } from "@/lib/client/texts";
 import { cx } from "@/lib/ui/cx";
 
 export interface PlayerStripProps {
@@ -28,7 +28,7 @@ export function PlayerStrip({ players, selfId, answeredIds }: PlayerStripProps) 
   return (
     <div data-testid="player-strip" className="border-t border-line bg-surface-1 pt-1 pb-safe">
       <ul
-        aria-label={clientTexts.game.playerStrip}
+        aria-label={de.a11y.playerStrip}
         // Ab 5 Personen horizontal scrollbar – dann per Tastatur erreichbar (WCAG 2.1.1), wie die Tafel.
         tabIndex={spread ? undefined : 0}
         className={cx(

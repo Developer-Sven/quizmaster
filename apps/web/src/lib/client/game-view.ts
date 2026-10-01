@@ -18,7 +18,6 @@ import type {
 import type { AnswerPicker, AnswerState } from "../../components/ui/answer-button";
 import { de } from "../../i18n/de";
 import type { CategoryVisual } from "../ui/category";
-import { clientTexts } from "./texts";
 
 /** Bekannte Kategorien dieser Lobby (id → Darstellung aus den Daten). */
 export type CategoryCatalog = Readonly<Record<string, CategoryOption>>;
@@ -70,7 +69,7 @@ export function gameParticipants(state: Pick<PublicLobbyState, "players" | "orde
 export function categoryVisual(catalog: CategoryCatalog, id: string | null | undefined): CategoryVisual {
   const option = id ? catalog[id] : undefined;
   if (option) return { name: option.name, icon: option.icon, color: option.color };
-  return { name: clientTexts.game.unknownCategory, icon: "", color: "" };
+  return { name: de.game.unknownCategory, icon: "", color: "" };
 }
 
 /** Kategorie-IDs, die Tafel, Zug oder Frage zeigen, deren Darstellung aber (noch) unbekannt ist. */
@@ -112,6 +111,17 @@ export function myChoiceFor(
   if (self?.myAnswer && self.myAnswer.questionId === question.id) return self.myAnswer.choice;
   if (pending && pending.questionId === question.id) return pending.choice;
   return null;
+}
+
+/**
+ * Ist „Fragen ansehen“ offen? Das Sheet gehört zu genau einem Spielende (`phaseStartedAt` der Phase
+ * `game_over`, `openedFor`): Nach einer Revanche öffnet es sich beim nächsten Spielende nicht von selbst.
+ */
+export function reviewSheetOpen(
+  openedFor: number | null,
+  state: Pick<PublicLobbyState, "phase" | "phaseStartedAt">,
+): boolean {
+  return openedFor !== null && state.phase === "game_over" && state.phaseStartedAt === openedFor;
 }
 
 /**
@@ -348,7 +358,7 @@ export function announcementFor(
   switch (state.phase) {
     case "category_pick": {
       if (!progress || !state.turn) return null;
-      if (state.turn.pickerId === selfId) return clientTexts.game.roundPickSelf(progress.round, progress.rounds);
+      if (state.turn.pickerId === selfId) return de.announcements.roundPickSelf(progress.round, progress.rounds);
       const picker = findPlayer(state.players, state.turn.pickerId);
       return picker ? de.announcements.roundPick(progress.round, progress.rounds, picker.name) : null;
     }

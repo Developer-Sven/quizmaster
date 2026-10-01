@@ -120,6 +120,15 @@ export function isFatalCode(code: ClientErrorCode): boolean {
 
 const ERROR_CODE_PATTERN = /^[A-Z_]{3,40}$/;
 
+/** `retryAfterMs` aus `err.data` eines abgelehnten Handshakes (ganze Zahl ≥ 0), sonst `undefined`. */
+export function parseConnectErrorRetryAfterMs(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const data = (error as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return undefined;
+  const value = (data as { retryAfterMs?: unknown }).retryAfterMs;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 /**
  * Liest den Fehlercode aus einem `connect_error` des Servers: bevorzugt `err.data.code`, sonst
  * `err.message`, wenn sie ein Code ist. Transportfehler („xhr poll error“, „timeout“) liefern `null`.

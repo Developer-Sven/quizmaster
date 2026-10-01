@@ -6,10 +6,9 @@
  */
 import { runStartChecks, type StartCheckResult } from "@quizmaster/db";
 import type { Logger } from "pino";
-import { getWebEnv, type WebEnv, WebEnvError } from "../../env";
+import { getWebEnv, isDevOrTestDatabase, TURNSTILE_TEST_SECRET_KEYS, type WebEnv, WebEnvError } from "../../env";
 import { allowInsecureDatabaseTransport, connectWebData } from "./db";
 import { getLogger, toDbLogger } from "./logger";
-import { TURNSTILE_TEST_SECRET_KEYS } from "./turnstile";
 
 export interface StartupOptions {
   logger?: Logger;
@@ -41,12 +40,20 @@ export async function runWebStartupChecks(options: StartupOptions = {}): Promise
     return exit(1);
   }
 
+  // Fail-closed (docs/06 §Bot-Schutz): Test-Schlüssel akzeptieren jedes Platzhalter-Token bzw. lehnen alles ab –
+  // außerhalb von Dev/Test wäre der Bot-Schutz wirkungslos. Die Env-Regel (env.ts) greift schon beim Parsen;
+  // diese Prüfung sichert auch eine anders entstandene Env ab.
   const secretKey = env.turnstile.secretKey;
-  if (secretKey !== undefined && TURNSTILE_TEST_SECRET_KEYS.includes(secretKey)) {
-    if (!allowInsecureDatabaseTransport(env.mongodbDb)) {
-      // Test-Schlüssel akzeptieren jedes Platzhalter-Token – außerhalb von Dev/Test ist der Bot-Schutz damit wirkungslos.
-      logger.warn("WARNUNG: TURNSTILE_SECRET_KEY ist ein Cloudflare-Testschlüssel – Bot-Schutz wirkungslos");
-    }
+  if (
+    secretKey !== undefined &&
+    TURNSTILE_TEST_SECRET_KEYS.includes(secretKey) &&
+    !isDevOrTestDatabase(env.mongodbDb)
+  ) {
+    logger.fatal(
+      { db: env.mongodbDb },
+      "Start abgebrochen: TURNSTILE_SECRET_KEY ist ein Cloudflare-Testschlüssel – nur mit *_dev/*_test-Datenbank erlaubt",
+    );
+    return exit(1);
   }
 
   const dbLogger = toDbLogger(logger);

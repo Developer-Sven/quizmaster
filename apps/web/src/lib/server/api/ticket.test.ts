@@ -7,7 +7,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WebEnvSource } from "../../../env";
 import { createServerContext, type ServerContext } from "../context";
 import { createLogger } from "../logger";
-import { sessionCookieOf, TEST_SECRETS, TURNSTILE_TEST, testEnv, testRequest } from "../test-support";
+import {
+  SESSION_COOKIE_NAMES,
+  sessionCookieOf,
+  setCookies,
+  TEST_SECRETS,
+  TURNSTILE_TEST,
+  testEnv,
+  testRequest,
+} from "../test-support";
 import { hmacKey, signSessionToken } from "../tokens";
 import { runApi } from "./route";
 import { handleTicketRequest } from "./ticket";
@@ -165,6 +173,24 @@ describe("POST /api/realtime/ticket – Ablehnungen", () => {
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: { code: "UNAUTHORIZED", message: "Keine gültige Session" } });
     }
+  });
+
+  it("https-APP_ORIGIN: Session nur aus __Host-kd_sid (ADR-033); kd_sid → 401, Erneuerung als __Host-kd_sid", async () => {
+    const origin = "https://quiz.example.com";
+    const h = harness({ APP_ORIGIN: origin, REALTIME_URL: "" });
+    const { guestId, cookie } = await guestWithSession(T0_SEC - 151 * DAY_SEC);
+    const token = cookie.slice("kd_sid=".length);
+
+    const injected = await post(h, { origin, cookie: `kd_sid=${token}`, ip: freshIp() });
+    expect(injected.status).toBe(401);
+
+    const ok = await post(h, { origin, cookie: `__Host-kd_sid=${token}`, ip: freshIp() });
+    expect(ok.status).toBe(200);
+    expect(decodeJwt(await ticketOf(ok)).sub).toBe(guestId);
+    const renewed = setCookies(ok);
+    expect(renewed.map((entry) => entry.name)).toEqual([SESSION_COOKIE_NAMES.https]);
+    expect(renewed[0]?.attributes.get("secure")).toBe(true);
+    expect(decodeJwt(sessionCookieOf(ok, SESSION_COOKIE_NAMES.https) ?? "").sub).toBe(guestId);
   });
 
   it("gültiges Cookie, aber Gast gelöscht → 401", async () => {

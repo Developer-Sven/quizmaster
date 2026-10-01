@@ -23,6 +23,7 @@ describe("parseWebEnv", () => {
     expect(env.searchIndexing).toBe(false);
     expect(env.logLevel).toBe("info");
     expect(env.rateLimitMode).toBe("normal");
+    expect(env.devBots).toBe(false);
   });
 
   it("übernimmt mehrere Origins kanonisch, die erste ist die öffentliche; leere REALTIME_URL = gleiche Origin", () => {
@@ -86,6 +87,43 @@ describe("parseWebEnv", () => {
       expect.stringMatching(/^TURNSTILE_ENABLED:/),
     ]);
     expect(problemsOf(() => parseWebEnv(testEnvSource({ TURNSTILE_ENABLED: "yes" })))).toHaveLength(1);
+  });
+
+  it("liest DEV_BOTS_ENABLED (Standard aus) – an nur mit *_dev- oder *_test-Datenbank", () => {
+    expect(parseWebEnv(testEnvSource()).devBots).toBe(false);
+    expect(parseWebEnv(testEnvSource({ DEV_BOTS_ENABLED: "true" })).devBots).toBe(true);
+    expect(parseWebEnv(testEnvSource({ DEV_BOTS_ENABLED: "true", MONGODB_DB: "quizmaster_dev" })).devBots).toBe(true);
+    expect(parseWebEnv(testEnvSource({ DEV_BOTS_ENABLED: "false", MONGODB_DB: "quizmaster" })).devBots).toBe(false);
+    expect(
+      problemsOf(() => parseWebEnv(testEnvSource({ DEV_BOTS_ENABLED: "true", MONGODB_DB: "quizmaster" }))),
+    ).toEqual([expect.stringMatching(/^DEV_BOTS_ENABLED:/)]);
+    expect(problemsOf(() => parseWebEnv(testEnvSource({ DEV_BOTS_ENABLED: "ja" })))).toEqual([
+      expect.stringMatching(/^DEV_BOTS_ENABLED:/),
+    ]);
+  });
+
+  it("lehnt Cloudflare-Turnstile-Testschlüssel außerhalb von *_dev/*_test ab (Bot-Schutz sonst wirkungslos)", () => {
+    const testKeys = { TURNSTILE_SITE_KEY: "1x00000000000000000000AA" };
+    for (const secret of [
+      "1x0000000000000000000000000000000AA",
+      "2x0000000000000000000000000000000AA",
+      "3x0000000000000000000000000000000AA",
+    ]) {
+      const problems = problemsOf(() =>
+        parseWebEnv(testEnvSource({ ...testKeys, TURNSTILE_SECRET_KEY: secret, MONGODB_DB: "quizmaster" })),
+      );
+      expect(problems).toEqual([expect.stringMatching(/^TURNSTILE_SECRET_KEY:.*Testschlüssel/)]);
+      expect(problems.join(" ")).not.toContain(secret);
+      for (const db of ["quizmaster_dev", "quizmaster_test"]) {
+        expect(
+          parseWebEnv(testEnvSource({ ...testKeys, TURNSTILE_SECRET_KEY: secret, MONGODB_DB: db })).turnstile.secretKey,
+        ).toBe(secret);
+      }
+    }
+    const real = parseWebEnv(
+      testEnvSource({ ...testKeys, TURNSTILE_SECRET_KEY: "0x4AAAAAAAecht-und-geheim", MONGODB_DB: "quizmaster" }),
+    );
+    expect(real.turnstile.secretKey).toBe("0x4AAAAAAAecht-und-geheim");
   });
 });
 
