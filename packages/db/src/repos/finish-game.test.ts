@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { GameDoc, LobbyDoc } from "@quizmaster/shared/documents";
-import { ClientSession } from "mongodb";
+import { ClientSession, MongoOperationTimeoutError } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sampleQuestion } from "../test-support.ts";
 import { createTestDatabase, type TestDatabase } from "../testing/index.ts";
@@ -203,7 +203,20 @@ describe("finishGame (Transaktion)", () => {
     } finally {
       spy.mockRestore();
     }
-    await expect(finishGame(t.client, t.collections, input("game_7", 41), endedAt, { timeoutMS: 1 })).rejects.toThrow();
+    // Zeitüberschreitung deterministisch simulieren: Eine echte 1-ms-Frist bräche eine laufende
+    // Server-Transaktion nur clientseitig ab; deren Locks blieben bis zu 60 s bestehen und blockierten
+    // das Aufräumen der Test-Collections. Der echte Rollback ist oben (doppelte Spiel-ID) abgedeckt.
+    const timeout = vi
+      .spyOn(ClientSession.prototype, "withTransaction")
+      .mockRejectedValueOnce(new MongoOperationTimeoutError("Timed out during withTransaction"));
+    try {
+      await expect(finishGame(t.client, t.collections, input("game_7", 41), endedAt, { timeoutMS: 1 })).rejects.toThrow(
+        MongoOperationTimeoutError,
+      );
+      expect(timeout.mock.calls.at(-1)?.[1]).toMatchObject({ timeoutMS: 1 });
+    } finally {
+      timeout.mockRestore();
+    }
     expect(await t.collections.games.countDocuments({ _id: "game_7" })).toBe(0);
   });
 });

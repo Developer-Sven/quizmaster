@@ -18,5 +18,6 @@
   "dependencies": {
     "obscenity": "0.4.6",
     "zod": "4.6.5"
-  }
+  },
+  "sideEffects": false
 }

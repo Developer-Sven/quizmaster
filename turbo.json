@@ -37,7 +37,8 @@
     "DEV_BOTS_ENABLED",
     "LOG_LEVEL",
     "SEARCH_INDEXING",
-    "E2E_*"
+    "E2E_*",
+    "RATE_LIMIT_MODE"
   ],
   "tasks": {
     "build": {
