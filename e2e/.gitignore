@@ -1,0 +1,4 @@
+# Playwright-Artefakte (Traces, Screenshots, Stack-Logs) – nie committen
+/test-results/
+/playwright-report/
+/blob-report/
