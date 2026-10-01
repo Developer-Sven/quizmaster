@@ -15,6 +15,7 @@
     "check": "biome check . && turbo run typecheck --concurrency=2 && pnpm test && pnpm content:validate",
     "test": "vitest run",
     "test:e2e": "pnpm --filter @quizmaster/e2e test",
+    "test:smoke": "pnpm --filter e2e test:smoke",
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "turbo run typecheck --concurrency=2",
@@ -43,7 +44,11 @@
     "ops:restore": "bash infra/ops/restore.sh",
     "admin:config": "node scripts/ops/admin.ts config",
     "admin:ban": "node scripts/ops/admin.ts ban",
-    "admin:reports": "node scripts/admin/reports.ts"
+    "admin:game": "node scripts/ops/admin.ts game",
+    "admin:reports": "node scripts/admin/reports.ts",
+    "perf:budgets": "node scripts/perf/bundle-budget.ts",
+    "perf:lighthouse": "node scripts/perf/lighthouse.ts",
+    "loadtest": "node scripts/loadtest/run.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
