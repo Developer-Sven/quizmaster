@@ -42,7 +42,7 @@ describe("Caddy-Site aus dem Template", () => {
       "abort @blocked",
       "respond @metrics 404",
       "reverse_proxy @realtime 127.0.0.1:7401 {",
-      "reverse_proxy 127.0.0.1:7400",
+      "reverse_proxy 127.0.0.1:7400 {",
     ];
     const positions = order.map((directive) => route.indexOf(directive));
     expect(positions.every((position) => position > 0)).toBe(true);
@@ -52,8 +52,17 @@ describe("Caddy-Site aus dem Template", () => {
     expect(lines).toContain("stream_close_delay 5m");
   });
 
-  it("keine Access-Logs, keine Kompression, keine offenen Platzhalter", () => {
+  it("beide Upstreams überbrücken Neustartlücken statt sofort 502 zu liefern", () => {
+    expect(lines.filter((line) => line === "lb_try_duration 8s")).toHaveLength(2);
+    expect(lines.filter((line) => line === "lb_try_interval 250ms")).toHaveLength(2);
+  });
+
+  it("keine Access-Logs, keine Kompression, Fehler ohne IP-haltiges Fehlerlog, keine offenen Platzhalter", () => {
     expect(lines.some((line) => /^(log|encode)\b/.test(line))).toBe(false);
+    // handle_errors senkt das Fehlerlog (mit Cf-Connecting-Ip) auf Debug, Status bleibt erhalten.
+    const errors = lines.slice(lines.indexOf("handle_errors {"));
+    expect(errors[1]).toBe('respond "" {err.status_code}');
+    expect(lines.indexOf("handle_errors {")).toBeGreaterThan(lines.indexOf("route {"));
     expect(site).not.toMatch(/\{\{|\}\}/);
   });
 

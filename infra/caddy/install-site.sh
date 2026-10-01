@@ -6,14 +6,17 @@
 #   pnpm caddy:install      (root) Backup → /etc/caddy/quizmaster.caddy → eine `import`-Zeile im Caddyfile
 #                           (idempotent) → caddy validate → `systemctl reload caddy` → is-active; bei Fehlern
 #                           Wiederherstellung + erneuter Reload
-#   install-site.sh --refresh-ips   (Cron, wöchentlich) nur tätig, wenn sich die Cloudflare-Liste geändert hat
+#   install-site.sh --refresh-ips   (Cron, wöchentlich) nur tätig, wenn sich die Cloudflare-Liste geändert hat;
+#                           ist sie zweimal in Folge nicht abrufbar/unplausibel → Alarm (gespeicherte Liste bleibt
+#                           aktiv, neue Cloudflare-Bereiche würden sonst unbemerkt ausgesperrt)
 #
 # Werte: QUIZMASTER_DOMAIN, QUIZMASTER_PORT, REALTIME_PORT (leer = Port + 1), TLS_CERT_FILE, TLS_KEY_FILE aus
 # .env.prod über @quizmaster/shared/env. Cloudflare-Bereiche von cloudflare.com/ips-v4|ips-v6 (geprüft; Fallback:
 # infra/caddy/cloudflare-ips.txt). Reload ausschließlich über systemd – nie `caddy reload/run/stop` oder :2019.
 #
 # Optionen: --env-file <datei> (Standard .env.prod) · --out <datei> (Dry-Run: Site zusätzlich speichern)
-# Nur Tests: QM_CADDY_DIR=<verz> (Standard /etc/caddy) zusammen mit --no-reload, QM_BACKUP_ROOT=<verz>.
+# Nur Tests: QM_CADDY_DIR=<verz> (Standard /etc/caddy) zusammen mit --no-reload, QM_BACKUP_ROOT=<verz>;
+# der Fehlerzähler liegt dann in $QM_CADDY_DIR/.quizmaster-state (sonst /var/lib/quizmaster, QM_STATE_DIR).
 set -Eeuo pipefail
 umask 022
 # shellcheck source=infra/ops/lib.sh
@@ -36,6 +39,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 CADDY_DIR="${QM_CADDY_DIR:-/etc/caddy}"
+if [ -n "${QM_CADDY_DIR:-}" ]; then export QM_STATE_DIR="${QM_STATE_DIR:-$QM_CADDY_DIR/.quizmaster-state}"; fi
 if [ "$NO_RELOAD" = 1 ] && [ "$CADDY_DIR" = "/etc/caddy" ]; then
   qm_die "--no-reload ist nur mit QM_CADDY_DIR (Testverzeichnis) erlaubt"
 fi
@@ -66,6 +70,7 @@ finish() {
 }
 trap finish EXIT
 
+qm_require_committed_tools
 qm_require caddy openssl diff curl flock
 NODE="$(qm_node)" || qm_die "Node 24 nicht gefunden (.deploy/runtime oder .tooling)"
 if [ "$MODE" = "install" ] && [ "$(id -u)" != 0 ]; then qm_die "Installation nur als root (Dry-Run: pnpm caddy:dry-run)"; fi
@@ -101,6 +106,19 @@ case "${IP_STATUS:-failed}" in
   unchanged) qm_log "Cloudflare-Liste unverändert (${IP_V4_COUNT:-?} IPv4 + ${IP_V6_COUNT:-?} IPv6)" ;;
   *) qm_warn "Cloudflare-Listen nicht abrufbar oder unplausibel – gespeicherte Liste $IPS_FILE wird verwendet" ;;
 esac
+if [ "$REFRESH" = 1 ]; then
+  if [ "${IP_STATUS:-failed}" = "changed" ] || [ "${IP_STATUS:-failed}" = "unchanged" ]; then
+    qm_streak cloudflare-refresh ok >/dev/null
+  else
+    FAILURES="$(qm_streak cloudflare-refresh fail)"
+    if [ "$FAILURES" -ge 2 ]; then
+      STAND="$(sed -nE 's/^# Stand: ([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/p' "$IPS_FILE" | head -n 1)"
+      qm_alert "Cloudflare-IP-Liste ${FAILURES}× in Folge nicht abrufbar/unplausibel – Caddy nutzt weiter die" \
+        "gespeicherte Liste (Stand ${STAND:-unbekannt}); neue Cloudflare-Bereiche würden ausgesperrt." \
+        "Prüfen: journalctl -t quizmaster-caddy, pnpm caddy:dry-run"
+    fi
+  fi
+fi
 if [ "$REFRESH" = 1 ] && [ "${IP_STATUS:-failed}" != "changed" ]; then
   STEP="fertig"
   qm_log "Refresh: nichts zu tun (Konfiguration bleibt, kein Reload)"

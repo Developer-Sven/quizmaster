@@ -49,6 +49,13 @@ jobs:
       - name: Lint (Biome)
         run: pnpm lint
 
+      - name: Shell-Skripte (shellcheck)
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q shellcheck; }
+          shellcheck --version | head -n 2
+          # SC1111: deutsche Anführungszeichen „…“ in Meldungstexten sind Absicht.
+          shellcheck -x -P SCRIPTDIR --severity=warning --exclude=SC1111 infra/ops/*.sh infra/caddy/*.sh
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -146,7 +153,11 @@ jobs:
       - name: pnpm audit --prod --audit-level high
         run: pnpm audit --prod --audit-level high
 
-  # Dateisystem-Scan (Lockfile-Abhängigkeiten + Secrets) – ersetzt den Image-Scan aus docs/12 (ADR-024/025)
+  # Dateisystem-Scan (Lockfile-Abhängigkeiten + Secrets) – ersetzt den Image-Scan aus docs/12 (ADR-024/025).
+  # pnpm ≥ 11 schreibt pnpm-lock.yaml als Strom aus ZWEI YAML-Dokumenten: zuerst das Env-Lockfile des
+  # Paketmanagers (nur pnpm/@pnpm/exe.*), danach das Projekt (Importer + Snapshots). Trivy (pnpm-Parser:
+  # ein einziges yaml.Decode) liest nur das erste – ein Scan von `.` prüfte kein einziges Projektpaket.
+  # Deshalb: Projekt-Dokument extrahieren und separat scannen; der Secret-Scan läuft getrennt über das Repo.
   trivy:
     name: Trivy (fs)
     runs-on: ubuntu-24.04
@@ -156,13 +167,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Trivy fs (HIGH/CRITICAL, nur behebbare)
+      - name: Trivy Secrets (gesamtes Repo)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret
+          scanners: secret
+          # Trivy-Cache (Schwachstellen-Datenbank) nie nach Secrets durchsuchen.
+          skip-dirs: .cache
+          exit-code: "1"
+          format: table
+          cache: "false"
+
+      - name: Projekt-Lockfile für Trivy extrahieren (letztes YAML-Dokument)
+        if: ${{ !cancelled() }}
+        run: |
+          out="$RUNNER_TEMP/trivy-lock"
+          mkdir -p "$out"
+          awk '/^---$/{n++; buf[n]=""; next} {buf[n]=buf[n] $0 ORS} END{printf "%s", buf[n]}' pnpm-lock.yaml \
+            > "$out/pnpm-lock.yaml"
+          grep -q '^  apps/web:$' "$out/pnpm-lock.yaml" \
+            || { echo "::error::Projekt-Lockfile (Importer apps/web) nicht gefunden – Format von pnpm-lock.yaml prüfen"; exit 1; }
+          echo "Projekt-Lockfile extrahiert ($(wc -l < "$out/pnpm-lock.yaml") Zeilen)"
+
+      - name: Trivy Abhängigkeiten (HIGH/CRITICAL, nur behebbare)
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: ${{ runner.temp }}/trivy-lock
+          scanners: vuln
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
           format: table
+          # Trivy ist seit dem Secret-Scan installiert (setup-trivy setzt PATH für alle Folgeschritte).
+          skip-setup-trivy: "true"

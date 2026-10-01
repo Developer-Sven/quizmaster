@@ -60,6 +60,29 @@ export async function dirtyPaths(repo: string): Promise<string[]> {
  */
 export const OPERATIONAL_PATHS: readonly string[] = ["infra/caddy/cloudflare-ips.txt"];
 
+/**
+ * Geänderte Dateien zwischen zwei Commits, beschränkt auf `paths` (Verzeichnisse oder Dateien). `null`, wenn der
+ * Vergleich nicht möglich ist (z. B. Commit eines alten Releases nicht mehr im Repository).
+ */
+export async function changedPaths(
+  repo: string,
+  from: string,
+  to: string,
+  paths: readonly string[],
+): Promise<string[] | null> {
+  if (!SHA_PATTERN.test(from) || !SHA_PATTERN.test(to)) return null;
+  const result = await run("git", ["-C", repo, "diff", "--name-only", "--no-renames", from, to, "--", ...paths], {
+    env: gitEnv(),
+    output: "capture",
+    timeoutMs: 60_000,
+  });
+  if (result.code !== 0 || result.timedOut) return null;
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
 /** Quelltext eines Commits nach `dest` entpacken. */
 export async function extractArchive(repo: string, sha: string, dest: string): Promise<void> {
   mkdirSync(dest, { recursive: true, mode: 0o755 });

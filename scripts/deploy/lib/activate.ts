@@ -3,16 +3,20 @@
  * web → Smoke web → realtime → Smoke realtime → watchdog starten, bei jedem Fehler automatisch auf den
  * vorherigen Stand zurück (Symlink, Env-Dateien, genau die angefassten Apps) und mit Fehler enden.
  *
- * Smoke-Test: Web `GET /api/health` 200 über 127.0.0.1:QUIZMASTER_PORT, Realtime `GET /healthz` 200,
- * Socket.IO-Handshake ohne Ticket (Polling + WebSocket) wird mit UNAUTHORIZED abgelehnt, `/metrics` ist ohne
- * Token nicht lesbar. Zusätzlich: der Port gehört dem neuen pm2-Prozess und lauscht nur auf Loopback, und
- * dessen Arbeitsverzeichnis liegt im erwarteten Release.
+ * Smoke-Test: Web `GET /api/health` 200 über 127.0.0.1:QUIZMASTER_PORT, die Startseite als HTML mit CSP-Nonce,
+ * die ihre Skripte tragen, und ein darin referenziertes /_next/static-Asset (fehlt .next/static im Release oder
+ * stimmt die Nonce nicht, wäre die Seite im Browser kaputt, obwohl /api/health antwortet). Realtime `GET
+ * /healthz` 200, Socket.IO-Handshake ohne Ticket (Polling + WebSocket) wird mit UNAUTHORIZED abgelehnt,
+ * `/metrics` ist ohne Token nicht lesbar. Zusätzlich: der Port gehört dem neuen pm2-Prozess und lauscht nur auf
+ * Loopback, und dessen Arbeitsverzeichnis liegt im erwarteten Release. Nicht abgedeckt (siehe README): ein
+ * Lobby-Durchlauf mit Session + Ticket und die Bereitschaft von Mongo/Change Streams (Aufgabe des Watchdogs).
  */
 import {
   chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -22,10 +26,25 @@ import {
 import { basename, join } from "node:path";
 import { readReleaseMeta } from "./build.ts";
 import { renderAppEnvFile, writePrivateFile } from "./envfiles.ts";
-import { APPS, type AppKey, envFile, type Layout, releaseDir, SHA_PATTERN } from "./layout.ts";
+import { APP_NAMES, APPS, type AppKey, envFile, type Layout, releaseDir, SHA_PATTERN } from "./layout.ts";
 import { DeployError, describeError, fail, info, ok, short, stamp, step, warn } from "./log.ts";
-import { httpRequest, listListeners, pollingHandshake, waitForHealth, websocketHandshake } from "./net.ts";
+import {
+  httpRequest,
+  judgeStartPage,
+  listListeners,
+  pollingHandshake,
+  waitForHealth,
+  websocketHandshake,
+} from "./net.ts";
 import type { Pm2App, Pm2Client } from "./pm2.ts";
+import {
+  type DumpMergeResult,
+  mergeDump,
+  type PreviousDump,
+  pruneDumpBackups,
+  readIfExists,
+  replaceKeepingMode,
+} from "./pm2-dump.ts";
 import type { SourceContext } from "./source-env.ts";
 
 export interface DeployContext {
@@ -37,7 +56,14 @@ export interface DeployContext {
   backupRoot: string;
   /** Nur Tests (--simulate-failure): Smoke-Test dieser App schlägt absichtlich fehl (nicht auf dem Rückweg). */
   simulateFailure: AppKey | null;
+  /** Nur Unit-Tests: Smoke-Test ersetzen (Standard: echte HTTP-/Socket-/Port-Prüfungen). */
+  smokeTest?: SmokeTest;
+  /** Nur Unit-Tests: Wartezeit der Stabilitätsprüfung nach dem Smoke-Test (Standard 3 s). */
+  settleMs?: number;
 }
+
+/** Prüft eine frisch gestartete App; wirft bei Fehlern. */
+export type SmokeTest = (app: AppKey, sha: string, proc: Pm2App) => Promise<void>;
 
 /** Env-Inhalt je App und Release. */
 export type EnvProvider = (app: AppKey, sha: string) => string;
@@ -132,11 +158,8 @@ async function assertNotRestarted(ctx: DeployContext, app: AppKey, proc: Pm2App)
   }
 }
 
-async function smoke(ctx: DeployContext, app: AppKey, sha: string, proc: Pm2App, simulate: boolean): Promise<void> {
+async function smoke(ctx: DeployContext, app: AppKey, sha: string, proc: Pm2App): Promise<void> {
   const { resolved } = ctx.source;
-  if (simulate && ctx.simulateFailure === app) {
-    throw new DeployError("SIMULATED_FAILURE", `simulierter Smoke-Fehler für ${APPS[app].name} (--simulate-failure)`);
-  }
   if (app === "web") {
     const health = await waitForHealth("127.0.0.1", resolved.webPort, "/api/health", 90_000);
     if (!health.ok)
@@ -146,6 +169,30 @@ async function smoke(ctx: DeployContext, app: AppKey, sha: string, proc: Pm2App,
     await verifyPortOwner(app, resolved.webPort, proc.pid);
     verifyReleaseDir(ctx.layout, app, proc.pid, sha);
     ok(`Web: Port ${resolved.webPort} gehört PID ${proc.pid} (nur Loopback), läuft aus Release ${short(sha)}`);
+    const page = judgeStartPage(
+      await httpRequest({
+        method: "GET",
+        host: "127.0.0.1",
+        port: resolved.webPort,
+        path: "/",
+        headers: { accept: "text/html", "sec-fetch-dest": "document", "sec-fetch-mode": "navigate" },
+        timeoutMs: 15_000,
+        maxBody: 2 * 1024 * 1024,
+      }),
+    );
+    if (!page.ok || page.asset === null) throw new DeployError("SMOKE_WEB_PAGE", `GET /: ${page.detail}`);
+    const asset = await httpRequest({
+      method: "GET",
+      host: "127.0.0.1",
+      port: resolved.webPort,
+      path: page.asset,
+      timeoutMs: 10_000,
+      maxBody: 1,
+    });
+    if (asset.status !== 200) {
+      throw new DeployError("SMOKE_WEB_STATIC", `GET ${page.asset}: HTTP ${asset.status} (.next/static im Release?)`);
+    }
+    ok(`Web: Startseite mit CSP-Nonce, ${page.asset} → 200`);
     return;
   }
   if (app === "realtime") {
@@ -207,8 +254,9 @@ async function bringUp(
 ): Promise<BringUpResult> {
   if (app === "watchdog" && !readReleaseMeta(ctx.layout, sha)?.hasWatchdog) {
     const reason = `Release ${short(sha)} enthält kein dist/watchdog.mjs`;
+    // Sichtbar, nicht still: ohne Watchdog meldet nur infra/ops/healthcheck.sh (Cron) Ausfälle.
+    warn(`Watchdog: ${reason} – keine Alarme aus /metrics; Ausfälle meldet nur infra/ops/healthcheck.sh (Cron)`);
     if (await removeApp(ctx, app, reason)) return { kind: "removed" };
-    info(`Watchdog: ${reason} – quizmaster-watchdog wird nicht gestartet`);
     return { kind: "skipped" };
   }
   step(`Start ${APPS[app].name} (Release ${short(sha)})`);
@@ -216,7 +264,11 @@ async function bringUp(
   for (const message of await ctx.pm2.startOrReload(APPS[app].name)) info(message);
   const proc = await waitOnline(ctx, app);
   ok(`${APPS[app].name} online (PID ${proc.pid})`);
-  await smoke(ctx, app, sha, proc, simulate);
+  if (simulate && ctx.simulateFailure === app) {
+    throw new DeployError("SIMULATED_FAILURE", `simulierter Smoke-Fehler für ${APPS[app].name} (--simulate-failure)`);
+  }
+  if (ctx.smokeTest) await ctx.smokeTest(app, sha, proc);
+  else await smoke(ctx, app, sha, proc);
   return { kind: "started", proc };
 }
 
@@ -241,7 +293,7 @@ export class ActivationError extends DeployError {
 
 async function checkStable(ctx: DeployContext, started: ReadonlyMap<AppKey, Pm2App>): Promise<void> {
   if (started.size === 0) return;
-  await sleep(3_000);
+  await sleep(ctx.settleMs ?? 3_000);
   for (const [app, proc] of started) {
     const now = await findApp(ctx, app);
     if (!now || now.pid !== proc.pid || now.status !== "online") {
@@ -311,11 +363,29 @@ async function revert(ctx: DeployContext, plan: ActivationPlan, touched: readonl
   return clean;
 }
 
-/** dump.pm2 sichern (…/<zeitstempel>/dump.pm2, 600), dann `pm2 save`. Liefert den Sicherungspfad. */
-export async function persistProcessList(ctx: DeployContext): Promise<string | null> {
+/** So viele dump.pm2-Sicherungen bleiben unter backupRoot (sie enthalten die Env aller Apps des Daemons). */
+export const KEEP_DUMP_BACKUPS = 20;
+
+export interface PersistResult {
+  /** Sicherung des vorherigen dump.pm2 (…/<zeitstempel>/dump.pm2, 600) oder null. */
+  backup: string | null;
+  merge: DumpMergeResult;
+  /** Gelöschte alte Sicherungen. */
+  pruned: number;
+}
+
+/**
+ * Prozessliste speichern: vorheriges dump.pm2 sichern, `pm2 save`, danach alle fremden Einträge auf den vorher
+ * gespeicherten Stand zurücksetzen (lib/pm2-dump.ts) – ein Deploy ändert nie, was pm2 beim Boot für andere Apps
+ * wiederherstellt. Ist kein gespeicherter Stand lesbar, bleibt der vollständige Save (mit Warnung).
+ */
+export async function persistProcessList(
+  ctx: Pick<DeployContext, "pm2" | "pm2Home" | "backupRoot">,
+): Promise<PersistResult> {
   const dump = join(ctx.pm2Home, "dump.pm2");
+  const previous: PreviousDump = { dump: readIfExists(dump), bak: readIfExists(`${dump}.bak`) };
   let backup: string | null = null;
-  if (existsSync(dump)) {
+  if (previous.dump !== null) {
     const dir = join(ctx.backupRoot, stamp());
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     backup = join(dir, "dump.pm2");
@@ -325,5 +395,8 @@ export async function persistProcessList(ctx: DeployContext): Promise<string | n
     warn(`kein dump.pm2 in ${ctx.pm2Home} – nichts zu sichern`);
   }
   for (const message of await ctx.pm2.save()) info(message);
-  return backup;
+  const merge = mergeDump(previous, readFileSync(dump, "utf8"), APP_NAMES);
+  if (merge.merged) replaceKeepingMode(dump, merge.text);
+  const pruned = pruneDumpBackups(ctx.backupRoot, KEEP_DUMP_BACKUPS);
+  return { backup, merge, pruned };
 }

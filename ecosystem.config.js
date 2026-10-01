@@ -40,6 +40,9 @@ const interpreter = path.join(deployDir, "runtime", "node", "bin", "node");
 /** `--env-file=<abs>/.deploy/env/<app>.env` (absolut, damit der Pfad nicht vom Arbeitsverzeichnis abhängt). */
 const envFile = (app) => `--env-file=${path.join(deployDir, "env", `${app}.env`)}`;
 
+// Restrisiko: Die Apps laufen – wie alle Apps dieses Servers – als root (pm2-root.service, kein uid/gid);
+// docs/12 sah einen Nicht-Root-Benutzer vor. Umstellung (Systembenutzer, uid/gid je App, Rechte unter .deploy)
+// steht in README „Vor dem Go-live offen“ und braucht eine Entscheidung des Betreibers.
 const common = {
   namespace: "quizmaster",
   exec_mode: "fork",

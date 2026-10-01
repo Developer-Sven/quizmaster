@@ -3,7 +3,11 @@
  * Socket.IO-Handshake ohne Ticket, der mit UNAUTHORIZED abgelehnt werden muss (beweist, dass /socket.io
  * vom Realtime-Prozess bedient wird und die Auth-Middleware greift – docs/05, docs/06, ADR-028).
  */
-import { request } from "node:http";
+import { X509Certificate } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { type IncomingHttpHeaders, request } from "node:http";
+import { request as httpsRequest } from "node:https";
+import type { TLSSocket } from "node:tls";
 import { io } from "socket.io-client";
 import { DeployError } from "./log.ts";
 import { run, SYSTEM_PATH } from "./proc.ts";
@@ -35,10 +39,12 @@ export function parseSsListeners(output: string): Listener[] {
 }
 
 export async function listListeners(): Promise<Listener[]> {
+  // Eigene Prozessgruppe: Strg+C/SIGHUP am Terminal darf die Prüfung mitten im Smoke-Test nicht beenden.
   const result = await run("ss", ["-Hltnp"], {
     env: { PATH: SYSTEM_PATH, LANG: "C" },
     output: "capture",
     timeoutMs: 15_000,
+    isolate: true,
   });
   if (result.code !== 0) throw new DeployError("SS_FAILED", "ss -Hltnp fehlgeschlagen");
   return parseSsListeners(result.stdout);
@@ -46,6 +52,7 @@ export async function listListeners(): Promise<Listener[]> {
 
 export interface HttpResponse {
   status: number;
+  headers: IncomingHttpHeaders;
   body: string;
 }
 
@@ -59,7 +66,10 @@ export function httpRequest(options: {
   headers?: Record<string, string>;
   body?: string;
   timeoutMs: number;
+  /** Höchstens so viele Zeichen des Körpers lesen (Standard 64 KiB; HTML der Startseite: mehr). */
+  maxBody?: number;
 }): Promise<HttpResponse> {
+  const maxBody = options.maxBody ?? MAX_BODY;
   return new Promise((resolvePromise, reject) => {
     const req = request(
       {
@@ -78,9 +88,9 @@ export function httpRequest(options: {
         let body = "";
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => {
-          if (body.length < MAX_BODY) body += chunk;
+          if (body.length < maxBody) body += chunk;
         });
-        res.on("end", () => resolvePromise({ status: res.statusCode ?? 0, body }));
+        res.on("end", () => resolvePromise({ status: res.statusCode ?? 0, headers: res.headers, body }));
         res.on("error", reject);
       },
     );
@@ -133,6 +143,91 @@ export async function waitForHealth(
     await new Promise((resolveTimer) => setTimeout(resolveTimer, intervalMs));
   }
   return { ok: false, attempts, detail };
+}
+
+export interface StartPageVerdict {
+  ok: boolean;
+  detail: string;
+  /** Erstes im HTML referenziertes /_next/static-Asset (wird anschließend abgerufen). */
+  asset: string | null;
+}
+
+/**
+ * Startseite wie ein Browser sie braucht (docs/12 §CI/CD Punkt 4, ADR-008): 200 als HTML, eine CSP mit Nonce,
+ * und die Skripte im HTML tragen genau diese Nonce – sonst blockiert der Browser sie (z. B. statisch statt
+ * dynamisch gerendert oder proxy.ts nicht aktiv). Liefert das erste /_next/static-Asset zur Folgeprüfung.
+ */
+export function judgeStartPage(response: HttpResponse): StartPageVerdict {
+  const fail = (detail: string): StartPageVerdict => ({ ok: false, detail, asset: null });
+  if (response.status !== 200) return fail(`HTTP ${response.status}`);
+  const type = String(response.headers["content-type"] ?? "");
+  if (!type.startsWith("text/html")) return fail(`Content-Type ${type || "fehlt"} statt text/html`);
+  const csp = String(response.headers["content-security-policy"] ?? "");
+  const nonce = /'nonce-([A-Za-z0-9+/_=-]+)'/.exec(csp)?.[1];
+  if (nonce === undefined) return fail("Content-Security-Policy ohne Nonce (proxy.ts aktiv?)");
+  if (!response.body.includes(`nonce="${nonce}"`)) {
+    return fail("Skripte im HTML tragen nicht die Nonce der CSP – der Browser würde sie blockieren");
+  }
+  const asset = /(?:src|href)="(\/_next\/static\/[^"?#\s]+)/.exec(response.body)?.[1] ?? null;
+  if (asset === null) return fail("keine /_next/static-Referenz im HTML");
+  return { ok: true, detail: "HTML mit CSP-Nonce", asset };
+}
+
+export interface SiteCheck {
+  status: number;
+  /** Liefert Caddy genau das Zertifikat aus TLS_CERT_FILE? (null = Zertifikatsdatei nicht lesbar) */
+  certificateMatches: boolean | null;
+}
+
+/**
+ * `GET https://<domain><path>` über den Host-Caddy auf 127.0.0.1:443 (SNI + Host = Domain; Loopback ist in der
+ * Caddy-Site erlaubt). Das Cloudflare-Origin-Zertifikat ist nicht öffentlich vertrauenswürdig – statt der
+ * CA-Prüfung wird das ausgelieferte Zertifikat mit TLS_CERT_FILE verglichen (Pinning, nur zur Kontrolle).
+ */
+export function checkSiteViaCaddy(options: {
+  domain: string;
+  path: string;
+  certFile: string | undefined;
+  timeoutMs: number;
+  /** Standard 443 (Host-Caddy); andere Ports nur für Tests. */
+  port?: number;
+}): Promise<SiteCheck> {
+  let expected: string | null = null;
+  try {
+    if (options.certFile) expected = new X509Certificate(readFileSync(options.certFile)).fingerprint256;
+  } catch {
+    expected = null;
+  }
+  return new Promise((resolvePromise, reject) => {
+    const req = httpsRequest(
+      {
+        method: "GET",
+        host: "127.0.0.1",
+        port: options.port ?? 443,
+        path: options.path,
+        servername: options.domain,
+        headers: { host: options.domain },
+        timeout: options.timeoutMs,
+        agent: false,
+        // Bewusst: nur Loopback zum eigenen Caddy; geprüft wird per Fingerabdruck gegen TLS_CERT_FILE (s. o.).
+        rejectUnauthorized: false,
+      },
+      (res) => {
+        const peer = (res.socket as TLSSocket).getPeerCertificate();
+        res.resume();
+        res.on("end", () =>
+          resolvePromise({
+            status: res.statusCode ?? 0,
+            certificateMatches: expected === null ? null : peer.fingerprint256 === expected,
+          }),
+        );
+        res.on("error", reject);
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("Zeitüberschreitung")));
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 export interface HandshakeResult {

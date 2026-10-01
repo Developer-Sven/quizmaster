@@ -33,9 +33,14 @@
     "caddy:dry-run": "bash infra/caddy/install-site.sh --dry-run",
     "caddy:install": "bash infra/caddy/install-site.sh",
     "ops:backup": "bash infra/ops/backup.sh",
+    "ops:check-backup": "bash infra/ops/check-backup.sh",
     "ops:restore-test": "bash infra/ops/restore-test.sh",
+    "ops:healthcheck": "bash infra/ops/healthcheck.sh",
     "ops:alert-test": "bash infra/ops/alert.sh \"Testalarm von quizmaster\"",
-    "ops:install-cron": "bash infra/ops/install-cron.sh"
+    "ops:install-cron": "bash infra/ops/install-cron.sh",
+    "ops:restore": "bash infra/ops/restore.sh",
+    "admin:config": "node scripts/ops/admin.ts config",
+    "admin:ban": "node scripts/ops/admin.ts ban"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

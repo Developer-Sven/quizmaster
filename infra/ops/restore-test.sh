@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore-Test von quizmaster (Cron quartalsweise; docs/12 „Restore quartalsweise testen“, docs/06):
-#   neuestes Backup entschlüsseln (gpg, Passphrase über fd 3) → direkt als Strom in mongorestore → TEST-DB
-#   (URI + TEST_MONGODB_DB aus .env.dev, ADR-029) mit umbenannten Collections rt<ts>_<name>
+#   neuestes Backup (höchstens --max-age-hours alt) entschlüsseln (gpg, Passphrase über fd 3) → direkt als Strom
+#   in mongorestore → TEST-DB (URI + TEST_MONGODB_DB aus .env.dev, ADR-029) mit umbenannten Collections rt<ts>_<name>
 #   → Dokumente je Collection vergleichen (Manifest = Archiv = Test-DB) → restaurierte Collections löschen
 #   → Ergebnis loggen. Nie in die Produktion: Ziel muss auf _test enden, Collections tragen das rt-Präfix.
 # Ohne Index-/Optionen-Restore: TTL-Indizes würden abgelaufene Dokumente während des Vergleichs löschen,
@@ -9,7 +9,9 @@
 #
 #   pnpm ops:restore-test [Optionen]
 #     --backup-dir <verz>       Backups (Standard /var/backups/quizmaster)
-#     --archive <datei>         bestimmtes Archiv statt des neuesten
+#     --archive <datei>         bestimmtes Archiv statt des neuesten (ohne Altersprüfung)
+#     --max-age-hours <n>       neuestes Archiv höchstens so alt (Standard 36; 0 = keine Prüfung) – sonst läuft
+#                               das tägliche Backup nicht, und ein Test mit Wochen alten Daten wäre wertlos
 #     --passphrase-file <f>     Passphrase aus Datei (600) statt BACKUP_PASSPHRASE aus .env.prod (Tests)
 #     --target-env-file <f>     Zielverbindung (Standard .env.dev)
 #     --keep                    restaurierte Collections nicht löschen (nur Fehlersuche)
@@ -26,19 +28,22 @@ TARGET_ENV="$QM_ROOT/.env.dev"
 KEEP=0
 ALERT=1
 RESTORE_TIMEOUT="${QM_RESTORE_TIMEOUT:-2h}"
+MAX_AGE_HOURS=36
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --backup-dir) BACKUP_DIR="${2:?--backup-dir braucht ein Verzeichnis}"; shift 2 ;;
     --archive) ARCHIVE="${2:?--archive braucht eine Datei}"; shift 2 ;;
+    --max-age-hours) MAX_AGE_HOURS="${2:?--max-age-hours braucht eine Zahl}"; shift 2 ;;
     --passphrase-file) PASS_FILE="${2:?--passphrase-file braucht eine Datei}"; shift 2 ;;
     --target-env-file) TARGET_ENV="${2:?--target-env-file braucht eine Datei}"; shift 2 ;;
     --keep) KEEP=1; shift ;;
     --no-alert) ALERT=0; shift ;;
-    -h | --help) sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) qm_die "unbekannte Option: $1 (--help)" ;;
   esac
 done
+[[ "$MAX_AGE_HOURS" =~ ^[0-9]+$ ]] || qm_die "--max-age-hours: ganze Zahl ≥ 0"
 HELPER="$QM_ROOT/scripts/ops"
 
 STEP="Vorbereitung"
@@ -71,6 +76,7 @@ finish() {
 }
 trap finish EXIT
 
+qm_require_committed_tools
 qm_require mongorestore gpg gpgconf find sort timeout
 NODE="$(qm_node)" || qm_die "Node 24 nicht gefunden (.deploy/runtime oder .tooling)"
 qm_private_file "$TARGET_ENV"
@@ -79,11 +85,17 @@ export GNUPGHOME="$TMP/gnupg"
 install -d -m 700 "$GNUPGHOME"
 
 STEP="Archiv wählen"
+AUTO_ARCHIVE=0
 if [ -z "$ARCHIVE" ]; then
-  ARCHIVE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'quizmaster-[0-9]*.archive.gz.gpg' -printf '%T@ %p\n' \
-    | sort -rn | head -n 1 | cut -d' ' -f2-)"
+  AUTO_ARCHIVE=1
+  ARCHIVE="$(qm_newest "$BACKUP_DIR" 'quizmaster-[0-9]*.archive.gz.gpg')"
 fi
 [ -n "$ARCHIVE" ] && [ -f "$ARCHIVE" ] || qm_die "kein Backup-Archiv in $BACKUP_DIR gefunden"
+AGE_HOURS="$(qm_age_hours "$ARCHIVE")"
+if [ "$AUTO_ARCHIVE" = 1 ] && [ "$MAX_AGE_HOURS" -gt 0 ] && [ "$AGE_HOURS" -gt "$MAX_AGE_HOURS" ]; then
+  qm_die "neuestes Backup $(basename "$ARCHIVE") ist ${AGE_HOURS} h alt (erlaubt ${MAX_AGE_HOURS} h) –" \
+    "das tägliche Backup läuft nicht (journalctl -t quizmaster-backup -t quizmaster-check-backup)"
+fi
 MANIFEST="${ARCHIVE%.archive.gz.gpg}.manifest.json"
 SOURCE_DB=""
 if [ -f "$MANIFEST" ]; then
@@ -97,7 +109,6 @@ if [ -z "$SOURCE_DB" ]; then
   SOURCE_DB="$("$NODE" "$HELPER/ops-env.ts" value --env-file "$QM_ROOT/.env.prod" --key MONGODB_DB)"
 fi
 [[ "$SOURCE_DB" =~ ^[A-Za-z0-9_-]{1,63}$ ]] || qm_die "ungültige Quell-Datenbank"
-AGE_HOURS=$(( ($(date +%s) - $(stat -c %Y "$ARCHIVE")) / 3600 ))
 qm_log "Archiv $(basename "$ARCHIVE") ($(du -h "$ARCHIVE" | cut -f1), ${AGE_HOURS} h alt), Quelle $SOURCE_DB"
 
 STEP="Zugangsdaten"

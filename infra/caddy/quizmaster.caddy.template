@@ -19,13 +19,28 @@
 
 	# Reihenfolge ist Absicht (route = genau so abarbeiten). Keine Access-Logs (Datensparsamkeit, docs/06).
 	# Kein encode: Next.js komprimiert selbst, Cloudflare liefert Brotli aus, /socket.io nie komprimieren.
+	# lb_try_*: Neustartlücken (Deploy, max_memory_restart, Absturz im Fork-Modus) werden bis 8 s überbrückt –
+	# die Anfrage wartet auf den Upstream, statt sofort mit 502 zu scheitern.
 	route {
 		abort @blocked
 		respond @metrics 404
 		reverse_proxy @realtime 127.0.0.1:{{REALTIME_PORT}} {
+			lb_try_duration 8s
+			lb_try_interval 250ms
 			# Offene WebSockets überstehen einen Caddy-Reload bis zu 5 Minuten.
 			stream_close_delay 5m
 		}
-		reverse_proxy 127.0.0.1:{{WEB_PORT}}
+		reverse_proxy 127.0.0.1:{{WEB_PORT}} {
+			lb_try_duration 8s
+			lb_try_interval 250ms
+		}
+	}
+
+	# Fehlerantworten (z. B. 502, wenn ein Upstream länger als 8 s fehlt) mit unverändertem Status, aber ohne
+	# Fehlerlog: Caddys Standard-Fehlerlog schreibt sonst den vollständigen Request inkl. Cf-Connecting-Ip (echte
+	# Client-IP) ins Journal (docs/06: keine IPs in Logs). Mit handle_errors loggt Caddy den Fehler nur auf
+	# Debug-Ebene. Ausfälle meldet infra/ops/healthcheck.sh (Cron), nicht das Caddy-Log.
+	handle_errors {
+		respond "" {err.status_code}
 	}
 }

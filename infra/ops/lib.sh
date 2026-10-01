@@ -79,3 +79,55 @@ qm_read_kv() {
 qm_alert() {
   bash "$QM_ROOT/infra/ops/alert.sh" "$@" || qm_warn "Alarm konnte nicht zugestellt werden"
 }
+
+# Zustand der Betriebsskripte (Fehlerserien, Health-Status): /var/lib/quizmaster (700), Tests: QM_STATE_DIR.
+qm_state_dir() {
+  local dir="${QM_STATE_DIR:-/var/lib/quizmaster}"
+  install -d -m 700 "$dir"
+  printf '%s\n' "$dir"
+}
+
+# Alter einer Datei in ganzen Stunden (Änderungszeit).
+qm_age_hours() {
+  printf '%s\n' "$((($(date +%s) - $(stat -c %Y "$1")) / 3600))"
+}
+
+# Neueste Datei zu einem Muster (find -name) in einem Verzeichnis – leer, wenn keine existiert.
+qm_newest() {
+  find "$1" -maxdepth 1 -type f -name "$2" -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2-
+}
+
+# Fehlerserie: `qm_streak <name> fail` zählt hoch und gibt die Anzahl aufeinanderfolgender Fehlschläge aus,
+# `qm_streak <name> ok` setzt sie zurück (Ausgabe 0).
+qm_streak() {
+  local file count=0
+  file="$(qm_state_dir)/$1.failures"
+  if [ "$2" = ok ]; then
+    rm -f -- "$file"
+    printf '0\n'
+    return 0
+  fi
+  if [ -f "$file" ]; then count="$(<"$file")"; fi
+  [[ "$count" =~ ^[0-9]+$ ]] || count=0
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$file.tmp"
+  mv -f -- "$file.tmp" "$file"
+  printf '%s\n' "$count"
+}
+
+# Unbeaufsichtigte Läufe (Cron setzt QM_UNATTENDED=1) führen nur committete Betriebswerkzeuge aus: Backup,
+# Restore-Test und Caddy-Refresh laufen als root aus diesem Arbeitsbaum, in dem auch entwickelt wird. Ein
+# halbfertiger Stand von infra/, scripts/ops/ oder @quizmaster/shared bricht den Lauf mit Alarm ab, statt
+# ungeprüften Code auszuführen (die vom Cron gepflegte Cloudflare-Liste ist ausgenommen).
+QM_TOOL_PATHS=(infra scripts/ops packages/shared package.json pnpm-lock.yaml pnpm-workspace.yaml scripts/package.json)
+qm_require_committed_tools() {
+  [ "${QM_UNATTENDED:-0}" = 1 ] || return 0
+  local changes
+  changes="$(git -C "$QM_ROOT" status --porcelain --untracked-files=no -- "${QM_TOOL_PATHS[@]}" \
+    ':(exclude)infra/caddy/cloudflare-ips.txt' 2>/dev/null)" \
+    || qm_die "Arbeitsbaum nicht prüfbar (git status) – unbeaufsichtigter Lauf abgebrochen"
+  if [ -n "$changes" ]; then
+    qm_die "Betriebswerkzeuge im Arbeitsbaum geändert, nicht committet ($(printf '%s\n' "$changes" \
+      | cut -c4- | head -n 5 | paste -sd ' ' -)) – unbeaufsichtigter Lauf abgebrochen: committen oder zurücksetzen"
+  fi
+}

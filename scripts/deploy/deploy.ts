@@ -1,14 +1,16 @@
 // Deploy-Werkzeug für quizmaster auf diesem Server (ADR-024 pm2 + Host-Caddy, ADR-025 Releases).
 //
-//   pnpm deploy:prod [--sha <rev>] [--dry-run] [--skip-audit] [--rebuild]
-//   pnpm deploy:rollback [--to <sha>]
+//   pnpm deploy:prod [--sha <rev>] [--dry-run] [--skip-audit] [--skip-backup] [--rebuild]
+//   pnpm deploy:rollback [--to <sha>] [--skip-backup]
 //   pnpm deploy:restart [--apps web,realtime,watchdog]     Env aus .env.prod neu erzeugen + Apps neu starten
 //   pnpm deploy:status
 //
 // Ablauf deploy:prod: Preflight (Werkzeuge, sauberer Arbeitsbaum außer bei --sha, env:check prod --connect,
 // Ports, Platz, pm2-Daemon) → Build aus `git archive` in .deploy/build/<sha> → Audit-Gate → Env-Split je App →
-// current umhängen → web → Smoke → realtime → Smoke → watchdog → bei Fehler automatischer Rollback (Exit ≠ 0)
-// → Sicherung von dump.pm2 + `pm2 save` → alte Releases bis auf 3 löschen. Ausgaben enthalten keine Secrets.
+// Datenbank-Sicherung, falls Schema-Dateien sich ändern (lib/db-backup.ts) → current umhängen → web → Smoke →
+// realtime → Smoke → watchdog → bei Fehler automatischer Rollback (Exit ≠ 0) → Sicherung von dump.pm2 +
+// `pm2 save` (fremde Apps unverändert) → Kontrolle über Caddy → alte Releases bis auf 3 löschen. Ausgaben
+// enthalten keine Secrets. SIGINT/SIGTERM/SIGHUP brechen nur vor der Aktivierung ab (lib/interrupt.ts).
 //
 // Nur für Tests des Werkzeugs (verlangt ein eigenes PM2_HOME, nie den Haupt-Daemon; eigenes Layout .deploy/test,
 // damit current, Env-Dateien und Releases der Produktion unberührt bleiben):
@@ -26,6 +28,8 @@ import {
   type DeployContext,
   type EnvProvider,
   envFromSource,
+  KEEP_DUMP_BACKUPS,
+  type PersistResult,
   persistProcessList,
 } from "./lib/activate.ts";
 import {
@@ -37,18 +41,28 @@ import {
   prepareSource,
   readReleaseMeta,
 } from "./lib/build.ts";
+import { backupReason, runDatabaseBackup, SCHEMA_PATHS } from "./lib/db-backup.ts";
 import { readRelease } from "./lib/envfiles.ts";
-import { commitSubject, dirtyPaths, extractArchive, OPERATIONAL_PATHS, resolveCommit } from "./lib/git.ts";
+import {
+  changedPaths,
+  commitSubject,
+  dirtyPaths,
+  extractArchive,
+  OPERATIONAL_PATHS,
+  resolveCommit,
+} from "./lib/git.ts";
+import { type Interrupts, installInterrupts } from "./lib/interrupt.ts";
 import { APP_KEYS, APP_NAMES, APPS, type AppKey, envFile, type Layout, layoutFor, releaseDir } from "./lib/layout.ts";
 import { acquireLock } from "./lib/lock.ts";
-import { DeployError, describeError, fail, info, ok, short, step, warn } from "./lib/log.ts";
-import { listListeners } from "./lib/net.ts";
+import { DeployError, describeError, info, ok, short, step, warn } from "./lib/log.ts";
+import { checkSiteViaCaddy, listListeners } from "./lib/net.ts";
 import { createPm2, daemonAlive, type Pm2Client, pm2Home } from "./lib/pm2.ts";
 import { buildEnv, pm2Env, run, SYSTEM_PATH, which } from "./lib/proc.ts";
 import { ensureRuntime } from "./lib/runtime.ts";
 import { loadSource, type SourceContext } from "./lib/source-env.ts";
 import {
   addHistory,
+  currentOf,
   type DeployState,
   type HistoryEntry,
   pruneStack,
@@ -64,8 +78,8 @@ const MIN_FREE_BYTES = 3 * 1024 ** 3;
 const DEFAULT_BACKUP_ROOT = "/root/backups/quizmaster";
 
 const USAGE = `Aufruf:
-  pnpm deploy:prod [--sha <rev>] [--dry-run] [--skip-audit] [--rebuild]
-  pnpm deploy:rollback [--to <sha>] [--dry-run]
+  pnpm deploy:prod [--sha <rev>] [--dry-run] [--skip-audit] [--skip-backup] [--rebuild]
+  pnpm deploy:rollback [--to <sha>] [--dry-run] [--skip-backup]
   pnpm deploy:restart [--apps web,realtime,watchdog] [--dry-run]
   pnpm deploy:status
 Nur Tests (eigenes PM2_HOME, Layout .deploy/test): --test-env <datei> [--repo <verz>]
@@ -81,6 +95,7 @@ function parseCli() {
         apps: { type: "string" },
         "dry-run": { type: "boolean", default: false },
         "skip-audit": { type: "boolean", default: false },
+        "skip-backup": { type: "boolean", default: false },
         rebuild: { type: "boolean", default: false },
         "test-env": { type: "string" },
         repo: { type: "string" },
@@ -99,7 +114,8 @@ const { values, positionals } = parseCli();
 type Command = "deploy" | "rollback" | "restart" | "status";
 const command = positionals[0] as Command | undefined;
 
-let interrupted = false;
+/** Abbruchsignale (SIGINT, SIGTERM, SIGHUP) – eingerichtet in main(). */
+let interrupts: Interrupts | null = null;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -277,6 +293,90 @@ function record(layout: Layout, entry: HistoryEntry, update?: (state: DeployStat
   return state;
 }
 
+/** Grund für eine Datenbank-Sicherung vor der Aktivierung (null = nicht nötig; Testdeploys sichern nie). */
+async function databaseBackupReason(
+  repo: string,
+  source: SourceContext,
+  from: string | null,
+  to: string,
+): Promise<string | null> {
+  if (source.mode === "test") return null;
+  return backupReason(from, from === null ? [] : await changedPaths(repo, from, to, SCHEMA_PATHS));
+}
+
+function describeBackupPlan(source: SourceContext, reason: string | null): void {
+  if (source.mode === "test") info("Testmodus: keine Datenbank-Sicherung (Test-DB)");
+  else if (reason === null) info("Schema-Dateien unverändert – keine Datenbank-Sicherung vor der Aktivierung nötig");
+  else {
+    info(
+      `Datenbank-Sicherung vor der Aktivierung: ${reason}` +
+        (values["skip-backup"] ? " – ÜBERSPRUNGEN (--skip-backup)" : ""),
+    );
+  }
+}
+
+/** Unmittelbar vor der Aktivierung: Datenbank sichern, falls `reason`. Fehler brechen ab, bevor etwas umschaltet. */
+async function backupBeforeActivation(reason: string | null): Promise<void> {
+  if (reason === null) return;
+  if (values["skip-backup"]) {
+    warn(`Datenbank-Sicherung übersprungen (--skip-backup) – ${reason}`);
+    return;
+  }
+  step(`Datenbank-Sicherung vor der Aktivierung (${reason})`);
+  await runDatabaseBackup(ROOT);
+  ok("Datenbank verschlüsselt gesichert (/var/backups/quizmaster) – Wiederherstellung: pnpm ops:restore");
+  stopIfInterrupted();
+}
+
+/** Nach der Aktivierung: erreicht /api/health auch über den Host-Caddy die neue App? Nur Produktion, nur Warnung. */
+async function checkCaddyPath(source: SourceContext): Promise<void> {
+  const domain = source.resolved.domain;
+  if (source.mode !== "prod" || !domain) return;
+  step("Kontrolle über Caddy");
+  try {
+    const result = await checkSiteViaCaddy({
+      domain,
+      path: "/api/health",
+      certFile: source.resolved.source.TLS_CERT_FILE,
+      timeoutMs: 10_000,
+    });
+    if (result.certificateMatches === false) {
+      warn(`Caddy liefert für ${domain} ein anderes Zertifikat als TLS_CERT_FILE – pnpm caddy:dry-run`);
+    }
+    if (result.status === 200 || result.status === 429) {
+      ok(
+        `https://${domain}/api/health über Caddy (Loopback) → HTTP ${result.status}` +
+          (result.certificateMatches ? ", Zertifikat = TLS_CERT_FILE" : ""),
+      );
+    } else {
+      warn(
+        `https://${domain}/api/health über Caddy → HTTP ${result.status} – Caddy-Site aktuell? (pnpm caddy:dry-run)`,
+      );
+    }
+  } catch (error) {
+    warn(
+      `Caddy über Loopback nicht erreichbar (${describeError(error)}) – Caddy-Site installiert? (pnpm caddy:dry-run)`,
+    );
+  }
+}
+
+/** Ergebnis von persistProcessList – nur Namen und Status fremder Apps, nie Werte. */
+function reportPersist(result: PersistResult): void {
+  const saved = result.backup ? ` (vorheriges dump.pm2 gesichert: ${result.backup})` : "";
+  const { merge } = result;
+  if (merge.merged) {
+    ok(`pm2 save: ${merge.ours} quizmaster-Einträge aktualisiert, ${merge.keptForeign} fremde unverändert${saved}`);
+    if (merge.drift.length > 0) {
+      info(`Hinweis: ${merge.drift.length} fremde App(s) weichen vom gespeicherten Boot-Zustand ab (bleibt so):`);
+      for (const line of merge.drift.slice(0, 10)) info(`  ${line}`);
+      if (merge.drift.length > 10) info(`  … (+${merge.drift.length - 10})`);
+    }
+  } else {
+    warn(`dump.pm2: ${merge.reason} – pm2 save hat den vollständigen aktuellen Zustand gespeichert${saved}`);
+  }
+  if (result.pruned > 0) info(`${result.pruned} alte dump.pm2-Sicherung(en) gelöscht (max. ${KEEP_DUMP_BACKUPS})`);
+}
+
 function applyRetention(layout: Layout, state: DeployState, protect: ReadonlySet<string>): void {
   const existing = listReleases(layout);
   const doomed = releasesToDelete(state, existing, KEEP_RELEASES, protect);
@@ -291,7 +391,35 @@ function applyRetention(layout: Layout, state: DeployState, protect: ReadonlySet
 
 /** Abbruchpunkt zwischen zwei Schritten (vor der Aktivierung) – `finally`-Blöcke räumen auf. */
 function stopIfInterrupted(): void {
-  if (interrupted) throw new DeployError("INTERRUPTED", "abgebrochen vor der Aktivierung – nichts wurde umgeschaltet");
+  interrupts?.checkpoint("abgebrochen vor der Aktivierung – nichts wurde umgeschaltet");
+}
+
+/**
+ * Aktivierung, Rückweg, state.json und `pm2 save` laufen auch bei Abbruchsignalen (Strg+C, SIGTERM, SSH-Abbruch)
+ * zu Ende – sonst bliebe `current` umgehängt, während Apps gemischt laufen und kein Rückweg stattfindet.
+ */
+function critical<T>(fn: () => Promise<T>): Promise<T> {
+  return interrupts ? interrupts.critical(fn) : fn();
+}
+
+/**
+ * `current` muss nach jeder abgeschlossenen Aktion auf das oberste Release des Stapels zeigen. Weicht es ab, wurde
+ * eine Aktivierung hart beendet (z. B. kill -9) – Apps laufen dann womöglich gemischt aus zwei Releases.
+ */
+function warnIfIncomplete(layout: Layout): void {
+  let top: string | null;
+  try {
+    top = currentOf(readState(layout.stateFile));
+  } catch {
+    return; // state.json defekt – meldet readState an der Stelle, an der es gebraucht wird
+  }
+  const current = currentRelease(layout);
+  if (current === top) return;
+  warn(
+    `unvollständige Aktivierung erkannt: current → ${current ? short(current) : "keins"}, zuletzt erfolgreich ` +
+      `aktiviert: ${top ? short(top) : "keins"} – Apps laufen evtl. gemischt. Abhilfe: pnpm deploy:prod --sha ` +
+      `${current ? short(current) : "<sha>"} erneut oder pnpm deploy:rollback (Zustand: pnpm deploy:status)`,
+  );
 }
 
 // ── Befehle ──────────────────────────────────────────────────────────────────
@@ -318,6 +446,7 @@ async function commandDeploy(): Promise<void> {
   await checkPorts(daemonAlive(home) ? ctx.pm2 : null, source);
   checkDisk(layout);
 
+  warnIfIncomplete(layout);
   const current = currentRelease(layout);
   const existing = readReleaseMeta(layout, sha);
   const reuse = existing !== null && (!values.rebuild || sha === current);
@@ -326,6 +455,8 @@ async function commandDeploy(): Promise<void> {
   info(
     `aktuell: ${current ? short(current) : "kein Release"} → Ziel: ${short(sha)}${reuse ? " (Release vorhanden, kein Build)" : ""}`,
   );
+  const backupNeed = await databaseBackupReason(repo, source, current, sha);
+  describeBackupPlan(source, backupNeed);
 
   if (values["dry-run"]) {
     step("Dry-Run: Audit-Gate auf dem Ziel-Commit (nichts wird verändert)");
@@ -367,35 +498,39 @@ async function commandDeploy(): Promise<void> {
     const envFor = envFromSource(ctx);
     for (const app of APP_KEYS) envFor(app, sha); // wirft vor der Aktivierung, falls ein Wert nicht schreibbar ist
     ok(`web.env, realtime.env, watchdog.env aus ${source.label} (nur die Schlüssel je App, RELEASE=${short(sha)})`);
+    stopIfInterrupted();
+    await backupBeforeActivation(backupNeed);
 
-    step("Aktivieren");
-    const fallback = current;
-    try {
-      await activate(ctx, {
-        target: sha,
-        fallback,
-        apps: ["web", "realtime", "watchdog"],
-        envFor,
-        fallbackEnvFor: snapshotEnv(layout, envFor),
-      });
-    } catch (error) {
-      record(layout, {
-        at: nowIso(),
-        action: "deploy",
-        sha,
-        from: current,
-        result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
-        message: describeError(error).slice(0, 500),
-      });
-      throw error;
-    }
-    record(layout, { at: nowIso(), action: "deploy", sha, from: current, result: "ok" }, (previous) =>
-      pushActivation(previous, sha, nowIso()),
-    );
+    await critical(async () => {
+      step("Aktivieren");
+      const fallback = current;
+      try {
+        await activate(ctx, {
+          target: sha,
+          fallback,
+          apps: ["web", "realtime", "watchdog"],
+          envFor,
+          fallbackEnvFor: snapshotEnv(layout, envFor),
+        });
+      } catch (error) {
+        record(layout, {
+          at: nowIso(),
+          action: "deploy",
+          sha,
+          from: current,
+          result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
+          message: describeError(error).slice(0, 500),
+        });
+        throw error;
+      }
+      record(layout, { at: nowIso(), action: "deploy", sha, from: current, result: "ok" }, (previous) =>
+        pushActivation(previous, sha, nowIso()),
+      );
 
-    step("Prozessliste sichern");
-    const backup = await persistProcessList(ctx);
-    ok(`pm2 save${backup ? ` (vorheriges dump.pm2 gesichert: ${backup})` : ""}`);
+      step("Prozessliste sichern");
+      reportPersist(await persistProcessList(ctx));
+    });
+    await checkCaddyPath(source);
 
     step("Aufräumen");
     applyRetention(layout, readState(layout.stateFile), new Set([sha, ...(current ? [current] : [])]));
@@ -418,6 +553,7 @@ async function commandRollback(): Promise<void> {
   const source = loadSource(ROOT, testEnv);
   const home = pm2Home();
   checkDaemon(home, source.mode);
+  warnIfIncomplete(layout);
   const current = currentRelease(layout);
   const state = readState(layout.stateFile);
   let target: string;
@@ -438,6 +574,8 @@ async function commandRollback(): Promise<void> {
   const meta = readReleaseMeta(layout, target);
   if (!meta) throw new DeployError("ROLLBACK_TARGET", `Release ${short(target)} ist unvollständig`);
   ok(`Ziel: ${short(target)} – ${meta.subject} (gebaut ${meta.builtAt})`);
+  const backupNeed = await databaseBackupReason(ROOT, source, current, target);
+  describeBackupPlan(source, backupNeed);
   if (values["dry-run"]) {
     step("Dry-Run beendet – keine Änderungen");
     return;
@@ -449,35 +587,39 @@ async function commandRollback(): Promise<void> {
     step("Node-Laufzeit");
     await ensureRuntime(layout);
     const envFor = envFromSource(ctx);
-    step(`Aktivieren von ${short(target)}`);
-    try {
-      await activate(ctx, {
-        target,
-        fallback: current,
-        apps: ["web", "realtime", "watchdog"],
-        envFor,
-        fallbackEnvFor: snapshotEnv(layout, envFor),
+    stopIfInterrupted();
+    await backupBeforeActivation(backupNeed);
+    await critical(async () => {
+      step(`Aktivieren von ${short(target)}`);
+      try {
+        await activate(ctx, {
+          target,
+          fallback: current,
+          apps: ["web", "realtime", "watchdog"],
+          envFor,
+          fallbackEnvFor: snapshotEnv(layout, envFor),
+        });
+      } catch (error) {
+        record(layout, {
+          at: nowIso(),
+          action: "rollback",
+          sha: target,
+          from: current,
+          result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
+          message: describeError(error).slice(0, 500),
+        });
+        throw error;
+      }
+      record(layout, { at: nowIso(), action: "rollback", sha: target, from: current, result: "ok" }, (previous) => {
+        if (values.to !== undefined) return pushActivation(previous, target, nowIso());
+        // Schrittweise zurück: alles oberhalb des Ziels abnehmen.
+        const index = previous.stack.map((entry) => entry.sha).lastIndexOf(target);
+        return { ...previous, stack: previous.stack.slice(0, index + 1) };
       });
-    } catch (error) {
-      record(layout, {
-        at: nowIso(),
-        action: "rollback",
-        sha: target,
-        from: current,
-        result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
-        message: describeError(error).slice(0, 500),
-      });
-      throw error;
-    }
-    record(layout, { at: nowIso(), action: "rollback", sha: target, from: current, result: "ok" }, (previous) => {
-      if (values.to !== undefined) return pushActivation(previous, target, nowIso());
-      // Schrittweise zurück: alles oberhalb des Ziels abnehmen.
-      const index = previous.stack.map((entry) => entry.sha).lastIndexOf(target);
-      return { ...previous, stack: previous.stack.slice(0, index + 1) };
+      step("Prozessliste sichern");
+      reportPersist(await persistProcessList(ctx));
     });
-    step("Prozessliste sichern");
-    const backup = await persistProcessList(ctx);
-    ok(`pm2 save${backup ? ` (vorheriges dump.pm2 gesichert: ${backup})` : ""}`);
+    await checkCaddyPath(source);
     step(`Fertig: Release ${short(target)} aktiv (vorher ${current ? short(current) : "keins"})`);
   } finally {
     lock.release();
@@ -514,29 +656,32 @@ async function commandRestart(): Promise<void> {
     const ctx = createContext(layout, tools, source);
     await ensureRuntime(layout);
     const envFor = envFromSource(ctx);
-    try {
-      await activate(ctx, {
-        target: current,
-        fallback: current,
-        apps,
-        envFor,
-        fallbackEnvFor: snapshotEnv(layout, envFor),
-      });
-    } catch (error) {
-      record(layout, {
-        at: nowIso(),
-        action: "restart",
-        sha: current,
-        from: current,
-        result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
-        message: describeError(error).slice(0, 500),
-      });
-      throw error;
-    }
-    record(layout, { at: nowIso(), action: "restart", sha: current, from: current, result: "ok" });
-    step("Prozessliste sichern");
-    const backup = await persistProcessList(ctx);
-    ok(`pm2 save${backup ? ` (vorheriges dump.pm2 gesichert: ${backup})` : ""}`);
+    stopIfInterrupted();
+    await critical(async () => {
+      try {
+        await activate(ctx, {
+          target: current,
+          fallback: current,
+          apps,
+          envFor,
+          fallbackEnvFor: snapshotEnv(layout, envFor),
+        });
+      } catch (error) {
+        record(layout, {
+          at: nowIso(),
+          action: "restart",
+          sha: current,
+          from: current,
+          result: error instanceof ActivationError && error.reverted ? "rolled_back" : "failed",
+          message: describeError(error).slice(0, 500),
+        });
+        throw error;
+      }
+      record(layout, { at: nowIso(), action: "restart", sha: current, from: current, result: "ok" });
+      step("Prozessliste sichern");
+      reportPersist(await persistProcessList(ctx));
+    });
+    if (apps.includes("web")) await checkCaddyPath(source);
     step("Fertig");
   } finally {
     lock.release();
@@ -549,6 +694,7 @@ async function commandStatus(): Promise<void> {
   const current = currentRelease(layout);
   const state = readState(layout.stateFile);
   step("Status");
+  warnIfIncomplete(layout);
   const describe = (sha: string | null) => {
     if (!sha) return "–";
     const meta = readReleaseMeta(layout, sha);
@@ -564,6 +710,9 @@ async function commandStatus(): Promise<void> {
   for (const app of APP_KEYS) {
     const release = readRelease(envFile(layout, app));
     info(`${app}.env:  ${release ? `RELEASE ${short(release)}` : "fehlt"}`);
+  }
+  if (current && readReleaseMeta(layout, current)?.hasWatchdog === false) {
+    warn("aktives Release ohne Watchdog – Ausfälle meldet nur infra/ops/healthcheck.sh (Cron), keine /metrics-Alarme");
   }
   const home = pm2Home();
   if (!daemonAlive(home)) {
@@ -608,21 +757,14 @@ async function main(): Promise<number> {
     return values.help ? 0 : 2;
   }
   process.umask(0o022);
-  for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    process.on(signal, () => {
-      if (interrupted) {
-        fail("zweiter Abbruch – sofortiges Ende; Zustand prüfen: pnpm deploy:status");
-        process.exit(130);
-      }
-      interrupted = true;
-      warn("Abbruch angefordert – der laufende Schritt wird sauber beendet (erneut drücken erzwingt das Ende)");
-    });
-  }
+  // SIGINT/SIGTERM/SIGHUP nur vormerken; Aktivierung bis `pm2 save` läuft immer zu Ende (lib/interrupt.ts).
+  const active = installInterrupts();
+  interrupts = active;
   if (command === "deploy") await commandDeploy();
   else if (command === "rollback") await commandRollback();
   else if (command === "restart") await commandRestart();
   else await commandStatus();
-  return interrupted ? 130 : 0;
+  return active.exitCode() ?? 0;
 }
 
 main().then(

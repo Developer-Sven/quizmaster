@@ -10,6 +10,7 @@
 #
 #   pnpm ops:backup [Optionen]
 #     --env prod|dev          Quelle der Zugangsdaten (Standard prod → .env.prod)
+#     --env-file <datei>      andere Env-Datei (600) statt .env.<env> (Tests)
 #     --db <name>             Datenbank (Standard MONGODB_DB der Quelle)
 #     --out-dir <verz>        Ziel (Standard /var/backups/quizmaster)
 #     --passphrase-file <f>   Passphrase aus Datei (600) statt BACKUP_PASSPHRASE (Tests)
@@ -22,6 +23,7 @@ umask 077
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 ENV_NAME="prod"
+ENV_FILE=""
 DB=""
 OUT_DIR="/var/backups/quizmaster"
 PASS_FILE=""
@@ -34,19 +36,20 @@ DUMP_TIMEOUT="${QM_BACKUP_TIMEOUT:-2h}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:?--env braucht prod oder dev}"; shift 2 ;;
+    --env-file) ENV_FILE="${2:?--env-file braucht eine Datei}"; shift 2 ;;
     --db) DB="${2:?--db braucht einen Namen}"; shift 2 ;;
     --out-dir) OUT_DIR="${2:?--out-dir braucht ein Verzeichnis}"; shift 2 ;;
     --passphrase-file) PASS_FILE="${2:?--passphrase-file braucht eine Datei}"; shift 2 ;;
     --retention-days) RETENTION_DAYS="${2:?--retention-days braucht eine Zahl}"; shift 2 ;;
     --no-files) WITH_FILES=0; shift ;;
     --no-alert) ALERT=0; shift ;;
-    -h | --help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) qm_die "unbekannte Option: $1 (--help)" ;;
   esac
 done
 case "$ENV_NAME" in prod | dev) ;; *) qm_die "--env erwartet prod oder dev" ;; esac
 [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] && [ "$RETENTION_DAYS" -ge 1 ] || qm_die "--retention-days: ganze Zahl ≥ 1"
-ENV_FILE="$QM_ROOT/.env.$ENV_NAME"
+[ -n "$ENV_FILE" ] || ENV_FILE="$QM_ROOT/.env.$ENV_NAME"
 HELPER="$QM_ROOT/scripts/ops"
 
 STEP="Vorbereitung"
@@ -74,6 +77,7 @@ finish() {
 }
 trap finish EXIT
 
+qm_require_committed_tools
 qm_require mongodump gpg gpgconf gzip tar find sort timeout flock
 NODE="$(qm_node)" || qm_die "Node 24 nicht gefunden (.deploy/runtime oder .tooling)"
 qm_private_file "$ENV_FILE"
@@ -108,7 +112,7 @@ decrypt_from() {
 }
 
 STEP="mongodump"
-qm_log "Backup der Datenbank $DB (.env.$ENV_NAME) → $(basename "$ARCHIVE")"
+qm_log "Backup der Datenbank $DB ($(basename "$ENV_FILE")) → $(basename "$ARCHIVE")"
 set +e
 timeout --kill-after=60s "$DUMP_TIMEOUT" mongodump --config <(printf '%s' "$MONGO_CONFIG") \
   --db "$DB" --archive --gzip 2>"$TMP/dump.log" | encrypt_to "$ARCHIVE.partial"
