@@ -14,6 +14,35 @@ function findRepoRoot(start: string): string {
 
 const repoRoot = findRepoRoot(process.cwd());
 
+/**
+ * Env-unabhängige Sicherheitsheader für ALLE Antworten (docs/06 §HTTP-Sicherheitsheader). Die CSP mit Nonce,
+ * HSTS (nur bei https-APP_ORIGIN) und X-Robots-Tag setzt `src/proxy.ts` zur Laufzeit – `headers()` wird beim
+ * Build ausgewertet und darf daher keine Env lesen.
+ */
+const SECURITY_HEADERS = [
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+  },
+];
+
+/** JSON-API: nichts ausführen/einbetten, nie indexieren. */
+const API_HEADERS = [
+  { key: "Content-Security-Policy", value: "default-src 'none'; frame-ancestors 'none'" },
+  { key: "X-Robots-Tag", value: "noindex, nofollow" },
+];
+
+/** Service Worker: immer frisch prüfen (docs/06, docs/10). */
+const SERVICE_WORKER_HEADERS = [
+  { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+  { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+];
+
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
@@ -23,6 +52,13 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@quizmaster/shared", "@quizmaster/db"],
   // Eigenes Build-Verzeichnis je paralleler Instanz (z. B. Agents/E2E), Standard .next
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  async headers() {
+    return [
+      { source: "/:path*", headers: SECURITY_HEADERS },
+      { source: "/api/:path*", headers: API_HEADERS },
+      { source: "/sw.js", headers: SERVICE_WORKER_HEADERS },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -1,5 +1,8 @@
-export const dynamic = "force-dynamic";
+/** `GET /api/health` – `{ ok }` ohne Details (Handler: lib/server/api/public.ts). */
+import { handleHealthRequest, healthUnavailable } from "../../../lib/server/api/public";
+import { apiRoute } from "../../../lib/server/api/route";
 
-export function GET() {
-  return Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
-}
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export const GET = apiRoute("GET /api/health", handleHealthRequest, { onUnexpected: healthUnavailable });
