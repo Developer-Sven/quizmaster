@@ -388,6 +388,35 @@ export function announcementFor(
   }
 }
 
+export interface LobbyRosterChanges {
+  /** Namen der neu Beigetretenen */
+  joined: string[];
+  /** Namen derer, die die Lobby verlassen haben oder entfernt wurden */
+  left: string[];
+}
+
+/**
+ * Wer in der Lobby-Phase dazugekommen bzw. gegangen ist (ohne die eigene Person) – für die Screenreader-Ansage
+ * „Ben ist beigetreten.“ (WCAG 4.1.3; sichtbar ändert sich nur die Liste, kein Toast). Getrennte bleiben in der
+ * Liste („offline“) und zählen nicht als gegangen; ohne Vorzustand, bei fremder Lobby und außerhalb der
+ * Lobby-Phase (Start, Revanche) gibt es keine Ansage.
+ */
+export function lobbyRosterChanges(
+  previous: PublicLobbyState | null,
+  next: PublicLobbyState,
+  selfId: string | null,
+): LobbyRosterChanges {
+  if (!previous || previous.code !== next.code || previous.phase !== "lobby" || next.phase !== "lobby") {
+    return { joined: [], left: [] };
+  }
+  const before = new Set(previous.players.map((player) => player.id));
+  const after = new Set(next.players.map((player) => player.id));
+  return {
+    joined: next.players.filter((player) => player.id !== selfId && !before.has(player.id)).map((p) => p.name),
+    left: previous.players.filter((player) => player.id !== selfId && !after.has(player.id)).map((p) => p.name),
+  };
+}
+
 export type LobbyNotice = { kind: "hostChanged"; name: string } | { kind: "playerResigned"; name: string };
 
 /**

@@ -10,6 +10,7 @@ import {
   firstRowOfRound,
   gameParticipants,
   lobbyNotices,
+  lobbyRosterChanges,
   mergeCategories,
   missedAnswer,
   missingCategoryIds,
@@ -279,6 +280,31 @@ describe("Hinweise aus dem Zustandsvergleich", () => {
     expect(lobbyNotices(base, next, "p1")).toEqual([]);
     expect(lobbyNotices(null, next, "p2")).toEqual([]);
     expect(lobbyNotices({ ...base, code: "XYZ789" }, next, "p2")).toEqual([]);
+  });
+});
+
+describe("Beitritte und Austritte in der Lobby (Ansage, WCAG 4.1.3)", () => {
+  const mia = testPlayer("p1", { isHost: true, name: "Mia" });
+  const lobby = testLobby({ players: [mia, testPlayer("p2", { name: "Ben" })] });
+
+  it("meldet, wer dazukommt und wer geht – nie die eigene Person", () => {
+    const joined = testLobby({ players: [...lobby.players, testPlayer("p3", { name: "Lea" })] });
+    expect(lobbyRosterChanges(lobby, joined, "p1")).toEqual({ joined: ["Lea"], left: [] });
+    const left = testLobby({ players: [mia] });
+    expect(lobbyRosterChanges(lobby, left, "p1")).toEqual({ joined: [], left: ["Ben"] });
+    expect(lobbyRosterChanges(left, lobby, "p2")).toEqual({ joined: [], left: [] });
+  });
+
+  it("schweigt ohne Vorzustand, in fremder Lobby, außerhalb der Lobby-Phase und bei bloßer Trennung", () => {
+    const joined = testLobby({ players: [...lobby.players, testPlayer("p3", { name: "Lea" })] });
+    expect(lobbyRosterChanges(null, joined, "p1")).toEqual({ joined: [], left: [] });
+    expect(lobbyRosterChanges({ ...lobby, code: "XYZ789" }, joined, "p1")).toEqual({ joined: [], left: [] });
+    // Revanche (game_over → lobby) und laufendes Spiel: keine Beitritts-Ansagen
+    expect(lobbyRosterChanges({ ...lobby, phase: "game_over" }, joined, "p1")).toEqual({ joined: [], left: [] });
+    expect(lobbyRosterChanges(lobby, { ...joined, phase: "intro" }, "p1")).toEqual({ joined: [], left: [] });
+    // getrennt ist nicht gegangen (die Person bleibt in der Liste, „offline“)
+    const offline = testLobby({ players: [mia, testPlayer("p2", { name: "Ben", connected: false })] });
+    expect(lobbyRosterChanges(lobby, offline, "p1")).toEqual({ joined: [], left: [] });
   });
 });
 

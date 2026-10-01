@@ -58,6 +58,11 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@quizmaster/shared", "@quizmaster/db"],
   // Eigenes Build-Verzeichnis je paralleler Instanz (z. B. Agents/E2E), Standard .next
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  // Schrift-Preloads als `<link rel="preload">` im HTML statt als `Link`-Header: React fügt beim Hydrieren
+  // (Ressourcen-Hinweise im RSC-Payload) sonst ein zweites Preload ein. Ohne Service Worker verschmilzt
+  // Chromium beide; kommt die Seite aus dem SW, lädt es jede Schrift doppelt und warnt „preloaded … but not
+  // used“. Mit dem Tag im HTML findet React sein Preload schon vor und legt kein zweites an.
+  reactMaxHeadersLength: 0,
   async headers() {
     return [
       { source: "/:path*", headers: SECURITY_HEADERS },

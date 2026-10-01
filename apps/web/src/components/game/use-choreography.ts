@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useClientClock } from "../../lib/client/clock-context";
 import { vibrate } from "../../lib/client/haptics";
+import { pageModalityTracker } from "../../lib/client/keyboard";
 import { remainingMs, toServerTime } from "../../lib/client/phase-clock";
 import { getSoundManager } from "../../lib/client/sound";
 import { useServerNow } from "../../lib/client/use-server-clock";
@@ -132,8 +133,9 @@ export function lockFeedback(): void {
 }
 
 /**
- * Audio im Spiel (docs/09 §10): entsperrt bei der ersten Interaktion (bzw. sofort nach einer früheren) und lädt
- * die Sounds, solange der Ton an ist. Ob gespielt wird, entscheidet der Sound-Manager (gespeicherte Einstellung).
+ * Audio im Spiel (docs/09 §10): entsperrt bei der ersten Interaktion (bzw. sofort nach einer früheren), nach
+ * jeder Unterbrechung (iOS: App-Wechsel, Sperrbildschirm) bei der nächsten Geste bzw. beim Sichtbarwerden erneut
+ * und lädt die Sounds, solange der Ton an ist. Ob gespielt wird, entscheidet der Sound-Manager (Einstellung).
  */
 export function useGameAudio(soundOn: boolean): void {
   useEffect(() => {
@@ -143,6 +145,52 @@ export function useGameAudio(soundOn: boolean): void {
   useEffect(() => {
     if (soundOn) getSoundManager()?.preload();
   }, [soundOn]);
+}
+
+function subscribeModality(notify: () => void): () => void {
+  return pageModalityTracker()?.subscribe(notify) ?? (() => {});
+}
+
+function keyboardModality(): boolean {
+  return pageModalityTracker()?.current() === "keyboard";
+}
+
+/**
+ * Wurde die Seite zuletzt per Tastatur bedient? Steuert den Fokusring der Antwort- bzw. Kachelgruppe
+ * (lib/client/keyboard.ts): Nur dann ist der orange Rahmen um die ganze Gruppe ein hilfreicher Fokus-Hinweis.
+ */
+export function useKeyboardModality(): boolean {
+  return useSyncExternalStore(subscribeModality, keyboardModality, () => false);
+}
+
+/**
+ * Ab dieser Viewport-Höhe in rem (der Seite!) gilt der Viewport als niedrig – gemessen in der Schriftgröße der
+ * Seite, damit Zoom (weniger CSS-Pixel) und große Schrift (größere rem) gleichermaßen greifen. 360 × 740 bei
+ * 100 % sind 46 rem, Querformat und 200 % Zoom auf 1280 × 720 rund 22 rem.
+ */
+export const COMPACT_HEIGHT_REM = 35;
+
+/** Ist ein Viewport von `viewportHeightPx` bei der Schriftgröße `rootFontPx` höchstens {@link COMPACT_HEIGHT_REM} rem hoch? */
+export function isCompactHeight(viewportHeightPx: number, rootFontPx: number): boolean {
+  const rem = Number.isFinite(rootFontPx) && rootFontPx > 0 ? rootFontPx : 16;
+  return viewportHeightPx / rem <= COMPACT_HEIGHT_REM;
+}
+
+function subscribeViewport(notify: () => void): () => void {
+  window.addEventListener("resize", notify);
+  return () => window.removeEventListener("resize", notify);
+}
+
+function compactSnapshot(): boolean {
+  return isCompactHeight(window.innerHeight, Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
+}
+
+/**
+ * Niedriger Viewport (Querformat, 200–400 % Zoom, große Schrift – WCAG 1.4.10): Dann scrollt der Spielscreen als
+ * ein Dokument statt einer starren Bühne zwischen festen Leisten (game-screen.tsx). Auf dem Server `false`.
+ */
+export function useCompactHeight(): boolean {
+  return useSyncExternalStore(subscribeViewport, compactSnapshot, () => false);
 }
 
 /**

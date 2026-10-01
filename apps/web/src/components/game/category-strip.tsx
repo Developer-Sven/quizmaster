@@ -68,7 +68,8 @@ function findPickedTile(categoryId: string): Element | null {
 
 /**
  * Kategoriestreifen (docs/09 §7): 44 px unter dem HUD, 4-px-Farbstreifen links (einer der drei Orte für
- * Kategoriefarben), Icon + Name, rechts Frage x/K.
+ * Kategoriefarben), Icon + Name, rechts Frage x/K. Bei großer Schrift bricht der Name um und der Streifen
+ * wächst (WCAG 1.4.4) – 44 px bleiben die Mindesthöhe.
  *
  * Kategorie-Einblendung (docs/09 §7.3): Die gewählte Kachel wandert per Shared-Layout-Animation (320 ms,
  * emphasized) in den Streifen – umgesetzt als FLIP nur mit transform/opacity (`LazyMotion` + `domAnimation`
@@ -122,7 +123,7 @@ export function CategoryStrip({ category, fraction, arrival = null }: CategorySt
   return (
     <MotionProvider>
       <div data-testid="category-strip" className="border-b border-line bg-surface-1">
-        <div ref={rowRef} className="relative mx-auto flex h-11 w-full max-w-column items-center px-gutter">
+        <div ref={rowRef} className="relative mx-auto flex min-h-11 w-full max-w-column items-center px-gutter py-1">
           {category ? (
             <m.span
               key={category.name}
@@ -138,7 +139,7 @@ export function CategoryStrip({ category, fraction, arrival = null }: CategorySt
                 className="absolute inset-y-0 left-0 w-1 bg-cat"
               />
               <CategoryIcon icon={category.icon} color={category.color} size={20} />
-              <span className="min-w-0 flex-1 truncate text-label text-text">{category.name}</span>
+              <span className="min-w-0 flex-1 text-label text-balance text-text">{category.name}</span>
               {fraction ? <span className="shrink-0 text-label text-text-2 tabular-nums">{fraction}</span> : null}
             </m.span>
           ) : null}

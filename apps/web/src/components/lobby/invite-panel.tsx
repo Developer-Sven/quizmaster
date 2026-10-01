@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { de } from "@/i18n/de";
-import { QR_CODE_SIZE, qrCodeDataUrl } from "@/lib/client/qr";
-import { CopyIcon, QrCodeIcon, Share2Icon } from "@/lib/ui/icons";
+import { de } from "../../i18n/de";
+import { QR_CODE_SIZE, qrCodeDataUrl } from "../../lib/client/qr";
+import { CopyIcon, QrCodeIcon, Share2Icon } from "../../lib/ui/icons";
+import { Button } from "../ui/button";
+import { IconButton } from "../ui/icon-button";
+import { Skeleton } from "../ui/skeleton";
 
 export interface InvitePanelProps {
   /** „ABC 234“ */
@@ -22,18 +22,23 @@ export interface InvitePanelProps {
 /**
  * Code-Block der Lobby (docs/09 §6): Code im Stil `display` mit Sperrsatz, IconButtons Kopieren/Teilen,
  * darunter der einklappbare QR-Code (160 × 160) zum Einladungslink.
+ * Passen Code und Buttons nicht in eine Zeile (breite Codes wie „MWM WMW“ bei 360 px), rücken die Buttons
+ * rechtsbündig in die nächste Zeile – der Code bricht nie am Leerzeichen um und liest sich nie wie zwei Codes.
+ * Nur wenn er allein nicht passt (Text-Zoom), bricht er um statt über den Rand zu ragen.
  */
 export function InvitePanel({ displayCode, inviteUrl, onCopyCode, onShare, defaultQrOpen = false }: InvitePanelProps) {
   const [qrOpen, setQrOpen] = useState(defaultQrOpen);
   const qrId = useId();
   return (
     <section aria-label={de.fields.lobbyCode} className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <p data-testid="lobby-code" className="min-w-0 flex-1 text-display tracking-code text-text tabular-nums">
+      <div className="flex flex-wrap items-center gap-2">
+        <p data-testid="lobby-code" className="mr-auto text-display tracking-code text-text tabular-nums">
           {displayCode}
         </p>
-        <IconButton icon={CopyIcon} label={de.lobby.copyCode} onClick={onCopyCode} data-testid="lobby-copy" />
-        <IconButton icon={Share2Icon} label={de.lobby.shareLink} onClick={onShare} data-testid="lobby-share" />
+        <div className="ml-auto flex gap-2">
+          <IconButton icon={CopyIcon} label={de.lobby.copyCode} onClick={onCopyCode} data-testid="lobby-copy" />
+          <IconButton icon={Share2Icon} label={de.lobby.shareLink} onClick={onShare} data-testid="lobby-share" />
+        </div>
       </div>
       <div className="flex">
         <Button
@@ -57,18 +62,18 @@ export function InvitePanel({ displayCode, inviteUrl, onCopyCode, onShare, defau
 
 function QrImage({ url }: { url: string }) {
   const [image, setImage] = useState<{ url: string; src: string } | null>(null);
-  const [failed, setFailed] = useState(false);
+  // Fehlschlag gilt nur für die URL, zu der er gehört – ein neuer Link versucht es ohne Zurücksetzen erneut.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    setFailed(false);
     qrCodeDataUrl(url).then(
       (src) => {
         if (active) setImage({ url, src });
       },
       (error: unknown) => {
         console.error("QR-Code konnte nicht erzeugt werden:", error instanceof Error ? error.name : "unbekannt");
-        if (active) setFailed(true);
+        if (active) setFailedUrl(url);
       },
     );
     return () => {
@@ -76,7 +81,7 @@ function QrImage({ url }: { url: string }) {
     };
   }, [url]);
 
-  if (failed) return null;
+  if (failedUrl === url) return null;
   if (!image || image.url !== url) {
     return (
       <div className="size-40" aria-busy="true">

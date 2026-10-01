@@ -350,6 +350,10 @@
     color: var(--color-text);
     color-scheme: dark;
     -webkit-tap-highlight-color: transparent;
+    /* Fokus und Sprungziele nie unter der klebenden Kopfzeile bzw. Aktionsleiste: deren Höhe melden die
+       Leisten selbst (components/app/sticky-inset.tsx), ohne Leiste 0 (WCAG 2.4.11) */
+    scroll-padding-top: var(--sticky-top, 0px);
+    scroll-padding-bottom: var(--sticky-bottom, 0px);
   }
 
   /* Sichtbarer Fokus für alles Fokussierbare: 2 px primary mit 2 px Abstand (docs/09 §5) */

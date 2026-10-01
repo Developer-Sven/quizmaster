@@ -67,6 +67,75 @@ function compile(filename: string, code: string): CompileResult {
   return result;
 }
 
+/**
+ * Strengere Prüfungen wie eslint-plugin-react-hooks v7 (ADR-013: kein ESLint): `set-state-in-effect`
+ * (synchrones setState im Effect → zusätzlicher Render) und `static-components` (Komponenten im Render
+ * erzeugt). Der Compiler meldet sie nur mit diesen Optionen; gezählt wird je Datei und Kategorie.
+ */
+function strictFindings(filename: string, code: string): string[] {
+  const categories: string[] = [];
+  const options: PluginOptions = {
+    panicThreshold: "none",
+    target: "19",
+    environment: { validateNoSetStateInEffects: true, validateStaticComponents: true },
+    logger: {
+      logEvent(_file: string | null, event: LoggerEvent) {
+        if (event.kind === "CompileError") categories.push(String(event.detail.category));
+      },
+    },
+  };
+  babel.transformSync(code, {
+    filename,
+    babelrc: false,
+    configFile: false,
+    code: false,
+    sourceType: "module",
+    parserOpts: { plugins: filename.endsWith(".tsx") ? ["typescript", "jsx"] : ["typescript"] },
+    plugins: [[reactCompiler, options]],
+  });
+  return categories;
+}
+
+/**
+ * Bewusste Ausnahmen der strengeren Prüfung: Datei → Kategorie → höchstens so viele Funde, mit Grund. Neue Funde
+ * brechen den Test; behobene dürfen wegfallen (Obergrenze statt Gleichstand).
+ */
+const STRICT_ALLOWED: Record<string, Record<string, { max: number; reason: string }>> = {
+  "components/lobby/start-screen.tsx": {
+    EffectSetState: {
+      max: 1,
+      reason: "Namen aus localStorage erst nach der Hydration übernehmen (SSR kennt ihn nicht)",
+    },
+  },
+  "components/lobby/join-screen.tsx": {
+    EffectSetState: {
+      max: 1,
+      reason: "Namen aus localStorage erst nach der Hydration übernehmen (SSR kennt ihn nicht)",
+    },
+  },
+  "components/lobby/lobby-screen.tsx": {
+    EffectSetState: {
+      max: 1,
+      reason: "Mitgliedschaft beim Betreten aus localStorage – erst nach der Hydration lesbar",
+    },
+  },
+  "components/ui/category-icon.tsx": {
+    StaticComponents: { max: 3, reason: "Fehlalarm: Icon aus der statischen Kategorie-Map (lib/ui/category.ts)" },
+  },
+  "lib/client/use-server-clock.ts": {
+    EffectSetState: {
+      max: 1,
+      reason: "useServerNow: frische Serverzeit, sobald Grenzen oder Offset wechseln (ADR-020)",
+    },
+  },
+  "components/game/live-game.tsx": {
+    EffectSetState: { max: 1, reason: "„Fragen ansehen“: Ladezustand bei jedem (erneuten) Laden zurücksetzen" },
+  },
+  "components/game/use-choreography.ts": {
+    EffectSetState: { max: 1, reason: "Timer-Lauf neu aufsetzen, sobald Generation oder Offset wechseln" },
+  },
+};
+
 describe("React Compiler (Rules of React)", () => {
   // lokal ~1 s für alle Dateien; Puffer für langsame CI-Runner
   it("kompiliert jede Komponente und jeden Hook in apps/web/src ohne Abbruch", { timeout: 30_000 }, () => {
@@ -82,6 +151,42 @@ describe("React Compiler (Rules of React)", () => {
     expect(problems).toEqual([]);
     // Prüfstand läuft wirklich: Designsystem und Musterseite liefern Dutzende Komponenten/Hooks
     expect(compiled).toBeGreaterThanOrEqual(40);
+  });
+
+  it("hält die strengeren Hook-Regeln ein (set-state-in-effect, static-components) – Ausnahmen begründet", {
+    timeout: 30_000,
+  }, () => {
+    const sources = walk(SRC).filter((path) => /\.tsx?$/.test(path) && !path.endsWith(".test.ts"));
+    const problems: string[] = [];
+    for (const path of sources) {
+      const file = relative(SRC, path).split(sep).join("/");
+      const counts = new Map<string, number>();
+      for (const category of strictFindings(path, readFileSync(path, "utf8"))) {
+        counts.set(category, (counts.get(category) ?? 0) + 1);
+      }
+      for (const [category, count] of counts) {
+        const allowed = STRICT_ALLOWED[file]?.[category]?.max ?? 0;
+        if (count > allowed) problems.push(`${file}: ${count}× ${category} (erlaubt ${allowed})`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("erkennt synchrones setState im Effect und Komponenten aus dem Render (Selbsttest)", () => {
+    const effect = `import { useEffect, useState } from "react";
+export function Echo({ value }: { value: string }) {
+  const [shown, setShown] = useState("");
+  useEffect(() => {
+    setShown(value);
+  }, [value]);
+  return <span>{shown}</span>;
+}`;
+    expect(strictFindings("echo.tsx", effect)).toEqual(["EffectSetState"]);
+    const created = `export function Outer({ text }: { text: string }) {
+  const Inner = () => <b>{text}</b>;
+  return <Inner />;
+}`;
+    expect(strictFindings("outer.tsx", created)).toContain("StaticComponents");
   });
 
   it("erkennt einen Regelverstoß (Selbsttest des Prüfstands)", () => {

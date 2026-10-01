@@ -17,7 +17,13 @@ import type {
 } from "@quizmaster/shared";
 import { create } from "zustand";
 import { de } from "../i18n/de";
-import { type CategoryCatalog, lobbyNotices, mergeCategories, missingCategoryIds } from "../lib/client/game-view";
+import {
+  type CategoryCatalog,
+  lobbyNotices,
+  lobbyRosterChanges,
+  mergeCategories,
+  missingCategoryIds,
+} from "../lib/client/game-view";
 import { inferTimingMode, reconnectGraceMs } from "../lib/client/phase-clock";
 
 /**
@@ -91,6 +97,12 @@ export interface GameStoreState {
   categories: CategoryCatalog;
   soundOn: boolean;
   toasts: readonly ToastEntry[];
+  /**
+   * Letzte Ansage nur für Screenreader (Beitritt/Austritt in der Lobby, WCAG 4.1.3) – sichtbar ändert sich nur
+   * die Spielerliste. Wiederholt sich der Text, endet er abwechselnd mit einem geschützten Leerzeichen, damit
+   * die Live-Region erneut ansagt.
+   */
+  announcement: string | null;
   /** `notice: MAINTENANCE` – Banner bis zur nächsten neuen Verbindung */
   maintenance: boolean;
   /** `UPDATE_REQUIRED` – Banner „Neue Version verfügbar“ */
@@ -124,6 +136,7 @@ function initialState(): GameStoreState {
     categories: EMPTY_CATALOG,
     soundOn: true,
     toasts: [],
+    announcement: null,
     maintenance: false,
     updateRequired: false,
   };
@@ -146,7 +159,15 @@ function lobbyReset(): Partial<GameStoreState> {
     pendingPick: null,
     categories: EMPTY_CATALOG,
     toasts: [],
+    announcement: null,
   };
+}
+
+/** Neue Ansage; ein gleicher Text wie zuletzt bekommt ein geschütztes Leerzeichen (bzw. verliert es). */
+function nextAnnouncement(previous: string | null, texts: readonly string[]): string | null {
+  if (texts.length === 0) return previous;
+  const text = texts.join(" ");
+  return previous === text ? `${text}\u00a0` : text;
 }
 
 /**
@@ -196,6 +217,11 @@ export const gameActions = {
           ? withToast(toasts, "hostChanged", de.notices.hostChanged(notice.name))
           : withToast(toasts, "playerResigned", de.notices.playerResigned(notice.name));
     }
+    const roster = lobbyRosterChanges(state.lobby, next, state.self?.playerId ?? null);
+    const announcement = nextAnnouncement(state.announcement, [
+      ...roster.joined.map(de.announcements.playerJoined),
+      ...roster.left.map(de.announcements.playerLeft),
+    ]);
     const question = next.question;
     const pendingAnswer =
       state.pendingAnswer && question?.id === state.pendingAnswer.questionId ? state.pendingAnswer : null;
@@ -210,6 +236,7 @@ export const gameActions = {
       lastRev: next.rev,
       acceptNextState: false,
       toasts,
+      announcement,
       pendingAnswer,
       pendingPick,
       categories: next.turn ? mergeCategories(state.categories, next.turn.options) : state.categories,
@@ -256,7 +283,15 @@ export const gameActions = {
 
   /** Die Lobby ist für diese Person vorbei (entfernt, aufgegeben, geschlossen). */
   exitLobby(exit: LobbyExit): void {
-    useGameStore.setState({ exit, lobby: null, self: null, pendingAnswer: null, pendingPick: null, toasts: [] });
+    useGameStore.setState({
+      exit,
+      lobby: null,
+      self: null,
+      pendingAnswer: null,
+      pendingPick: null,
+      toasts: [],
+      announcement: null,
+    });
   },
 
   /** Vor `lobby:resume`: der nächste Zustand gilt unabhängig von `rev`. */
@@ -401,6 +436,9 @@ export const selectSoundOn = (state: GameStoreState) => state.soundOn;
 export const selectPendingAnswer = (state: GameStoreState) => state.pendingAnswer;
 export const selectPendingPick = (state: GameStoreState) => state.pendingPick;
 export const selectCurrentToast = (state: GameStoreState) => state.toasts[0] ?? null;
+export const selectAnnouncement = (state: GameStoreState) => state.announcement;
+/** Kam für die aktuelle Lobby schon ein Zustand an? Bleibt nach dem Ende (`exit`) gesetzt, bis die Lobby wechselt. */
+export const selectSawState = (state: GameStoreState) => state.lastRev !== null;
 export const selectMaintenance = (state: GameStoreState) => state.maintenance;
 export const selectUpdateRequired = (state: GameStoreState) => state.updateRequired;
 export const selectSelfId = (state: GameStoreState) => state.self?.playerId ?? null;

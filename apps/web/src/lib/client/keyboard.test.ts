@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   answerShortcut,
   categoryShortcut,
+  createModalityTracker,
   isEditableElement,
+  keyboardOperation,
   type ShortcutGuard,
   shortcutsAllowed,
   shouldClaimFocus,
@@ -98,5 +100,71 @@ describe("Fokus für die Kürzel-Gruppe", () => {
     expect(shouldClaimFocus(hudButton, stage, false, root)).toBe(false);
     expect(shouldClaimFocus(body, stage, true, root)).toBe(false);
     expect(shouldClaimFocus(hudButton, null, false, root)).toBe(false);
+  });
+
+  it("übernimmt einen Fokus, der in einem inerten Bereich liegt (z. B. Bühne unter dem Spielende)", () => {
+    const inertButton = { ...element(), closest: (selector: string) => (selector === "[inert]" ? body : null) };
+    expect(shouldClaimFocus(inertButton as unknown as Element, null, false, root)).toBe(true);
+    expect(shouldClaimFocus(inertButton as unknown as Element, stage, true, root)).toBe(false);
+  });
+});
+
+describe("Eingabeart für den Fokusring der Kürzel-Gruppe", () => {
+  it("zählt Bedien-Tasten als Tastatur – Tippen in ein Eingabefeld (Lobby-Code) nur mit Tab, Enter oder Esc", () => {
+    expect(keyboardOperation({ key: "Tab" }, false)).toBe(true);
+    expect(keyboardOperation({ key: "1" }, false)).toBe(true);
+    expect(keyboardOperation({ key: " " }, false)).toBe(true);
+    expect(keyboardOperation({ key: "A" }, true)).toBe(false);
+    expect(keyboardOperation({ key: "7" }, true)).toBe(false);
+    expect(keyboardOperation({ key: "Backspace" }, true)).toBe(false);
+    expect(keyboardOperation({ key: "Tab" }, true)).toBe(true);
+    expect(keyboardOperation({ key: "Enter" }, true)).toBe(true);
+    expect(keyboardOperation({ key: "Escape" }, true)).toBe(true);
+  });
+
+  it("ignoriert Bildschirmtastaturen (IME, keyCode 229) und reine Modifikatoren", () => {
+    expect(keyboardOperation({ key: "a", isComposing: true }, false)).toBe(false);
+    expect(keyboardOperation({ key: "Unidentified", keyCode: 229 }, false)).toBe(false);
+    expect(keyboardOperation({ key: "Process" }, false)).toBe(false);
+    expect(keyboardOperation({ key: "1", keyCode: 229 }, false)).toBe(false);
+    for (const key of ["Shift", "Control", "Alt", "Meta", "CapsLock"]) {
+      expect(keyboardOperation({ key }, false), key).toBe(false);
+    }
+  });
+
+  /** Tastendruck als Ereignis (Node kennt kein KeyboardEvent): `key`/`keyCode` als eigene Felder. */
+  function keydown(key: string, keyCode?: number): Event {
+    return Object.assign(new Event("keydown"), { key, keyCode });
+  }
+
+  it("verfolgt die zuletzt benutzte Eingabeart und meldet nur Wechsel", () => {
+    const target = new EventTarget();
+    let editable = false;
+    const tracker = createModalityTracker(target, () => editable);
+    const seen: Array<string | null> = [];
+    const unsubscribe = tracker.subscribe(() => seen.push(tracker.current()));
+    expect(tracker.current()).toBeNull();
+
+    // Auto-Beitritt: sechs Zeichen in das Code-Feld getippt – keine Tastatur-Bedienung
+    editable = true;
+    for (const key of ["A", "B", "C", "2", "3", "4"]) target.dispatchEvent(keydown(key));
+    expect(tracker.current()).toBeNull();
+
+    target.dispatchEvent(new Event("pointerdown"));
+    expect(tracker.current()).toBe("pointer");
+    target.dispatchEvent(keydown("Tab"));
+    expect(tracker.current()).toBe("keyboard");
+    editable = false;
+    target.dispatchEvent(keydown("1"));
+    target.dispatchEvent(keydown("Unidentified", 229));
+    expect(tracker.current()).toBe("keyboard");
+    target.dispatchEvent(new Event("pointerdown"));
+    expect(seen).toEqual(["pointer", "keyboard", "pointer"]);
+
+    unsubscribe();
+    tracker.stop();
+    target.dispatchEvent(keydown("Tab"));
+    expect(tracker.current()).toBe("pointer");
+    expect(seen).toHaveLength(3);
   });
 });

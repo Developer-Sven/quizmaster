@@ -2,10 +2,11 @@
 
 import { usePresence, usePresenceData, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, use, useEffect, useRef } from "react";
 import { cx } from "../../../lib/ui/cx";
 import { panelMotion } from "../../../lib/ui/motion-presets";
 import { DURATION_MS } from "../../../lib/ui/tokens";
+import { OverlayLayoutContext } from "./overlay-layout";
 
 export interface OverlayFrameProps {
   children: ReactNode;
@@ -43,9 +44,14 @@ export const OVERLAY_EXIT_FALLBACK_MS = DURATION_MS.base + DURATION_MS.slow;
  * Kinder nur gemeinsam entfernt, stapelten sich alle folgenden Overlays sichtbar übereinander. Hier wird jedes
  * Overlay nach dem Ausblenden (spätestens nach {@link OVERLAY_EXIT_FALLBACK_MS}) sicher entfernt. Ausblendende
  * Overlays sind inert (keine Klicks, kein Fokus, nicht vorgelesen) und tragen `data-exiting`.
+ *
+ * Niedrige Viewports (`OverlayLayoutContext` = `flow`, siehe game-screen.tsx): Das aktuelle Overlay steht im
+ * Dokumentfluss und wächst mit seinem Inhalt (der ganze Spielscreen scrollt); ein ausblendendes liegt nur noch
+ * absolut darüber, damit es keinen Platz mehr belegt.
  */
 export function OverlayFrame({ children, testId, scrim = false, center = false, leaving = false }: OverlayFrameProps) {
   const reduce = useReducedMotion() ?? false;
+  const flow = use(OverlayLayoutContext) === "flow";
   const [present, safeToRemove] = usePresence();
   // Übergang der Bühne (beim Einhängen der aktuelle, beim Entfernen der zum nachfolgenden Overlay)
   const transition: unknown = usePresenceData();
@@ -56,6 +62,8 @@ export function OverlayFrame({ children, testId, scrim = false, center = false, 
   // Commit, damit nie zwei Karten übereinander zu sehen sind; die Freigabe folgt im Effekt – erst nach dem
   // Layout-Effekt von AnimatePresence, der das ausblendende Kind registriert (vorher wäre sie wirkungslos).
   const removeNow = !present && (cut || leaving);
+  // Im Fluss nur, solange es das aktuelle Overlay ist (auch beim Ausblenden innerhalb der Phase).
+  const inFlow = flow && present;
   // Immer die aktuelle Freigabe-Funktion (sie wechselt mit jedem Render von AnimatePresence).
   const removeRef = useRef(safeToRemove);
   useEffect(() => {
@@ -83,14 +91,17 @@ export function OverlayFrame({ children, testId, scrim = false, center = false, 
       data-testid={testId}
       data-exiting={hidden ? "true" : undefined}
       className={cx(
-        "absolute inset-0 overflow-y-auto overscroll-contain",
+        inFlow
+          ? "relative flex grow flex-col"
+          : cx("absolute inset-0", flow ? "overflow-hidden" : "overflow-y-auto overscroll-contain"),
         scrim && "bg-scrim",
         removeNow && "invisible",
       )}
     >
       <div
         className={cx(
-          "mx-auto flex min-h-full w-full max-w-column flex-col px-gutter py-4",
+          "mx-auto flex w-full max-w-column flex-col px-gutter py-4",
+          inFlow ? "grow" : "min-h-full",
           center && "justify-center",
         )}
       >

@@ -17,7 +17,7 @@ describe("Button", () => {
     const html = renderHtml(Button, { variant: "primary", icon: PlayIcon }, "Spiel starten");
     expect(html).toMatch(/^<button[^>]*type="button"/);
     expect(html).toContain("bg-primary text-on-primary");
-    expect(html).toContain("h-14");
+    expect(html).toContain("min-h-14");
     expect(html).toContain("is-focus:outline-2 is-focus:outline-offset-2 is-focus:outline-primary");
     expect(html).toContain("lucide-play");
     expect(html).toContain("Spiel starten");
@@ -43,7 +43,7 @@ describe("Button", () => {
 
   it("hat kompakt 44 px Höhe mit 48-px-Trefferfläche", () => {
     const html = renderHtml(Button, { variant: "ghost", size: "compact" }, "Revanche");
-    expect(html).toContain("h-11");
+    expect(html).toContain("min-h-11");
     expect(html).toContain("before:-inset-y-0.5");
   });
 
@@ -51,6 +51,27 @@ describe("Button", () => {
     const html = renderHtml(Button, { variant: "destructive" }, "Verlassen");
     expect(html).toContain("text-danger");
     expect(html).not.toContain("bg-danger");
+  });
+
+  it("zeigt die Hauptaktion auch im Kontrastmodus als Button: transparenter Rahmen (WCAG 1.4.11)", () => {
+    // forced-colors macht die orange Fläche zu Canvas – nur ein Rahmen (dann in Systemfarbe) bleibt sichtbar.
+    const primary = renderHtml(Button, { variant: "primary" }, "Spiel starten");
+    expect(primary).toContain("border border-transparent bg-primary");
+    // Sekundär und destruktiv tragen ihren sichtbaren Rahmen ohnehin.
+    expect(renderHtml(Button, { variant: "secondary" }, "Beitreten")).toContain("border border-line-strong");
+    expect(renderHtml(Button, { variant: "destructive" }, "Verlassen")).toContain("border border-line-strong");
+  });
+
+  it("schneidet Beschriftungen nie ab: bricht bei Text-Zoom um und wächst mit (WCAG 1.4.4)", () => {
+    for (const html of [
+      renderHtml(Button, { variant: "primary", icon: PlayIcon, block: true }, "Spiel starten"),
+      renderHtml(Button, { variant: "ghost", size: "compact" }, "QR-Code zeigen"),
+      renderHtml(ButtonLink, { variant: "secondary", href: "/" }, "Zur Startseite"),
+    ]) {
+      expect(html).not.toContain("truncate");
+      expect(html).not.toMatch(/(?:^|[\s"])h-1[14](?:[\s"]|$)/);
+      expect(html).toMatch(/<span class="min-w-0 text-center wrap-break-word">[^<]+<\/span>/);
+    }
   });
 
   it("rendert ButtonLink als Link mit denselben Klassen", () => {

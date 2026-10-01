@@ -3,6 +3,7 @@ import { myChoiceFor } from "../lib/client/game-view";
 import { testLobby, testPlayer, testQuestion, testSelf } from "../lib/client/test-support";
 import {
   gameActions,
+  selectAnnouncement,
   selectConnectionOverlayVisible,
   selectCurrentToast,
   selectPhase,
@@ -252,6 +253,37 @@ describe("Hinweise und Kategorien", () => {
     expect(state().toasts.filter((toast) => toast.text === "Code kopiert.")).toHaveLength(1);
     gameActions.applyNotice("SERVER_RESTART");
     expect(state().toasts.at(-1)?.text).toBe("Neustart – gleich geht es weiter.");
+  });
+
+  it("sagt Beitritte und Austritte in der Lobby an (nur Screenreader, kein Toast)", () => {
+    const mia = testPlayer("p1", { isHost: true, name: "Mia" });
+    const ben = testPlayer("p2", { name: "Ben" });
+    gameActions.applyPublicState(testLobby({ rev: 1, players: [mia] }));
+    gameActions.applyPrivateState(testSelf("p1"));
+    expect(selectAnnouncement(state())).toBeNull();
+
+    gameActions.applyPublicState(testLobby({ rev: 2, players: [mia, ben] }));
+    expect(selectAnnouncement(state())).toBe("Ben ist beigetreten.");
+    gameActions.applyPublicState(testLobby({ rev: 3, players: [mia] }));
+    expect(selectAnnouncement(state())).toBe("Ben hat die Lobby verlassen.");
+    // Zweimal hintereinander derselbe Text (zweiter Bot gleichen Namens): Er muss sich unterscheiden, sonst
+    // schwiege die Live-Region beim zweiten Mal.
+    const bot = testPlayer("p3", { name: "Bot", isBot: true });
+    const botTwin = testPlayer("p4", { name: "Bot", isBot: true });
+    gameActions.applyPublicState(testLobby({ rev: 4, players: [mia, bot] }));
+    expect(selectAnnouncement(state())).toBe("Bot ist beigetreten.");
+    gameActions.applyPublicState(testLobby({ rev: 5, players: [mia, bot, botTwin] }));
+    expect(selectAnnouncement(state())).toBe("Bot ist beigetreten.\u00a0");
+    gameActions.applyPublicState(testLobby({ rev: 6, players: [mia] }));
+    expect(selectAnnouncement(state())).toBe("Bot hat die Lobby verlassen. Bot hat die Lobby verlassen.");
+    expect(state().toasts).toEqual([]);
+
+    // Ein Zustand ohne Änderung der Liste lässt die letzte Ansage stehen; das Verlassen der Lobby löscht sie.
+    const settings = { rounds: 4, questionsPerCategory: 3, maxPlayers: 8 };
+    gameActions.applyPublicState(testLobby({ rev: 7, players: [mia], settings }));
+    expect(selectAnnouncement(state())).toBe("Bot hat die Lobby verlassen. Bot hat die Lobby verlassen.");
+    gameActions.resetLobby();
+    expect(selectAnnouncement(state())).toBeNull();
   });
 
   it("merkt sich die Kategorien aus den Zug-Optionen", () => {

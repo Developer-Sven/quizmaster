@@ -3,18 +3,20 @@
 import type { BoardRow, PublicLobbyState, PublicPlayer } from "@quizmaster/shared";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { useId, useState } from "react";
-import { Avatar } from "@/components/ui/avatar";
-import { Board } from "@/components/ui/board";
-import { Button } from "@/components/ui/button";
-import { Podium } from "@/components/ui/podium";
-import { type RankingEntry, RankingList } from "@/components/ui/ranking-list";
-import { de } from "@/i18n/de";
-import { type CategoryCatalog, duelSides, findPlayer } from "@/lib/client/game-view";
-import { elapsedMs } from "@/lib/client/phase-clock";
-import { cx } from "@/lib/ui/cx";
-import { ChevronDownIcon, ChevronUpIcon, CrownIcon } from "@/lib/ui/icons";
-import { EASING, seconds } from "@/lib/ui/tokens";
+import { useEffect, useId, useRef, useState } from "react";
+import { de } from "../../../i18n/de";
+import { type CategoryCatalog, duelSides, findPlayer } from "../../../lib/client/game-view";
+import { claimGroupFocus } from "../../../lib/client/keyboard";
+import { elapsedMs } from "../../../lib/client/phase-clock";
+import { cx } from "../../../lib/ui/cx";
+import { ChevronDownIcon, ChevronUpIcon, CrownIcon } from "../../../lib/ui/icons";
+import { EASING, seconds } from "../../../lib/ui/tokens";
+import { AppFooter } from "../../app/app-footer";
+import { Avatar } from "../../ui/avatar";
+import { Board } from "../../ui/board";
+import { Button } from "../../ui/button";
+import { Podium } from "../../ui/podium";
+import { type RankingEntry, RankingList } from "../../ui/ranking-list";
 import {
   CHOREOGRAPHY,
   enterMotion,
@@ -77,8 +79,13 @@ function rankingEntries(results: GameResults, participants: readonly PublicPlaye
  * Spielende (Phase `game_over`, docs/09 §6 + §7.9): 0–480 ms Scrim, die Ergebnis-Headline blendet ein
  * (0,96 → 1). 2 Personen: „7 : 5“, beide Avatare 88 px fahren von außen ein, die Krone poppt danach über der
  * Sieger:in (0 → 1,15 → 1, 320 ms). 3–8: Podest-Säulen wachsen gestaffelt (Platz 3 → 2 → 1, je 160 ms), dann
- * erscheint die Rangliste. Darunter die Tafel, eingeklappt („Spielverlauf“). Kein Konfetti, kein Lichteffekt.
+ * erscheint die Rangliste. Darunter die Tafel, eingeklappt („Spielverlauf“), und der Link „Regeln“ (neuer Tab –
+ * im laufenden Spiel gibt es ihn nicht). Kein Konfetti, kein Lichteffekt.
  * Ton `win`/`lose`/`turn` als Cue der Bühne. Wer später einsteigt, sieht den Endzustand ohne Wiederholung.
+ *
+ * Die Headline ist die Überschrift des Ergebnisses und übernimmt beim Erscheinen den Fokus, wenn er frei ist –
+ * Screenreader und Tastatur starten am Ergebnis, die Aktionen folgen per Tab. Aufgeklappt rückt der
+ * Spielverlauf ins Bild (er liegt bei vielen Personen sonst unter dem sichtbaren Bereich).
  */
 export function GameOverOverlay({
   results,
@@ -94,6 +101,25 @@ export function GameOverOverlay({
   const [boardOpen, setBoardOpen] = useState(defaultBoardOpen);
   const boardId = useId();
   const { now, enteredAt } = useOverlayClock(phaseStartedAt, [phaseStartedAt + END.podiumAtMs]);
+  const headlineRef = useRef<HTMLHeadingElement>(null);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const hasResults = results !== null;
+
+  useEffect(() => {
+    const headline = headlineRef.current;
+    if (hasResults && headline) claimGroupFocus(headline, headline.closest('[data-testid="overlay-game-over"]'));
+  }, [hasResults]);
+
+  const toggleHistory = () => {
+    const open = !boardOpen;
+    setBoardOpen(open);
+    if (!open) return;
+    // Nach dem Aufklappen (nächster Frame): Knopf und Tafel ins Bild holen – bei reduzierter Bewegung ohne Gleiten.
+    window.requestAnimationFrame(() =>
+      historyRef.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }),
+    );
+  };
+
   if (!results)
     return (
       <OverlayFrame testId="overlay-game-over" scrim>
@@ -118,18 +144,22 @@ export function GameOverOverlay({
 
   return (
     <OverlayFrame testId="overlay-game-over" scrim>
-      <div className="flex flex-col gap-6 pb-4">
-        <m.p
+      <div className="flex flex-col gap-4 pb-4">
+        <m.h2
           {...headlineMotion}
+          ref={headlineRef}
+          tabIndex={-1}
           data-testid="game-over-headline"
           className={cx(
-            "pt-4 text-center text-text",
+            // Fokusziel ohne Ring: Die Überschrift ist kein Bedienelement (der Ring gehört den Aktionen). Passt
+            // das Wort bei großer Schrift nicht in die Spalte, wird es getrennt statt abgeschnitten (WCAG 1.4.4).
+            "pt-4 text-center text-text hyphens-auto wrap-break-word focus-visible:outline-hidden",
             // „Unentschieden“ passt in `display` erst ab 390 px Breite – darunter `h1`, statt abzuschneiden.
             headline.length > LONG_HEADLINE_CHARS ? "text-h1 xs:text-display" : "text-display",
           )}
         >
           {headline}
-        </m.p>
+        </m.h2>
 
         {duel ? (
           <DuelResult results={results} left={duel[0]} right={duel[1]} reduce={reduce} enteredAt={enteredAt} />
@@ -149,7 +179,7 @@ export function GameOverOverlay({
         )}
 
         {board.length > 0 ? (
-          <div className="flex flex-col gap-3">
+          <div ref={historyRef} className="flex scroll-my-4 flex-col gap-3">
             <div className="flex">
               <Button
                 variant="ghost"
@@ -157,7 +187,7 @@ export function GameOverOverlay({
                 icon={boardOpen ? ChevronUpIcon : ChevronDownIcon}
                 aria-expanded={boardOpen}
                 aria-controls={boardId}
-                onClick={() => setBoardOpen((open) => !open)}
+                onClick={toggleHistory}
                 data-testid="game-over-history"
               >
                 {de.result.history}
@@ -178,6 +208,9 @@ export function GameOverOverlay({
             </div>
           </div>
         ) : null}
+
+        {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach der Frist entfernt (keine Revanche mehr). */}
+        <AppFooter newTab />
       </div>
     </OverlayFrame>
   );
@@ -208,9 +241,12 @@ function DuelResult({ results, left, right, reduce, enteredAt }: DuelResultProps
   return (
     <div className="flex flex-col items-center gap-6">
       <m.p {...score} data-testid="game-over-score" className="text-h1 text-text tabular-nums">
-        {de.game.duelScore(scoreOf(left), scoreOf(right))}
+        {/* sichtbar „7 : 5“, vorgelesen mit Namen (die Avatare stehen erst danach) */}
+        <span aria-hidden="true">{de.game.duelScore(scoreOf(left), scoreOf(right))}</span>
+        <span className="sr-only">{de.a11y.duelScore(left.name, scoreOf(left), right.name, scoreOf(right))}</span>
       </m.p>
-      <div className="flex w-full justify-center gap-10">
+      {/* bei großer Schrift untereinander statt über den Rand */}
+      <div className="flex w-full flex-wrap justify-center gap-10">
         {sides.map((player, side) => {
           const winner = player.id === winnerId;
           const entrance = enterMotion(

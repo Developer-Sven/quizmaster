@@ -1,37 +1,23 @@
 import type { Metadata, Viewport } from "next";
-import { Rubik } from "next/font/google";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 import { PwaRegistrar } from "@/components/pwa/pwa-registrar";
-import { de } from "../i18n/de";
+import { getWebEnv } from "../env";
+import { rootMetadata } from "../lib/server/site-metadata";
 import { THEME_COLOR } from "../lib/ui/tokens";
+import { rubik } from "./fonts";
 import "./globals.css";
 
-/** Einzige Schrift (docs/09 §3): Rubik, selbst gehostet über next/font, als Variable für `--font-sans`. */
-const rubik = Rubik({
-  subsets: ["latin", "latin-ext"],
-  display: "swap",
-  variable: "--font-rubik",
-});
-
 /**
- * Metadaten inkl. PWA (docs/10): Das Manifest verlinkt Next aus `app/manifest.ts`. iOS: als Web-App startbar,
- * Statusleiste durchscheinend (Inhalt reicht darunter – Safe Areas über `pt-safe`), Home-Bildschirm-Icon
- * 180 × 180 ohne Transparenz. Favicon als SVG mit ICO-Rückfall (Icons: `scripts/generate-icons.ts`).
+ * Metadaten inkl. PWA (docs/10, `lib/server/site-metadata.ts`): Titel „quizmaster“ mit Vorlage für Unterseiten,
+ * Beschreibung wie im Manifest, iOS-/Icon-Angaben; das Manifest verlinkt Next aus `app/manifest.ts`. Das
+ * robots-Meta-Tag (`noindex, nofollow`, solange `SEARCH_INDEXING` aus ist – ADR-030) hängt an der Laufzeit-Env:
+ * erst `connection()` (der Build läuft ohne Env und rendert keine Seite vor), dann die Env.
  */
-export const metadata: Metadata = {
-  title: de.app.name,
-  description: de.pwa.manifest.description,
-  applicationName: de.app.name,
-  appleWebApp: { capable: true, title: de.app.name, statusBarStyle: "black-translucent" },
-  icons: {
-    icon: [
-      { url: "/icons/favicon.ico", sizes: "32x32" },
-      { url: "/icons/favicon.svg", type: "image/svg+xml" },
-    ],
-    apple: [{ url: "/icons/apple-icon-180.png", sizes: "180x180", type: "image/png" }],
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  await connection();
+  return rootMetadata(getWebEnv());
+}
 
 /** Viewport und Theme-Color (docs/10): `viewport-fit=cover` für die Safe Areas im Standalone-Modus. */
 export const viewport: Viewport = {

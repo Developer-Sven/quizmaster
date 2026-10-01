@@ -38,26 +38,24 @@ export function useServerNow(boundaries: readonly number[]): number {
 
 /**
  * Restzeit bis zu einem Client-Zeitpunkt, einmal pro Sekunde aktualisiert (Frist-Countdown im
- * Verbindungs-Overlay). `null` ohne Ziel.
+ * Verbindungs-Overlay). `null` ohne Ziel – abgeleitet statt per setState im Effect; ein Wert gilt nur für das
+ * Ziel, zu dem er berechnet wurde (bis der Effect das neue Ziel misst, `null` wie bisher).
  */
 export function useCountdown(untilClientMs: number | null): number | null {
   const { now: clock } = useClientClock();
-  const [remaining, setRemaining] = useState<number | null>(() =>
-    untilClientMs === null ? null : Math.max(0, untilClientMs - clock()),
+  const [tick, setTick] = useState<{ until: number; remaining: number } | null>(() =>
+    untilClientMs === null ? null : { until: untilClientMs, remaining: Math.max(0, untilClientMs - clock()) },
   );
 
   useEffect(() => {
-    if (untilClientMs === null) {
-      setRemaining(null);
-      return;
-    }
-    const update = () => setRemaining(Math.max(0, untilClientMs - clock()));
+    if (untilClientMs === null) return;
+    const update = () => setTick({ until: untilClientMs, remaining: Math.max(0, untilClientMs - clock()) });
     update();
     const timer = window.setInterval(update, 1_000);
     return () => window.clearInterval(timer);
   }, [untilClientMs, clock]);
 
-  return remaining;
+  return untilClientMs !== null && tick?.until === untilClientMs ? tick.remaining : null;
 }
 
 /** Zähler, der alle `intervalMs` steigt, solange `active` (z. B. wandernder Rahmen der Kategoriewahl). */

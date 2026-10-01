@@ -16,7 +16,13 @@
  *
  * Damit die Kürzel ohne Suchen wirken, bekommt die Gruppe beim Öffnen den Fokus – aber nur, wenn er gerade
  * „frei“ ist (auf `<body>` oder in der Bühne, siehe {@link shouldClaimFocus}); er wird nie aus dem HUD, einem
- * Dialog oder einem Eingabefeld gezogen. Der Fokus der Gruppe ist sichtbar (Ring `primary`, docs/09 §5).
+ * Dialog oder einem Eingabefeld gezogen.
+ *
+ * **Fokusring der Gruppe:** Der Ring (`primary`, docs/09 §5) erscheint nur, wenn die Seite zuletzt per Tastatur
+ * bedient wurde ({@link createModalityTracker}), und nur, solange die Gruppe bedienbar ist. Ein oranger Rahmen um
+ * alle Antworten bzw. Kacheln wirkte sonst wie eine Auswahl (Orange = „antippbar oder zählt gerade“), etwa nach
+ * dem Auto-Beitritt per Code-Eingabe oder nach dem Einloggen. Den Fokus selbst übernimmt die Gruppe trotzdem:
+ * Kürzel wirken auch für Maus-plus-Tastatur, und Screenreader lesen beim Öffnen die Frage (Gruppenname).
  */
 import { type AnswerIndex, answerIndexForKey, categoryIndexForKey } from "../ui/shortcuts";
 
@@ -92,8 +98,9 @@ export function readShortcutGuard(group: HTMLElement): ShortcutGuard {
 }
 
 /**
- * Darf die Gruppe den Fokus übernehmen? Nur wenn er frei ist: nirgends, auf `<body>`/`<html>` oder innerhalb
- * der Bühne (`stage`, z. B. auf einem Element des gerade ausgeblendeten Overlays) – und kein Sheet/Dialog offen.
+ * Darf die Gruppe den Fokus übernehmen? Nur wenn er frei ist: nirgends, auf `<body>`/`<html>`, innerhalb der
+ * Bühne (`stage`, z. B. auf einem Element des gerade ausgeblendeten Overlays) oder in einem inerten Bereich
+ * (dort ist er ohnehin verloren, z. B. unter dem Spielende) – und kein Sheet/Dialog offen.
  */
 export function shouldClaimFocus(
   active: Element | null,
@@ -103,11 +110,108 @@ export function shouldClaimFocus(
 ): boolean {
   if (modalOpen) return false;
   if (active === null || active === root.body || active === root.documentElement) return true;
+  if (typeof active.closest === "function" && active.closest("[inert]") !== null) return true;
   return stage?.contains(active) ?? false;
 }
 
-/** Setzt den Fokus in die Gruppe, wenn er frei ist (siehe {@link shouldClaimFocus}). */
-export function claimGroupFocus(group: HTMLElement, stage: Element | null): void {
+/**
+ * Setzt den Fokus in die Gruppe, wenn er frei ist (siehe {@link shouldClaimFocus}). Liefert, ob die Gruppe den
+ * Fokus jetzt hat (z. B. für eine Ansage, wenn nicht).
+ */
+export function claimGroupFocus(group: HTMLElement, stage: Element | null): boolean {
   const modalOpen = document.querySelector(MODAL_SELECTOR) !== null;
   if (shouldClaimFocus(document.activeElement, stage, modalOpen, document)) group.focus({ preventScroll: true });
+  return document.activeElement === group;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Eingabeart (Tastatur oder Zeigen/Tippen) – nur für die Sichtbarkeit des Gruppen-Fokusrings
+// ---------------------------------------------------------------------------------------------------
+
+export type InputModality = "keyboard" | "pointer";
+
+export interface ModalityKeyEvent {
+  key: string;
+  /** 229 = Eingabe über eine Bildschirmtastatur bzw. IME (Android) */
+  keyCode?: number;
+  isComposing?: boolean;
+}
+
+/** Reine Modifikatoren bedienen nichts. */
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "OS", "Fn", "CapsLock"]);
+
+/** In einem Eingabefeld zählen nur diese Tasten als Bedienung der Seite (Fokus wechseln, absenden, abbrechen). */
+const FIELD_NAVIGATION_KEYS = new Set(["Tab", "Enter", "Escape"]);
+
+/** IME-Tastendrücke tragen keinen echten Tastenwert. */
+const IME_KEYS = new Set(["Process", "Unidentified"]);
+
+/**
+ * Bedient dieser Tastendruck die Seite per Tastatur? Nein bei Bildschirmtastatur/IME (`keyCode` 229,
+ * `isComposing`), reinen Modifikatoren und beim Tippen in ein Eingabefeld (`editable`) – etwa dem Lobby-Code mit
+ * Auto-Beitritt; dort zählen nur Tab, Enter und Esc.
+ */
+export function keyboardOperation(event: ModalityKeyEvent, editable: boolean): boolean {
+  if (event.isComposing || event.keyCode === 229 || IME_KEYS.has(event.key)) return false;
+  if (MODIFIER_KEYS.has(event.key)) return false;
+  return !editable || FIELD_NAVIGATION_KEYS.has(event.key);
+}
+
+export interface ModalityTracker {
+  /** zuletzt benutzte Eingabeart; `null`, solange nichts davon geschah */
+  current(): InputModality | null;
+  /** meldet jeden Wechsel; liefert die Abmeldung */
+  subscribe(listener: () => void): () => void;
+  stop(): void;
+}
+
+function isModalityKeyEvent(event: Event): event is Event & ModalityKeyEvent {
+  return typeof (event as Partial<ModalityKeyEvent>).key === "string";
+}
+
+/**
+ * Verfolgt die Eingabeart an `target` (im Browser `document`, Capture-Phase): Bedien-Tasten (siehe
+ * {@link keyboardOperation}) → „keyboard“, `pointerdown` (Maus, Finger, Stift) → „pointer“.
+ */
+export function createModalityTracker(
+  target: EventTarget,
+  isEditable: (target: EventTarget | null) => boolean,
+): ModalityTracker {
+  let modality: InputModality | null = null;
+  const listeners = new Set<() => void>();
+  const change = (next: InputModality) => {
+    if (modality === next) return;
+    modality = next;
+    for (const listener of listeners) listener();
+  };
+  const onKeyDown = (event: Event) => {
+    if (isModalityKeyEvent(event) && keyboardOperation(event, isEditable(event.target))) change("keyboard");
+  };
+  const onPointerDown = () => change("pointer");
+  target.addEventListener("keydown", onKeyDown, { capture: true, passive: true });
+  target.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
+  return {
+    current: () => modality,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    stop() {
+      target.removeEventListener("keydown", onKeyDown, { capture: true });
+      target.removeEventListener("pointerdown", onPointerDown, { capture: true });
+      listeners.clear();
+    },
+  };
+}
+
+let pageTracker: ModalityTracker | null = null;
+
+/**
+ * Eingabeart dieser Seite (einmal je Seite, im Browser). Früh starten – beim Betreten der Lobby
+ * (`preloadOverlays`) –, damit schon die erste Kategoriewahl weiß, ob per Tastatur bedient wird.
+ */
+export function pageModalityTracker(): ModalityTracker | null {
+  if (typeof document === "undefined") return null;
+  pageTracker ??= createModalityTracker(document, (target) => target instanceof Element && isEditableElement(target));
+  return pageTracker;
 }

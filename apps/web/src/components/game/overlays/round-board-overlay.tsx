@@ -3,11 +3,7 @@
 import type { BoardRow, PublicPlayer } from "@quizmaster/shared";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { Avatar } from "@/components/ui/avatar";
-import { Board, type BoardPlayer, type BoardRowData, fillDelayMs } from "@/components/ui/board";
-import { CategoryBadge } from "@/components/ui/category-badge";
-import { ResultSquare } from "@/components/ui/result-square";
-import { de } from "@/i18n/de";
+import { de } from "../../../i18n/de";
 import {
   type CategoryCatalog,
   categoryVisual,
@@ -15,10 +11,14 @@ import {
   firstRowOfRound,
   pointsUntilRound,
   rankChanges,
-} from "@/lib/client/game-view";
-import { cx } from "@/lib/ui/cx";
-import { ArrowDownIcon, ArrowUpIcon } from "@/lib/ui/icons";
-import { squareResult } from "@/lib/ui/results";
+} from "../../../lib/client/game-view";
+import { cx } from "../../../lib/ui/cx";
+import { ArrowDownIcon, ArrowUpIcon } from "../../../lib/ui/icons";
+import { squareResult } from "../../../lib/ui/results";
+import { Avatar } from "../../ui/avatar";
+import { Board, type BoardPlayer, type BoardRowData, fillDelayMs } from "../../ui/board";
+import { CategoryBadge } from "../../ui/category-badge";
+import { ResultSquare } from "../../ui/result-square";
 import { CHOREOGRAPHY, enterMotion, momentAhead, PANEL_FROM, remainingDelayMs } from "../choreography";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
@@ -146,75 +146,115 @@ function squareLines(count: number): number[][] {
   return result;
 }
 
+/** Platzwechsel neben dem Gesamtstand – nur Bild; Screenreader hören ihn mit Namen im Spielstand-Text. */
 function RankArrow({ change }: { change: "up" | "down" | null | undefined }) {
-  if (change === "up") return <ArrowUpIcon role="img" aria-label={de.a11y.rankUp} size={16} className="text-text-2" />;
-  if (change === "down") {
-    return <ArrowDownIcon role="img" aria-label={de.a11y.rankDown} size={16} className="text-text-2" />;
-  }
+  if (change === "up") return <ArrowUpIcon aria-hidden="true" size={16} className="text-text-2" />;
+  if (change === "down") return <ArrowDownIcon aria-hidden="true" size={16} className="text-text-2" />;
   return null;
 }
 
-/** Duell-Layout der Tafel (2 Personen, docs/01 §Rundentafel). */
+/** Spielstand des Duells mit Namen und Platzwechseln, z. B. „Mia: 8 Punkte, Ben: 11 Punkte. Ben: Platz verbessert“. */
+export function duelStandingText(left: BoardPlayer, right: BoardPlayer): string {
+  const change = (player: BoardPlayer) =>
+    player.rankChange === "up"
+      ? de.a11y.rankUpOf(player.name)
+      : player.rankChange === "down"
+        ? de.a11y.rankDownOf(player.name)
+        : null;
+  return [de.a11y.duelScore(left.name, left.score, right.name, right.score), change(left), change(right)]
+    .filter((part): part is string => part !== null)
+    .join(". ");
+}
+
+/**
+ * Duell-Layout der Tafel (2 Personen, docs/01 §Rundentafel, docs/09 §7.8): links Person A, Mitte Kategorie,
+ * rechts Person B, oben der Gesamtstand. Als Tabelle in Lesereihenfolge (WCAG 1.3.1, 1.3.2): Spaltenköpfe sind
+ * die beiden Personen, Zeilenköpfe die Kategorie – Screenreader nennen so zu jedem Kästchen Person und Zug.
+ */
 function DuelBoard({ left, right, rows, newFrom, questionsPerTurn, enteredAt }: DuelBoardProps) {
   if (!left || !right) return null;
-  const sides = [left, right] as const;
   const lines = squareLines(Math.max(1, questionsPerTurn));
-  return (
-    <section aria-label={de.a11y.boardCaption} className="rounded-xl border border-line bg-surface-1 p-4">
-      <div className="flex items-center gap-3">
-        {sides.map((player, side) => (
-          <div
-            key={player.id}
-            className={cx("flex min-w-0 flex-1 flex-col items-center gap-1", side === 0 ? "order-1" : "order-3")}
-          >
-            <Avatar name={player.name} color={player.color} size={56} resigned={player.resigned} />
-            <span className="max-w-full truncate text-label text-text">{player.name}</span>
-          </div>
-        ))}
-        <p className="order-2 flex shrink-0 items-center gap-1 text-h1 text-text tabular-nums">
-          <RankArrow change={left.rankChange} />
-          <span>{de.game.duelScore(left.score, right.score)}</span>
-          <RankArrow change={right.rankChange} />
-        </p>
-      </div>
-      <ol className="mt-4 flex flex-col">
-        {rows.map((row, rowIndex) => {
-          const fresh = rowIndex >= newFrom ? rowIndex - newFrom : -1;
-          return (
-            <li key={row.key} className="grid grid-cols-3 items-center border-t border-line py-2">
-              {sides.map((player, side) => (
-                <span
-                  key={player.id}
-                  className={cx("flex flex-col gap-1", side === 0 ? "order-1 items-start" : "order-3 items-end")}
-                >
-                  {lines.map((line) => (
-                    <span key={line[0]} className="flex gap-1">
-                      {line.map((position) => (
-                        <ResultSquare
-                          key={position}
-                          result={squareResult(row.results[player.id]?.[position])}
-                          appearDelayMs={
-                            fresh < 0
-                              ? undefined
-                              : remainingDelayMs(
-                                  fillDelayMs(fresh, side, position),
-                                  CHOREOGRAPHY.roundBoard.squareMs,
-                                  enteredAt,
-                                )
-                          }
-                        />
-                      ))}
-                    </span>
-                  ))}
-                </span>
+  const head = (player: BoardPlayer) => (
+    <th scope="col" className="w-1/2 pb-4 align-top font-normal">
+      <span className="flex min-w-0 flex-col items-center gap-1">
+        <Avatar name={player.name} color={player.color} size={56} resigned={player.resigned} />
+        <span
+          className={cx("max-w-full truncate text-label", player.resigned ? "text-text-2 line-through" : "text-text")}
+        >
+          {player.name}
+        </span>
+        {player.resigned ? <span className="sr-only">{de.a11y.statusResigned}</span> : null}
+      </span>
+    </th>
+  );
+  const squares = (row: BoardRowData, rowIndex: number, player: BoardPlayer, side: 0 | 1) => {
+    const fresh = rowIndex >= newFrom ? rowIndex - newFrom : -1;
+    return (
+      <td className="py-2">
+        <span className={cx("flex flex-col gap-1", side === 0 ? "items-start" : "items-end")}>
+          {lines.map((line) => (
+            <span key={line[0]} className="flex gap-1">
+              {line.map((position) => (
+                <ResultSquare
+                  key={position}
+                  result={squareResult(row.results[player.id]?.[position])}
+                  appearDelayMs={
+                    fresh < 0
+                      ? undefined
+                      : remainingDelayMs(
+                          fillDelayMs(fresh, side, position),
+                          CHOREOGRAPHY.roundBoard.squareMs,
+                          enteredAt,
+                        )
+                  }
+                />
               ))}
-              <span className="order-2 flex justify-center">
-                <CategoryBadge category={row.category} compact />
+            </span>
+          ))}
+        </span>
+      </td>
+    );
+  };
+  return (
+    // Wie die Tafel ab 3 Personen: Wird sie bei großer Schrift breiter als die Spalte, scrollt nur sie
+    // waagerecht (per Tastatur erreichbar, WCAG 2.1.1) – nie die ganze Seite.
+    <section
+      aria-label={de.a11y.boardCaption}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: waagerecht scrollbare Tafel muss per Tastatur scrollbar sein
+      tabIndex={0}
+      className="relative isolate overflow-x-auto rounded-xl border border-line bg-surface-1 p-4"
+    >
+      <p className="sr-only">{duelStandingText(left, right)}</p>
+      <table className="w-full border-collapse">
+        <caption className="sr-only">{de.a11y.boardCaption}</caption>
+        <thead>
+          <tr>
+            {head(left)}
+            <th scope="col" className="px-2 pb-4 align-middle font-normal whitespace-nowrap">
+              <span className="sr-only">{de.a11y.boardCategory}</span>
+              <span aria-hidden="true" className="flex items-center gap-1 text-h1 text-text tabular-nums">
+                <RankArrow change={left.rankChange} />
+                <span>{de.game.duelScore(left.score, right.score)}</span>
+                <RankArrow change={right.rankChange} />
               </span>
-            </li>
-          );
-        })}
-      </ol>
+            </th>
+            {head(right)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={row.key} className="border-t border-line">
+              {squares(row, rowIndex, left, 0)}
+              <th scope="row" className="py-2 font-normal">
+                <span className="flex justify-center">
+                  <CategoryBadge category={row.category} compact />
+                </span>
+              </th>
+              {squares(row, rowIndex, right, 1)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }

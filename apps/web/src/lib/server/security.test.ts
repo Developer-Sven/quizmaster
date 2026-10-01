@@ -195,6 +195,12 @@ describe("next.config.ts headers()", () => {
     expect(nextConfig.poweredByHeader).toBe(false);
     expect(nextConfig.output).toBe("standalone");
   });
+
+  it("liefert Preloads als Tag im HTML statt als Link-Header (keine doppelten Schrift-Preloads mit Service Worker)", () => {
+    // Mit `Link`-Header legt React beim Hydrieren ein zweites Preload an; aus dem SW geladen, meldet Chromium
+    // dann „preloaded … but not used“ für beide Schriften (Befund W3: Schrift-Preloads mit aktivem SW).
+    expect(nextConfig.reactMaxHeadersLength).toBe(0);
+  });
 });
 
 describe("getPublicRuntimeConfig / publicRuntimeConfigFrom (ADR-023)", () => {

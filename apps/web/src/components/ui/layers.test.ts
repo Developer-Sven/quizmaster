@@ -96,5 +96,18 @@ describe("Skeleton und EmptyState", () => {
     expect(html).toContain("<h1");
     expect(html).toContain("Du bist offline.");
     expect(html).toContain('<button type="button">x</button>');
+    expect(html).not.toContain("tabindex");
+  });
+
+  it("macht den Text fokussierbar, wenn er eine Seite ersetzt (Fokus statt body, WCAG 2.4.3)", () => {
+    const html = renderToStaticMarkup(
+      h(EmptyState, {
+        icon: WifiOffIcon,
+        message: "Du wurdest aus der Lobby entfernt.",
+        as: "h1",
+        headingRef: { current: null },
+      }),
+    );
+    expect(html).toMatch(/<h1 tabindex="-1" class="[^"]*">Du wurdest aus der Lobby entfernt\.<\/h1>/);
   });
 });

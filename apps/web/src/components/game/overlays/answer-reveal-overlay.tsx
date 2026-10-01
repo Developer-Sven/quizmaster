@@ -3,11 +3,13 @@
 import { ANSWER_INDEXES, type PublicPlayer, type PublicQuestion } from "@quizmaster/shared";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { AnswerButton } from "@/components/ui/answer-button";
-import { QuestionCard } from "@/components/ui/question-card";
-import { de } from "@/i18n/de";
-import { missedAnswer, pickersByAnswer, revealAnswerStates } from "@/lib/client/game-view";
-import { TimerIcon } from "@/lib/ui/icons";
+import { useId } from "react";
+import { de } from "../../../i18n/de";
+import { missedAnswer, pickersByAnswer, revealAnswerStates } from "../../../lib/client/game-view";
+import { cx } from "../../../lib/ui/cx";
+import { TimerIcon } from "../../../lib/ui/icons";
+import { AnswerButton } from "../../ui/answer-button";
+import { QuestionCard } from "../../ui/question-card";
 import { CHOREOGRAPHY, enterMotion, momentAhead, motionPlan, overlayLeaveAt } from "../choreography";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
@@ -33,9 +35,14 @@ const SHAKE_LATE_MS = 120;
  * (50 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 400 ms der Spielerstreifen
  * (ScorePill), Ton und Haptik kommen als Cues der Bühne. Ohne eigene Antwort „Zeit abgelaufen“ über der Karte.
  * Ausblenden bei 3.000 ms. Wer erst mitten in der Auflösung einsteigt, sieht den Endzustand ohne Wiederholung.
+ *
+ * Gleiche Lage wie die Frage: Unter der Karte bleibt die Statuszeile der Frage frei (leer), damit Karte und
+ * Antworten beim „cut“ stehen bleiben; die Antworten sind wie dort eine Gruppe mit dem Fragetext als Namen.
  */
 export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt }: AnswerRevealOverlayProps) {
   const reduce = useReducedMotion() ?? false;
+  const promptId = useId();
+  const headingId = useId();
   const leaveAt = overlayLeaveAt("answer_reveal", { phaseStartedAt, question }) ?? phaseStartedAt;
   const { now, enteredAt } = useOverlayClock(phaseStartedAt, [leaveAt]);
   const picks = question.picks;
@@ -50,6 +57,12 @@ export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt 
 
   return (
     <OverlayFrame testId="overlay-answer-reveal" leaving={now >= leaveAt}>
+      <h2 id={headingId} className="sr-only">
+        {de.game.questionHeading(question.index, question.total)}
+      </h2>
+      <span id={promptId} hidden>
+        {question.prompt}
+      </span>
       <div className="flex flex-col">
         {missed ? (
           <m.p
@@ -62,9 +75,17 @@ export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt 
           </m.p>
         ) : null}
         <QuestionCard prompt={question.prompt} media={question.media} timer={null} />
+        {/* Platz der Statuszeile der Frage (mt-1 + 16 px): Die Antworten stehen genau wie in der Frage. Mit
+            „Zeit abgelaufen“ über der Karte (docs/09 §7.6) entfällt er – die Antworten rücken so nicht weiter. */}
+        {missed ? null : <div aria-hidden="true" className="mt-1 min-h-4" />}
         {/* initial={false} blockiert die Einblendungen darin (Avatare an den Antworten) beim späten Einstieg */}
         <AnimatePresence initial={pickersFresh}>
-          <div key="answers" className="mt-4 flex flex-col gap-4">
+          <fieldset
+            key="answers"
+            aria-labelledby={promptId}
+            aria-describedby={headingId}
+            className={cx("flex min-w-0 flex-col gap-4", missed ? "mt-4" : "mt-2")}
+          >
             {ANSWER_INDEXES.map((choice) => (
               <AnswerButton
                 key={choice}
@@ -77,7 +98,7 @@ export function AnswerRevealOverlay({ question, players, selfId, phaseStartedAt 
                 data-state={states[choice]}
               />
             ))}
-          </div>
+          </fieldset>
         </AnimatePresence>
       </div>
     </OverlayFrame>

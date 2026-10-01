@@ -80,7 +80,12 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
                 <div aria-hidden="true" className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-line-strong" />
                 <div className="flex shrink-0 items-center gap-2 px-gutter pt-2 pb-3">
                   {onBack ? <IconButton icon={ChevronLeftIcon} label={de.actions.back} onClick={onBack} /> : null}
-                  <h2 ref={titleRef} id={titleId} tabIndex={-1} className="min-w-0 flex-1 text-h2 text-text">
+                  <h2
+                    ref={titleRef}
+                    id={titleId}
+                    tabIndex={-1}
+                    className="min-w-0 flex-1 text-h2 text-text wrap-break-word"
+                  >
                     {title}
                   </h2>
                   <IconButton icon={ChevronDownIcon} label={de.actions.close} onClick={onClose} />

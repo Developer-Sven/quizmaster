@@ -1,19 +1,12 @@
 "use client";
 
-import { Rubik } from "next/font/google";
 import { useEffect } from "react";
-import { ErrorView } from "@/components/app/error-view";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ErrorView, ToStartLink } from "@/components/app/error-view";
+import { BUTTON_LABEL_CLASSES, buttonClasses } from "@/components/ui/button-styles";
 import { de, errorPresentations } from "@/i18n/de";
 import { reloadPage } from "@/lib/client/reload";
+import { rubik } from "./fonts";
 import "./globals.css";
-
-/** Wie im Wurzel-Layout (docs/09 §3) – die globale Fehlerseite ersetzt das Layout samt `<html>`. */
-const rubik = Rubik({
-  subsets: ["latin", "latin-ext"],
-  display: "swap",
-  variable: "--font-rubik",
-});
 
 interface GlobalErrorProps {
   error: Error & { digest?: string };
@@ -25,6 +18,8 @@ interface GlobalErrorProps {
  * Layout selbst ist gescheitert) und „Zur Startseite“. Next rendert diese Datei zusätzlich als rein statische
  * 500-Seite vor; dort tragen die Skripte keine Nonce – „Zur Startseite“ ist deshalb ein normaler Link und
  * funktioniert auch ohne JavaScript. Geloggt wird nur die Kennung (`digest`), keine Inhalte.
+ * Bewusst schlank (schlichte `<button>`/`<a>` mit den Button-Klassen, Schrift aus `./fonts`): Ihr Chunk lädt mit
+ * dem Layout auf jeder Seite (docs/07 Initial-JS).
  */
 export default function GlobalError({ error }: GlobalErrorProps) {
   useEffect(() => {
@@ -39,12 +34,10 @@ export default function GlobalError({ error }: GlobalErrorProps) {
           message={errorPresentations.INTERNAL.text}
           action={
             <div className="flex w-full flex-col gap-3">
-              <Button variant="primary" block onClick={reloadPage}>
-                {de.actions.retry}
-              </Button>
-              <ButtonLink variant="ghost" href="/" block>
-                {de.actions.toStart}
-              </ButtonLink>
+              <button type="button" className={buttonClasses("primary", "default", true)} onClick={reloadPage}>
+                <span className={BUTTON_LABEL_CLASSES}>{de.actions.retry}</span>
+              </button>
+              <ToStartLink variant="ghost" />
             </div>
           }
         />

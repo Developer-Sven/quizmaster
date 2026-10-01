@@ -31,6 +31,8 @@ export interface DialogProps {
 /**
  * Dialog (docs/09 §5): zentriert, max. 360, Titel `h2`, max. 2 Zeilen Text, 2 Buttons – nur für
  * Bestätigungen. `alertdialog` mit Fokusfalle, Escape = Abbrechen, Fokus-Rückgabe; liegt über Sheets.
+ * Die 2 Zeilen gelten für die Texte bei 100 %: Bei Text-Zoom bricht alles um statt abgeschnitten zu werden, und
+ * ist der Dialog dann höher als der Bildschirm, scrollt er (WCAG 1.4.4, 1.4.10).
  */
 export function Dialog({
   open,
@@ -63,8 +65,11 @@ export function Dialog({
       <MotionProvider>
         <AnimatePresence>
           {open ? (
-            <div key="dialog" className="fixed inset-0 z-overlay flex items-center justify-center px-gutter">
-              <m.div {...scrimMotion} aria-hidden="true" className="absolute inset-0 bg-scrim" onClick={onCancel} />
+            <div
+              key="dialog"
+              className="fixed inset-0 z-overlay flex items-center-safe justify-center overflow-y-auto overscroll-contain px-gutter py-6"
+            >
+              <m.div {...scrimMotion} aria-hidden="true" className="fixed inset-0 bg-scrim" onClick={onCancel} />
               <m.div
                 {...panelMotion(reduce)}
                 ref={panelRef}
@@ -75,11 +80,11 @@ export function Dialog({
                 tabIndex={-1}
                 className="relative w-full max-w-dialog rounded-xl border border-line bg-surface-1 p-6 shadow-level-2"
               >
-                <h2 id={titleId} className="text-h2 text-text">
+                <h2 id={titleId} className="text-h2 text-text wrap-break-word">
                   {title}
                 </h2>
                 {description ? (
-                  <p id={descriptionId} className="mt-2 line-clamp-2 text-body text-text-2">
+                  <p id={descriptionId} className="mt-2 text-body text-text-2 wrap-break-word">
                     {description}
                   </p>
                 ) : null}

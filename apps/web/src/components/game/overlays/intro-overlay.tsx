@@ -3,10 +3,10 @@
 import type { PublicPlayer } from "@quizmaster/shared";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { Avatar } from "@/components/ui/avatar";
-import { de } from "@/i18n/de";
-import { elapsedMs, introStage } from "@/lib/client/phase-clock";
-import { transitions } from "@/lib/ui/motion-presets";
+import { de } from "../../../i18n/de";
+import { elapsedMs, introStage } from "../../../lib/client/phase-clock";
+import { transitions } from "../../../lib/ui/motion-presets";
+import { Avatar } from "../../ui/avatar";
 import { CHOREOGRAPHY, enterMotion, PANEL_FROM } from "../choreography";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
@@ -28,6 +28,10 @@ const INTRO = CHOREOGRAPHY.intro;
  * 3–8 im Raster plus Wahl-Reihenfolge. Bei 3.200 ms schiebt sich die Titelkarte „Runde 1“ hoch, bei 3.700 ms
  * blendet das Overlay aus. Alles relativ zu `phaseStartedAt` – nach einem Reconnect geht es an der richtigen
  * Stelle weiter (bereits gelaufene Bewegungen stehen sofort im Endzustand).
+ *
+ * Die Personen blenden für die Titelkarte nur aus und behalten ihren Platz (unsichtbar, für Screenreader
+ * verborgen): Würden sie entfernt, schrumpfte die mittig ausgerichtete Rasterzelle und die Titelkarte spränge
+ * um die halbe Höhendifferenz (bei 5–8 Personen 80 px – Layout-Sprung, CLS).
  */
 export function IntroOverlay({ players, phaseStartedAt, round }: IntroOverlayProps) {
   const reduce = useReducedMotion() ?? false;
@@ -37,6 +41,7 @@ export function IntroOverlay({ players, phaseStartedAt, round }: IntroOverlayPro
   ]);
   const elapsed = elapsedMs(phaseStartedAt, now);
   const stage = introStage(elapsed);
+  const people = stage === "people";
   const duel = players.length === 2;
 
   const avatar = (position: number) =>
@@ -66,57 +71,56 @@ export function IntroOverlay({ players, phaseStartedAt, round }: IntroOverlayPro
     <OverlayFrame testId="overlay-intro" scrim center leaving={stage === "done"}>
       {/* Personen und Titelkarte liegen übereinander (gleiche Rasterzelle) – kein Sprung beim Wechsel */}
       <div className="grid">
-        <AnimatePresence>
-          {stage === "people" ? (
-            <m.div
-              key="people"
-              exit={{ opacity: 0, transition: transitions.exit }}
-              className="col-start-1 row-start-1 flex flex-col items-center gap-8"
-            >
-              {duel ? (
-                <div className="flex w-full items-center justify-center gap-4">
-                  {players.map((player, position) => (
-                    <m.div
-                      key={player.id}
-                      {...avatar(position)}
-                      className={
-                        position === 0
-                          ? "order-1 flex min-w-0 flex-col items-center gap-2"
-                          : "order-3 flex min-w-0 flex-col items-center gap-2"
-                      }
-                    >
-                      <Avatar name={player.name} color={player.color} size={88} />
-                      <span className="max-w-28 truncate text-label text-text">{player.name}</span>
-                    </m.div>
-                  ))}
-                  <m.span {...afterAvatars} className="order-2 text-display text-primary">
-                    {de.game.versus}
-                  </m.span>
-                </div>
-              ) : (
-                <>
-                  <ul className="flex flex-wrap justify-center gap-4">
-                    {players.map((player, position) => (
-                      <m.li key={player.id} {...avatar(position)} className="flex">
-                        <Avatar name={player.name} color={player.color} size={88} label={player.name} />
-                      </m.li>
-                    ))}
-                  </ul>
-                  <m.ol
-                    {...afterAvatars}
-                    className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-label text-text-2"
-                  >
-                    {players.map((player, position) => (
-                      <li key={player.id} className="flex items-baseline gap-1">
-                        <span className="text-text tabular-nums">{position + 1}</span>
-                        <span>{player.name}</span>
-                      </li>
-                    ))}
-                  </m.ol>
-                </>
-              )}
-            </m.div>
+        <m.div
+          aria-hidden={people ? undefined : true}
+          initial={false}
+          animate={{ opacity: people ? 1 : 0 }}
+          transition={reduce ? transitions.fade : transitions.exit}
+          className="col-start-1 row-start-1 flex flex-col items-center gap-8"
+        >
+          {duel ? (
+            // Bei großer Schrift bricht die zweite Person in eine neue Zeile um, statt über den Rand zu ragen
+            <div className="flex w-full flex-wrap items-center justify-center gap-4">
+              {players.map((player, position) => (
+                <m.div
+                  key={player.id}
+                  {...avatar(position)}
+                  className={
+                    position === 0
+                      ? "order-1 flex min-w-0 flex-col items-center gap-2"
+                      : "order-3 flex min-w-0 flex-col items-center gap-2"
+                  }
+                >
+                  <Avatar name={player.name} color={player.color} size={88} />
+                  <span className="max-w-28 truncate text-label text-text">{player.name}</span>
+                </m.div>
+              ))}
+              <m.span {...afterAvatars} className="order-2 text-display text-primary">
+                {de.game.versus}
+              </m.span>
+            </div>
           ) : (
+            <>
+              <ul className="flex flex-wrap justify-center gap-4">
+                {players.map((player, position) => (
+                  <m.li key={player.id} {...avatar(position)} className="flex">
+                    <Avatar name={player.name} color={player.color} size={88} label={player.name} />
+                  </m.li>
+                ))}
+              </ul>
+              <m.ol {...afterAvatars} className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-label text-text-2">
+                {players.map((player, position) => (
+                  <li key={player.id} className="flex items-baseline gap-1">
+                    <span className="text-text tabular-nums">{position + 1}</span>
+                    <span>{player.name}</span>
+                  </li>
+                ))}
+              </m.ol>
+            </>
+          )}
+        </m.div>
+        <AnimatePresence>
+          {people ? null : (
             <m.div
               key="title"
               {...title}

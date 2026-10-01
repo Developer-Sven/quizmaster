@@ -24,6 +24,8 @@ export interface HudProps {
  * HUD (docs/09 §7 Grundgerüst): 56 px, links `x` = Aufgeben (Dialog), Mitte Fortschritt, rechts der
  * Ton-Umschalter (`volume-2`/`volume-x`, docs/09 §10: Standard an, gespeichert). Enthält die höfliche
  * Live-Region für die Ansagen (Runde/Wahl, Kategorie + Frage, Richtig/Falsch, Rundenende, Spielende).
+ * Bei großer Schrift (150–200 %) bricht der Fortschritt um und das HUD wächst, statt ihn abzuschneiden
+ * (WCAG 1.4.4); 56 px bleiben die Mindesthöhe.
  */
 export function Hud({
   progress,
@@ -37,13 +39,16 @@ export function Hud({
   const [confirm, setConfirm] = useState(false);
   return (
     <header className="z-hud border-b border-line bg-surface-1 pt-safe">
-      <div className="mx-auto flex h-14 w-full max-w-column items-center gap-2 px-gutter">
+      <div className="mx-auto flex min-h-14 w-full max-w-column items-center gap-2 px-gutter py-1">
         <div className="flex w-11 shrink-0">
           {canResign ? (
             <IconButton icon={XIcon} label={de.game.resign} onClick={() => setConfirm(true)} data-testid="hud-resign" />
           ) : null}
         </div>
-        <p data-testid="hud-progress" className="min-w-0 flex-1 truncate text-center text-label text-text tabular-nums">
+        <p
+          data-testid="hud-progress"
+          className="min-w-0 flex-1 text-center text-label text-balance text-text tabular-nums"
+        >
           {progress}
         </p>
         <IconButton

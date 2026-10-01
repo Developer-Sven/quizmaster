@@ -7,11 +7,20 @@ import { LiveGame } from "@/components/game/live-game";
 import { ConnectionOverlay } from "@/components/game/overlays/connection-overlay";
 import { preloadOverlays } from "@/components/game/overlays/preload";
 import { loadCategoryCatalog } from "@/lib/client/categories";
+import { pageModalityTracker } from "@/lib/client/keyboard";
 import { joinPath } from "@/lib/client/paths";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
 import { readMembership, readStoredSoundOn } from "@/lib/client/storage";
-import { gameActions, selectCategoriesMissing, selectExit, selectPhase, useGameStore } from "@/stores/game-store";
+import {
+  gameActions,
+  selectCategoriesMissing,
+  selectExit,
+  selectPhase,
+  selectSawState,
+  useGameStore,
+} from "@/stores/game-store";
 import { LiveLobby } from "./live-lobby";
+import { LobbyAnnouncer } from "./lobby-announcer";
 import { LobbyLoadingView } from "./lobby-loading-view";
 import { LobbyExitView, LobbyFatalView, LobbyStalledView } from "./lobby-status-views";
 
@@ -32,8 +41,9 @@ export interface LobbyScreenProps {
 /**
  * Lobby- und Spielseite `/lobby/[code]` (docs/02): verbindet sich, synchronisiert per `lobby:resume` und
  * zeigt je nach Phase die Lobby oder das Spiel. Das Verbindungs-Overlay liegt im Haupt-Bundle, die
- * Spiel-Overlays werden beim Betreten vorgeladen (docs/07). Wer die Seite ohne Mitgliedschaft öffnet
- * (geteilter Lobby-Link), landet auf der Beitreten-Seite.
+ * Spiel-Overlays werden beim Betreten vorgeladen (docs/07) – sobald der erste Zustand da ist: vorher
+ * konkurrierten ihre neun Chunks mit Ticket und Handshake um die Bandbreite und verzögerten die Lobby.
+ * Wer die Seite ohne Mitgliedschaft öffnet (geteilter Lobby-Link), landet auf der Beitreten-Seite.
  */
 export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbyScreenProps) {
   const router = useRouter();
@@ -42,24 +52,27 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
   const fatal = useGameStore((state) => state.connection.fatal);
   const connected = useGameStore((state) => state.connection.status === "connected");
   const categoriesMissing = useGameStore(selectCategoriesMissing);
+  // Gab es schon einen Zustand dieser Lobby? (Bleibt nach dem Ende gesetzt – „nicht gefunden“ vs. Beitreten)
+  const sawState = useGameStore(selectSawState);
   // Beim Betreten gemerkt: war diese Person hier schon Mitglied? (entscheidet über „nicht gefunden“ vs. Beitreten)
   const [memberAtEntry, setMemberAtEntry] = useState<boolean | null>(null);
-  const [sawState, setSawState] = useState(false);
   const [stalled, setStalled] = useState(false);
   const waitingForState = phase === null && exit === null && fatal === null && connected;
+  const hasState = phase !== null;
 
   useEffect(() => {
     setMemberAtEntry(readMembership() === code);
     gameActions.setSoundOn(readStoredSoundOn());
-    preloadOverlays();
+    // Eingabeart früh verfolgen (Fokusring schon bei der ersten Kategoriewahl), unabhängig vom Vorladen.
+    pageModalityTracker();
     const client = getRealtimeClient({ realtimeUrl });
     client.enterLobby(code);
     return () => client.releaseLobby();
   }, [code, realtimeUrl]);
 
   useEffect(() => {
-    if (phase !== null) setSawState(true);
-  }, [phase]);
+    if (hasState) preloadOverlays();
+  }, [hasState]);
 
   // Verbunden, aber kein Zustand (Resync scheitert dauerhaft): nach 15 s Hinweis statt endlosem Skeleton.
   // Der Client versucht es im Hintergrund weiter – kommt der Zustand doch noch, verschwindet der Hinweis.
@@ -104,6 +117,7 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots }: LobbySc
       {content}
       <ConnectionOverlay />
       <LiveToasts />
+      <LobbyAnnouncer />
     </>
   );
 }

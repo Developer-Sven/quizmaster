@@ -16,11 +16,17 @@ export function spokenCategoryName(name: string): string {
 }
 
 const MAINTENANCE_FALLBACK = "Wartung – gleich geht es weiter.";
+const APP_NAME = "quizmaster";
 
 export const de = {
   app: {
-    name: "quizmaster",
+    name: APP_NAME,
     claim: "Das Quiz-Duell für deine Runde.",
+    /**
+     * Seitentitel nach der Vorlage des Layouts („Lobby – quizmaster“), z. B. wenn eine Ansicht die Lobby ersetzt
+     * („Du wurdest aus der Lobby entfernt – quizmaster“); ein Schlusspunkt fällt weg.
+     */
+    pageTitle: (page: string) => `${page.replace(/\.$/, "")} – ${APP_NAME}`,
   },
 
   /** Beschriftungen von Buttons (docs/09 §11) */
@@ -49,7 +55,6 @@ export const de = {
 
   start: {
     or: "oder",
-    rules: "Regeln",
     imprint: "Impressum",
     privacy: "Datenschutz",
     /** Name fehlt beim Erstellen oder Beitreten */
@@ -110,6 +115,13 @@ export const de = {
     revealSubtitle: (questions: number, name: string) =>
       `${questions} ${plural(questions, "Frage", "Fragen")} · gewählt von ${name}`,
     questionProgress: (index: number, total: number) => `Frage ${index}/${total}`,
+    /** Überschrift (nur Screenreader) über Frage und Auflösung, zugleich Beschreibung der Antwortgruppe */
+    questionHeading: (index: number, total: number) => `Frage ${index} von ${total}`,
+    /** Hauptüberschrift des Spielscreens (nur Screenreader), z. B. „Runde 2 von 3, Zug 3 von 4“ */
+    screenHeading: (round: number, rounds: number, turn: number, turns: number) =>
+      `Runde ${round} von ${rounds}, Zug ${turn} von ${turns}`,
+    /** Hauptüberschrift des Spielscreens am Spielende (nur Screenreader) */
+    gameOverHeading: "Spiel beendet",
     /** Kurzform im Kategoriestreifen, z. B. „1/3“ */
     fraction: (index: number, total: number) => `${index}/${total}`,
     waitingForOthers: (count: number) => `Warte auf ${count} weitere …`,
@@ -227,6 +239,25 @@ export const de = {
     notFound: "Seite nicht gefunden.",
   },
 
+  /**
+   * Regeln-Seite `/regeln` und der Link „Regeln“ in der Fußzeile (docs/09 §6: höchstens 6 kurze Punkte;
+   * Inhalt nach docs/01 – nur, was es gibt, keine Extras). Zahl und Einheit mit geschütztem Leerzeichen
+   * (`\u00a0`), damit „20 Sekunden“ nie über zwei Zeilen bricht.
+   */
+  rules: {
+    title: "Regeln",
+    points: [
+      "2 bis 8\u00a0Personen spielen in einer Lobby. Der Host stellt Runden und Fragen pro Kategorie ein und startet das Spiel.",
+      "Die Reihenfolge wird ausgelost. In jeder Runde wählt jede Person einmal eine von 3\u00a0Kategorien.",
+      "Alle beantworten gleichzeitig dieselben Fragen: 4\u00a0Antworten, genau eine ist richtig, 20\u00a0Sekunden Zeit.",
+      "Du hast pro Frage eine Antwort und kannst sie nicht ändern. Ohne Antwort zählt die Frage als falsch.",
+      "Jede richtige Antwort bringt 1\u00a0Punkt – Tempo zählt nicht. Gleich viele Punkte bedeuten den gleichen Platz.",
+      "Wer das Spiel verlässt oder zu lange getrennt ist, gilt als aufgegeben und landet hinter allen, die zu Ende spielen.",
+    ] as const,
+    /** Nur für Screenreader, hinter „Regeln“: Der Link öffnet einen neuen Tab (Lobby, Spielende) */
+    opensNewTab: "(öffnet in neuem Tab)",
+  },
+
   /** Texte nur für Screenreader und Bedienhilfen */
   a11y: {
     loading: "Lädt …",
@@ -248,6 +279,12 @@ export const de = {
     statusWinner: "Sieger:in",
     rankUp: "Platz verbessert",
     rankDown: "Platz verschlechtert",
+    /** Platzwechsel mit Person (Duell-Tafel), z. B. „Mia: Platz verbessert“ */
+    rankUpOf: (name: string) => `${name}: Platz verbessert`,
+    rankDownOf: (name: string) => `${name}: Platz verschlechtert`,
+    /** Gesamtstand im Duell für Screenreader (sichtbar „8 : 11“), z. B. „Mia: 8 Punkte, Ben: 11 Punkte“ */
+    duelScore: (left: string, leftScore: number, right: string, rightScore: number) =>
+      `${left}: ${leftScore} ${plural(leftScore, "Punkt", "Punkte")}, ${right}: ${rightScore} ${plural(rightScore, "Punkt", "Punkte")}`,
     boardCaption: "Spieltafel",
     boardCategory: "Kategorie",
     boardTotal: "Summe",
@@ -271,6 +308,11 @@ export const de = {
     /** Spielende mit dem eigenen Ergebnis, z. B. „Spiel beendet. Gewonnen.“ */
     gameEnded: (headline: string) => `Spiel beendet. ${headline}.`,
     connectionLost: "Verbindung unterbrochen",
+    /** Lobby: Beitritt bzw. Austritt (auch Entfernen) einer anderen Person – nur Screenreader */
+    playerJoined: (name: string) => `${name} ist beigetreten.`,
+    playerLeft: (name: string) => `${name} hat die Lobby verlassen.`,
+    /** höflich, kurz nach der Rückkehr (das Overlay blendet still aus, docs/09 §7.10) */
+    connectionRestored: "Verbindung wiederhergestellt",
   },
 };
 

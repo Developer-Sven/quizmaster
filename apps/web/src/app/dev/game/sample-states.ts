@@ -14,8 +14,8 @@ import type {
   PublicQuestion,
   ReviewItem,
 } from "@quizmaster/shared";
-import { placesFor } from "@/lib/client/game-view";
-import type { LobbyExit, PendingAnswer } from "@/stores/game-store";
+import { placesFor } from "../../../lib/client/game-view";
+import type { LobbyExit, PendingAnswer } from "../../../stores/game-store";
 import { LONGEST_ANSWER, LONGEST_QUESTION } from "../ui/sample-data";
 
 export type PreviewPlayers = 2 | 6;
@@ -181,7 +181,12 @@ interface SampleQuestion {
   correct: AnswerIndex;
   media: PublicQuestion["media"];
   explanation: string | null;
+  /** Index in PREVIEW_CATEGORIES – die Kategorie muss zur Frage passen (Manifest-Screenshot frage.png) */
+  category: number;
 }
+
+/** „Rund um die Welt“: Hauptstädte, Flüsse und Flaggen gehören hierher. */
+const GEOGRAPHY = 3;
 
 const CAPITAL: SampleQuestion = {
   prompt: "Wie heißt die Hauptstadt von Australien?",
@@ -189,6 +194,7 @@ const CAPITAL: SampleQuestion = {
   correct: 1,
   media: null,
   explanation: "Canberra wurde als Kompromiss zwischen Sydney und Melbourne gegründet.",
+  category: GEOGRAPHY,
 };
 
 const LONG: SampleQuestion = {
@@ -202,6 +208,7 @@ const LONG: SampleQuestion = {
   correct: 0,
   media: null,
   explanation: null,
+  category: GEOGRAPHY,
 };
 
 const FLAG: SampleQuestion = {
@@ -210,7 +217,13 @@ const FLAG: SampleQuestion = {
   correct: 1,
   media: { kind: "flag", code: "de" },
   explanation: null,
+  category: GEOGRAPHY,
 };
+
+/** Zug, in dem die Beispielfrage gestellt wird: Kategorie der Frage, gewählt aus drei Optionen. */
+function turnFor(sample: SampleQuestion) {
+  return { pickerId: "p1", options: options(sample.category), categoryId: category(sample.category).id };
+}
 
 function question(
   sample: SampleQuestion,
@@ -223,7 +236,7 @@ function question(
     id: `q${index}x7k2m9p4`,
     index,
     total: K,
-    categoryId: category(0).id,
+    categoryId: category(sample.category).id,
     prompt: sample.prompt,
     answers: sample.answers,
     media: sample.media,
@@ -311,7 +324,7 @@ function questionScene(
       phaseEndsAt: startsAt + 20_000,
       order: orderFor(ctx.count),
       progress: progress(ctx, 1, 2),
-      turn: { pickerId: "p1", options: options(0), categoryId: category(0).id },
+      turn: turnFor(sample),
       question: questionState,
       board,
       players: players(ctx.count, board),
@@ -333,7 +346,7 @@ function revealCategoryScene(ctx: PreviewContext): PreviewScene {
       phaseEndsAt: phaseStartedAt + 22_000,
       order: orderFor(ctx.count),
       progress: progress(ctx, 1, 2),
-      turn: { pickerId: "p1", options: options(0), categoryId: category(0).id },
+      turn: turnFor(CAPITAL),
       question: question(CAPITAL, 1, phaseStartedAt + 2_000, []),
       board,
       players: players(ctx.count, board),
@@ -353,7 +366,7 @@ function answerScene(ctx: PreviewContext, own: AnswerIndex | null): PreviewScene
       phaseEndsAt: phaseStartedAt + 3_500,
       order: orderFor(ctx.count),
       progress: progress(ctx, 1, 2),
-      turn: { pickerId: "p1", options: options(0), categoryId: category(0).id },
+      turn: turnFor(CAPITAL),
       question: question(CAPITAL, 2, phaseStartedAt - 12_000, [], picksFor(ctx.count, own)),
       board,
       players: players(ctx.count, board),
@@ -452,7 +465,7 @@ function reviewItems(count: PreviewPlayers, selfId: string): ReviewItem[] {
   return [
     {
       questionId: "q1x7k2m9p4",
-      categoryId: category(0).id,
+      categoryId: category(CAPITAL.category).id,
       prompt: CAPITAL.prompt,
       media: null,
       answers: CAPITAL.answers,
@@ -464,7 +477,7 @@ function reviewItems(count: PreviewPlayers, selfId: string): ReviewItem[] {
     },
     {
       questionId: "q2x7k2m9p4",
-      categoryId: category(3).id,
+      categoryId: category(FLAG.category).id,
       prompt: FLAG.prompt,
       media: FLAG.media,
       answers: FLAG.answers,
@@ -476,7 +489,7 @@ function reviewItems(count: PreviewPlayers, selfId: string): ReviewItem[] {
     },
     {
       questionId: "q3x7k2m9p4",
-      categoryId: category(1).id,
+      categoryId: category(LONG.category).id,
       prompt: LONG.prompt,
       media: null,
       answers: LONG.answers,

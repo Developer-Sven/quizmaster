@@ -7,6 +7,10 @@
  * - **Entsperren (iOS):** Der `AudioContext` entsteht erst in bzw. nach einer Interaktion (`unlock()` in einem
  *   Gesten-Handler; `armUnlock()` hängt die Handler an). Hat die Seite schon eine Interaktion gesehen (sticky
  *   activation), wird sofort entsperrt – Browser ohne diese Regel (Safari) entsperren bei der nächsten Geste.
+ * - **Unterbrechung (iOS):** App-Wechsel, Sperrbildschirm oder ein Anruf setzen den Kontext auf `interrupted`
+ *   bzw. `suspended`; fortsetzen darf ihn dann meist nur eine Geste. Die Gesten-Handler bleiben deshalb bis zum
+ *   Ende des Spiels angemeldet (sie entsperren nur, solange der Kontext nicht läuft), beim Sichtbarwerden der
+ *   Seite und beim Abspielen (z. B. `lock` im Tipp-Handler) wird ein unterbrochener Kontext fortgesetzt.
  * - **Ton an/aus:** Standard an, gespeichert über `storage.ts` (`setEnabled` ist der Umschalter im HUD).
  * - Format: Opus in WebM, wo unterstützt, sonst MP3 (scheitert das Dekodieren, einmal MP3 als Ersatz).
  * - Gespielt wird nur bei sichtbarer Seite; ein Sound, der beim Abspielen noch nicht dekodiert ist, entfällt
@@ -65,14 +69,23 @@ export interface SoundManager {
   unlock(): void;
   /** Lädt alle Sounds (dekodiert, sobald entsperrt). Ohne Wirkung bei Ton aus. */
   preload(): void;
-  /** Spielt einen Sound; `false`, wenn aus, nicht entsperrt, Seite verborgen oder noch nicht geladen. */
+  /**
+   * Spielt einen Sound; `false`, wenn aus, nicht entsperrt, Seite verborgen oder noch nicht geladen. Ist der
+   * Kontext unterbrochen, wird er fortgesetzt (dieser Ton entfällt, die nächsten klingen wieder).
+   */
   play(name: SoundName): boolean;
-  /** Entsperrt bei der ersten Interaktion (bzw. sofort nach einer früheren). Liefert die Abmeldung. */
+  /**
+   * Entsperrt bei der ersten Interaktion (bzw. sofort nach einer früheren) und nach jeder Unterbrechung erneut
+   * (Gesten und Sichtbarwerden von `target`, i. d. R. `document`). Liefert die Abmeldung.
+   */
   armUnlock(target: EventTarget): () => void;
 }
 
 /** Ereignisse, die als Nutzer-Geste zählen und Audio entsperren dürfen (iOS: touchend/click). */
 const UNLOCK_EVENTS = ["pointerdown", "touchend", "click", "keydown"] as const;
+
+/** Die Seite wird wieder sichtbar (bzw. verborgen) – am `document`. */
+const VISIBILITY_EVENT = "visibilitychange";
 
 /** Höchstens so viele laufende Sounds merken (zum Stoppen bei „Ton aus“). */
 const MAX_TRACKED_SOURCES = 8;
@@ -180,7 +193,13 @@ export function createSoundManager<B>(deps: SoundManagerDeps<B>): SoundManager {
       decodeAll();
     },
     play(name) {
-      if (!enabled || !deps.isVisible() || !engine || !running()) return false;
+      if (!enabled || !deps.isVisible() || !engine) return false;
+      if (!running()) {
+        // Unterbrochen (iOS) oder noch nicht entsperrt: fortsetzen – im Tipp-Handler (`lockFeedback`) gelingt
+        // das auch auf iOS. Dieser Ton entfällt (ein verspäteter Ton wäre falscher als keiner).
+        unlock();
+        return false;
+      }
       const buffer = decoded.get(name);
       if (buffer === undefined) {
         void decode(name);
@@ -191,18 +210,23 @@ export function createSoundManager<B>(deps: SoundManagerDeps<B>): SoundManager {
       return true;
     },
     armUnlock(target) {
-      if (running()) return () => {};
-      if (deps.hasUserActivation()) unlock();
+      if (deps.hasUserActivation() && !running()) unlock();
+      // Jede Geste entsperrt, solange der Kontext nicht läuft – auch nach einer Unterbrechung (iOS). Läuft er,
+      // kostet der Handler nur einen Zustandsvergleich.
       const onGesture = () => {
-        unlock();
-        if (running()) detach();
+        if (!running()) unlock();
+      };
+      // Zurück im Vordergrund: einen schon angelegten Kontext fortsetzen (ohne Geste nie einen neuen anlegen).
+      const onVisibility = () => {
+        if (engine !== null && !running() && deps.isVisible()) unlock();
       };
       // Objekt-Optionen statt `true`: manche EventTarget-Implementierungen (Node) entfernen sonst nicht.
-      const detach = () => {
-        for (const type of UNLOCK_EVENTS) target.removeEventListener(type, onGesture, { capture: true });
-      };
       for (const type of UNLOCK_EVENTS) target.addEventListener(type, onGesture, { capture: true, passive: true });
-      return detach;
+      target.addEventListener(VISIBILITY_EVENT, onVisibility);
+      return () => {
+        for (const type of UNLOCK_EVENTS) target.removeEventListener(type, onGesture, { capture: true });
+        target.removeEventListener(VISIBILITY_EVENT, onVisibility);
+      };
     },
   };
 }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { ErrorView } from "@/components/app/error-view";
-import { Button, ButtonLink } from "@/components/ui/button";
+import { ErrorView, ToStartLink } from "@/components/app/error-view";
+import { BUTTON_LABEL_CLASSES, buttonClasses } from "@/components/ui/button-styles";
 import { de, errorPresentations } from "@/i18n/de";
 import { isChunkLoadError } from "@/lib/client/chunk-error";
 import { reloadPage } from "@/lib/client/reload";
@@ -17,6 +17,8 @@ interface RootErrorProps {
  * „Erneut versuchen“ und „Zur Startseite“. Geloggt wird nur die Kennung (`digest`), keine Inhalte.
  * Scheiterte das Nachladen von Code (Netzabbruch, neuer Deploy), lädt „Erneut versuchen“ die Seite neu –
  * `retry()` allein fände nur den gemerkten Fehlschlag des Modul-Laders wieder (Szenario 9 prüft das).
+ * Bewusst schlank (schlichte `<button>`/`<a>` mit den Button-Klassen statt `Button`/`ButtonLink`): Ihr Chunk lädt
+ * mit dem Layout auf jeder Seite (docs/07 Initial-JS) – und muss auch ohne nachladbare Chunks funktionieren.
  */
 export default function RootError({ error, retry }: RootErrorProps) {
   useEffect(() => {
@@ -29,12 +31,14 @@ export default function RootError({ error, retry }: RootErrorProps) {
       message={errorPresentations.INTERNAL.text}
       action={
         <div className="flex w-full flex-col gap-3">
-          <Button variant="primary" block onClick={isChunkLoadError(error) ? reloadPage : retry}>
-            {de.actions.retry}
-          </Button>
-          <ButtonLink variant="ghost" href="/" block>
-            {de.actions.toStart}
-          </ButtonLink>
+          <button
+            type="button"
+            className={buttonClasses("primary", "default", true)}
+            onClick={isChunkLoadError(error) ? reloadPage : retry}
+          >
+            <span className={BUTTON_LABEL_CLASSES}>{de.actions.retry}</span>
+          </button>
+          <ToStartLink variant="ghost" />
         </div>
       }
     />

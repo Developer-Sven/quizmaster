@@ -3,14 +3,16 @@
 import { ANSWER_INDEXES, type AnswerIndex, type PublicQuestion } from "@quizmaster/shared";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { type KeyboardEvent, useEffect, useRef } from "react";
-import { AnswerButton } from "@/components/ui/answer-button";
-import { QuestionCard } from "@/components/ui/question-card";
-import { de } from "@/i18n/de";
-import { questionAnswerStates } from "@/lib/client/game-view";
-import { answerShortcut, claimGroupFocus, readShortcutGuard } from "@/lib/client/keyboard";
+import { type KeyboardEvent, useEffect, useEffectEvent, useId, useRef } from "react";
+import { de } from "../../../i18n/de";
+import { questionAnswerStates } from "../../../lib/client/game-view";
+import { answerShortcut, claimGroupFocus, readShortcutGuard } from "../../../lib/client/keyboard";
+import { cx } from "../../../lib/ui/cx";
+import { selectConnectionOverlayVisible, useGameStore } from "../../../stores/game-store";
+import { AnswerButton } from "../../ui/answer-button";
+import { QuestionCard } from "../../ui/question-card";
 import { CHOREOGRAPHY, enterMotion } from "../choreography";
-import { useOverlayClock, useTimerRun } from "../use-choreography";
+import { useKeyboardModality, useOverlayClock, useTimerRun } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 
 export interface QuestionOverlayProps {
@@ -24,6 +26,11 @@ export interface QuestionOverlayProps {
   /** Identität des Timer-Laufs, z. B. `${question.id}:${syncGeneration}` – neu → TimerBar mit frischer Restzeit */
   runId: string;
   onAnswer: (choice: AnswerIndex) => void;
+  /**
+   * Die Antwortgruppe konnte den Fokus nicht übernehmen (er liegt z. B. im HUD): Dann liest kein Screenreader
+   * die Frage beim Öffnen – die Bühne sagt sie über die Live-Region des HUD an.
+   */
+  onPromptUnfocused?: (questionId: string) => void;
 }
 
 const QUESTION = CHOREOGRAPHY.question;
@@ -32,10 +39,14 @@ const QUESTION = CHOREOGRAPHY.question;
  * Frage (Phase `question` ab `startsAt`, 20 s, docs/09 §7.4–5): `QuestionCard` fährt 16 px von unten ein
  * (200 ms), die Antworten folgen gestaffelt (40 ms); die `TimerBar` läuft als CSS über die Restzeit bis
  * `deadline` (ab 5 s Rest rot, dazu `tick` je Sekunde – Cues der Bühne). Tippen loggt sofort ein: getippte
- * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), darunter live
- * „Warte auf 2 weitere …“. Nach der Deadline nicht mehr bedienbar.
- * Tastatur: `1`–`4`/`A`–`D`, solange der Fokus in der Antwortgruppe liegt (WCAG 2.1.4, lib/client/keyboard.ts);
- * die Gruppe übernimmt beim Öffnen den Fokus, wenn er frei ist.
+ * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), unter der Karte live
+ * „Warte auf 2 weitere …“ (Zeile immer reserviert – nichts springt). Nach der Deadline nicht mehr bedienbar.
+ *
+ * Screenreader (WCAG 1.3.1, 4.1.2): Die Antwortgruppe heißt wie die Frage und ist mit „Frage 2 von 3“
+ * beschrieben; darüber steht dieselbe Angabe als Überschrift (nur Screenreader). Die Gruppe übernimmt beim
+ * Öffnen den Fokus, wenn er frei ist – Screenreader lesen so die Frage; sonst sagt das HUD sie an.
+ * Tastatur: `1`–`4`/`A`–`D`, solange der Fokus in der Antwortgruppe liegt (WCAG 2.1.4, lib/client/keyboard.ts).
+ * Der Fokusring der Gruppe erscheint nur nach Bedienung per Tastatur und nur, solange sie bedienbar ist.
  */
 export function QuestionOverlay({
   question,
@@ -44,6 +55,7 @@ export function QuestionOverlay({
   waitingCount,
   runId,
   onAnswer,
+  onPromptUnfocused,
 }: QuestionOverlayProps) {
   const reduce = useReducedMotion() ?? false;
   const { now, enteredAt } = useOverlayClock(question.startsAt, [question.deadline]);
@@ -52,11 +64,18 @@ export function QuestionOverlay({
   const states = questionAnswerStates(myChoice, canAnswer && !expired);
   const groupRef = useRef<HTMLFieldSetElement>(null);
   const open = canAnswer && myChoice === null && !expired;
+  const keyboard = useKeyboardModality();
+  // Solange das Verbindungs-Overlay steht, ist die Bühne inert; danach wird der Fokus erneut übernommen.
+  const connectionLost = useGameStore(selectConnectionOverlayVisible);
+  const promptId = useId();
+  const headingId = useId();
+  const reportUnfocused = useEffectEvent(() => onPromptUnfocused?.(question.id));
 
   useEffect(() => {
     const group = groupRef.current;
-    if (open && group) claimGroupFocus(group, group.closest("[data-stage]"));
-  }, [open]);
+    if (!open || connectionLost || !group) return;
+    if (!claimGroupFocus(group, group.closest("[data-stage]"))) reportUnfocused();
+  }, [open, connectionLost]);
 
   const select = (choice: AnswerIndex) => {
     if (states[choice] === "idle") onAnswer(choice);
@@ -87,6 +106,13 @@ export function QuestionOverlay({
 
   return (
     <OverlayFrame testId="overlay-question">
+      <h2 id={headingId} className="sr-only">
+        {de.game.questionHeading(question.index, question.total)}
+      </h2>
+      {/* Name der Antwortgruppe: der Fragetext (sichtbar steht er in der Karte; ausgeblendet, nie doppelt gelesen) */}
+      <span id={promptId} hidden>
+        {question.prompt}
+      </span>
       <m.div {...card}>
         <QuestionCard
           prompt={question.prompt}
@@ -98,12 +124,18 @@ export function QuestionOverlay({
           }}
         />
       </m.div>
+      <StatusLine>{myChoice !== null && waitingCount > 0 ? de.game.waitingForOthers(waitingCount) : ""}</StatusLine>
       <fieldset
         ref={groupRef}
-        aria-label={de.game.questionProgress(question.index, question.total)}
+        aria-labelledby={promptId}
+        aria-describedby={headingId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="mt-4 flex min-w-0 flex-col gap-4 rounded-lg"
+        className={cx(
+          "mt-2 flex min-w-0 flex-col gap-4 rounded-lg",
+          // Ring nur als Tastatur-Hinweis auf eine bedienbare Gruppe – nie als zweiter oranger Rahmen
+          !(open && keyboard) && "focus-visible:outline-hidden",
+        )}
       >
         {ANSWER_INDEXES.map((choice) => (
           <m.div key={choice} {...answer(choice)}>
@@ -117,13 +149,23 @@ export function QuestionOverlay({
           </m.div>
         ))}
       </fieldset>
-      <p
-        aria-live="polite"
-        data-testid="question-waiting"
-        className="mt-4 min-h-4 text-center text-caption text-text-2"
-      >
-        {myChoice !== null && waitingCount > 0 ? de.game.waitingForOthers(waitingCount) : ""}
-      </p>
     </OverlayFrame>
+  );
+}
+
+/**
+ * Statuszeile direkt unter der Karte (docs/09 §7.5, `caption`, text-2): „Warte auf 2 weitere …“, live
+ * angesagt. Ihre Höhe ist immer reserviert – die Auflösung hält denselben Abstand, Karte und Antworten
+ * bleiben beim „cut“ stehen (answer-reveal-overlay.tsx).
+ */
+function StatusLine({ children }: { children: string }) {
+  return (
+    <p
+      aria-live="polite"
+      data-testid="question-waiting"
+      className="mt-1 flex min-h-4 items-center justify-center text-center text-caption text-text-2"
+    >
+      {children}
+    </p>
   );
 }

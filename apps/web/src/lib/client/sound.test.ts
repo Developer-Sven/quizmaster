@@ -24,7 +24,11 @@ interface FakeAudio {
   written: boolean[];
   warnings: string[];
   primes: number;
+  /** Aufrufe von `resume()` (Entsperren bzw. Fortsetzen) */
+  resumes: number;
   set(options: { activation?: boolean; visible?: boolean; resumeFails?: boolean }): void;
+  /** iOS unterbricht den laufenden Kontext (App-Wechsel, Sperrbildschirm, Anruf): Zustand `interrupted`. */
+  interrupt(): void;
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -33,6 +37,7 @@ function fakeAudio(
   options: { stored?: boolean; canPlay?: string; undecodable?: readonly string[]; noEngine?: boolean } = {},
 ): FakeAudio {
   const state = { activation: false, visible: true, resumeFails: false };
+  let contextState = "suspended";
   const audio: FakeAudio = {
     engines: 0,
     started: [],
@@ -41,20 +46,25 @@ function fakeAudio(
     written: [],
     warnings: [],
     primes: 0,
+    resumes: 0,
     set(next) {
       Object.assign(state, next);
+    },
+    interrupt() {
+      contextState = "interrupted";
     },
     deps: {
       createEngine: () => {
         if (options.noEngine) return null;
         audio.engines += 1;
-        let contextState = "suspended";
+        contextState = "suspended";
         const engine: AudioEngine<FakeBuffer> = {
           get state() {
             return contextState;
           },
           // wie im Browser asynchron: der Kontext läuft erst nach der Geste
           resume: async () => {
+            audio.resumes += 1;
             await Promise.resolve();
             if (state.resumeFails) throw new DOMException("not allowed", "NotAllowedError");
             contextState = "running";
@@ -108,7 +118,7 @@ describe("Sound-Manager: Entsperren (iOS) und Laden", () => {
     expect(audio.started).toEqual(["/sounds/lock.webm"]);
   });
 
-  it("entsperrt bei der ersten Geste (pointerdown, touchend, click, keydown) und meldet sich danach ab", async () => {
+  it("entsperrt bei der ersten Geste (pointerdown, touchend, click, keydown); weitere Gesten lassen den laufenden Kontext in Ruhe", async () => {
     const audio = fakeAudio();
     const sound = createSoundManager(audio.deps);
     const target = new EventTarget();
@@ -119,17 +129,97 @@ describe("Sound-Manager: Entsperren (iOS) und Laden", () => {
     expect(sound.unlocked).toBe(false);
     await flush();
     expect(sound.unlocked).toBe(true);
-    // nächste Geste: entsperrt läuft – die Handler melden sich ab
-    target.dispatchEvent(new Event("pointerdown"));
-    expect(audio.primes).toBe(2);
-    target.dispatchEvent(new Event("click"));
-    target.dispatchEvent(new Event("keydown"));
-    expect(audio.primes).toBe(2);
+    // weitere Gesten: der Kontext läuft – weder neu entsperren noch einen zweiten Kontext anlegen
+    for (const type of ["pointerdown", "click", "keydown"]) target.dispatchEvent(new Event(type));
+    expect(audio.primes).toBe(1);
+    expect(audio.resumes).toBe(1);
     expect(audio.engines).toBe(1);
     detach();
   });
 
-  it("meldet die Handler ab, wenn das Spiel vorher endet", () => {
+  it("entsperrt nach einer Unterbrechung (iOS: App-Wechsel, Sperrbildschirm, Anruf) bei der nächsten Geste erneut", async () => {
+    const audio = fakeAudio();
+    const sound = createSoundManager(audio.deps);
+    const target = new EventTarget();
+    const detach = sound.armUnlock(target);
+    target.dispatchEvent(new Event("touchend"));
+    await flush();
+    expect(sound.play("lock")).toBe(true);
+    // weiteres Tippen bei laufendem Kontext (z. B. die nächste Antwort)
+    target.dispatchEvent(new Event("touchend"));
+    await flush();
+
+    audio.interrupt();
+    expect(sound.unlocked).toBe(false);
+    target.dispatchEvent(new Event("touchend"));
+    expect(audio.resumes).toBe(2);
+    expect(audio.primes).toBe(2);
+    await flush();
+    expect(sound.unlocked).toBe(true);
+    expect(sound.play("tick")).toBe(true);
+    expect(audio.engines).toBe(1);
+    detach();
+  });
+
+  it("setzt einen unterbrochenen Kontext beim Abspielen fort (Tipp-Handler): dieser Ton entfällt, der nächste klingt", async () => {
+    const audio = fakeAudio();
+    const sound = createSoundManager(audio.deps);
+    sound.unlock();
+    await flush();
+    audio.interrupt();
+    expect(sound.play("lock")).toBe(false);
+    expect(audio.resumes).toBe(2);
+    await flush();
+    expect(sound.play("lock")).toBe(true);
+    expect(audio.started).toEqual(["/sounds/lock.webm"]);
+  });
+
+  it("setzt einen entsperrten Kontext fort, sobald die Seite wieder sichtbar ist – verborgen nicht", async () => {
+    const audio = fakeAudio();
+    const sound = createSoundManager(audio.deps);
+    const target = new EventTarget();
+    const detach = sound.armUnlock(target);
+    target.dispatchEvent(new Event("click"));
+    await flush();
+    audio.interrupt();
+    audio.set({ visible: false });
+    target.dispatchEvent(new Event("visibilitychange"));
+    expect(audio.resumes).toBe(1);
+    audio.set({ visible: true });
+    target.dispatchEvent(new Event("visibilitychange"));
+    expect(audio.resumes).toBe(2);
+    await flush();
+    expect(sound.unlocked).toBe(true);
+    detach();
+  });
+
+  it("legt beim Sichtbarwerden ohne vorherige Geste keinen Audio-Kontext an", () => {
+    const audio = fakeAudio();
+    const sound = createSoundManager(audio.deps);
+    const target = new EventTarget();
+    const detach = sound.armUnlock(target);
+    target.dispatchEvent(new Event("visibilitychange"));
+    expect(audio.engines).toBe(0);
+    detach();
+  });
+
+  it("meldet alle Handler (Gesten und Sichtbarkeit) ab, wenn das Spiel endet", async () => {
+    const audio = fakeAudio();
+    const sound = createSoundManager(audio.deps);
+    const target = new EventTarget();
+    const detach = sound.armUnlock(target);
+    target.dispatchEvent(new Event("click"));
+    await flush();
+    detach();
+    audio.interrupt();
+    for (const type of ["pointerdown", "touchend", "click", "keydown", "visibilitychange"]) {
+      target.dispatchEvent(new Event(type));
+    }
+    expect(audio.resumes).toBe(1);
+    expect(audio.engines).toBe(1);
+  });
+
+  it("meldet die Handler ab, wenn das Spiel vor der ersten Geste endet", () => {
     const audio = fakeAudio();
     const sound = createSoundManager(audio.deps);
     const target = new EventTarget();

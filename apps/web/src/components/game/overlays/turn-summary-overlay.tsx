@@ -59,7 +59,7 @@ export function TurnSummaryOverlay({ summary, players, category, phaseStartedAt 
       <m.div {...sheet} className="rounded-xl border border-line bg-surface-1 p-5 shadow-level-2">
         <div className="flex items-center gap-3">
           <CategoryIcon icon={category.icon} color={category.color} frame="tile" />
-          <h2 className="min-w-0 flex-1 text-h2 text-text">{category.name}</h2>
+          <h2 className="min-w-0 flex-1 text-h2 text-text hyphens-auto wrap-break-word">{category.name}</h2>
         </div>
         <ol className="mt-4 flex flex-col gap-2">
           {(summary?.entries ?? []).map((entry, row) => {
@@ -71,38 +71,42 @@ export function TurnSummaryOverlay({ summary, players, category, phaseStartedAt 
                 data-testid="turn-summary-row"
                 data-best={best.has(entry.playerId) || undefined}
                 className={cx(
-                  "flex min-h-12 items-center gap-3 rounded-lg border px-3 py-2",
+                  // Bei großer Schrift rücken Kästchen und Punkte in eine zweite Zeile, statt den Namen auf
+                  // null zu kürzen und über den Rand zu ragen (WCAG 1.4.4); bei 100 % alles in einer Zeile.
+                  "flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2",
                   best.has(entry.playerId) ? "border-primary" : "border-transparent",
                 )}
               >
                 <Avatar name={player.name} color={player.color} size={32} resigned={player.status === "resigned"} />
                 <span
                   className={cx(
-                    "min-w-0 flex-1 truncate text-body",
+                    "min-w-0 flex-1 text-body wrap-break-word",
                     player.status === "resigned" ? "text-text-2 line-through" : "text-text",
                   )}
                 >
                   {player.name}
                 </span>
-                <span className="flex shrink-0 flex-col items-end gap-1">
-                  {lines(entry.results.length).map((line) => (
-                    <span key={line[0]} className="flex gap-1">
-                      {line.map((position) => (
-                        <ResultSquare
-                          key={position}
-                          result={squareResult(entry.results[position])}
-                          appearDelayMs={remainingDelayMs(
-                            SUMMARY.squaresAtMs + fillDelayMs(0, row, position),
-                            SUMMARY.squareMs,
-                            enteredAt,
-                          )}
-                        />
-                      ))}
-                    </span>
-                  ))}
-                </span>
-                <span className="w-8 shrink-0 text-right text-label text-text tabular-nums">
-                  {de.game.pointsGained(entry.points)}
+                <span className="ms-auto flex shrink-0 items-center gap-3">
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    {lines(entry.results.length).map((line) => (
+                      <span key={line[0]} className="flex gap-1">
+                        {line.map((position) => (
+                          <ResultSquare
+                            key={position}
+                            result={squareResult(entry.results[position])}
+                            appearDelayMs={remainingDelayMs(
+                              SUMMARY.squaresAtMs + fillDelayMs(0, row, position),
+                              SUMMARY.squareMs,
+                              enteredAt,
+                            )}
+                          />
+                        ))}
+                      </span>
+                    ))}
+                  </span>
+                  <span className="w-8 shrink-0 text-right text-label text-text tabular-nums">
+                    {de.game.pointsGained(entry.points)}
+                  </span>
                 </span>
               </li>
             );

@@ -18,6 +18,7 @@ import type { StageKind } from "@/lib/client/phase-clock";
 import { MotionProvider } from "@/lib/ui/motion";
 import type { PendingAnswer, PendingPick } from "@/stores/game-store";
 import { stageTransition } from "./choreography";
+import type { GameOverOverlayProps } from "./overlays/game-over-overlay";
 import { loadOverlay, preloadedOverlays } from "./overlays/loaders";
 
 // Overlays in eigenen Chunks (docs/07) – über dieselben Loader, die preloadOverlays() beim Betreten der Lobby
@@ -59,6 +60,8 @@ export interface StageProps {
   syncGeneration: number;
   onPick: (categoryId: string) => void;
   onAnswer: (questionId: string, choice: AnswerIndex) => void;
+  /** Die Antwortgruppe einer Frage bekam den Fokus nicht – die Frage wird angesagt (QuestionOverlay) */
+  onPromptUnfocused?: (questionId: string) => void;
 }
 
 /**
@@ -69,6 +72,9 @@ export interface StageProps {
  * Nach einem Reconnect wird nichts wiederholt; nur Timer starten mit der Restzeit neu (`syncGeneration` in
  * ihrer Lauf-ID). Ein Overlay, das erst mitten in seiner Phase erscheint, setzt die Choreografie an der
  * richtigen Stelle fort (choreography.ts). Von der Frage in die Auflösung gibt es kein Aus-/Einblenden („cut“).
+ *
+ * Das Spielende zeigt nicht die Bühne, sondern {@link GameOverStage} über Streifen und Bühne (game-screen.tsx):
+ * Beim Wechsel ändert sich so kein Layout unter dem ausblendenden Overlay (kein Layout-Sprung, CLS).
  */
 export function Stage(props: StageProps) {
   const { kind, lobby } = props;
@@ -92,6 +98,7 @@ function StageOverlay({
   syncGeneration,
   onPick,
   onAnswer,
+  onPromptUnfocused,
 }: StageProps) {
   // Je Overlay einmal beim Einhängen entschieden: vorgeladenes Modul synchron oder `dynamic()` (nie ein Wechsel
   // mitten im Overlay – das würde es neu einhängen und die Choreografie wiederholen).
@@ -103,7 +110,6 @@ function StageOverlay({
   const AnswerRevealOverlay = modules.answerReveal?.AnswerRevealOverlay ?? AnswerRevealOverlayLazy;
   const TurnSummaryOverlay = modules.turnSummary?.TurnSummaryOverlay ?? TurnSummaryOverlayLazy;
   const RoundBoardOverlay = modules.roundBoard?.RoundBoardOverlay ?? RoundBoardOverlayLazy;
-  const GameOverOverlay = modules.gameOver?.GameOverOverlay ?? GameOverOverlayLazy;
   const selfId = self?.playerId ?? null;
   const selfPlayer = findPlayer(lobby.players, selfId);
   const question = lobby.question;
@@ -125,6 +131,7 @@ function StageOverlay({
         <CategoryPickOverlay
           options={turn.options}
           picker={findPlayer(lobby.players, turn.pickerId)}
+          isPicker={selfId !== null && turn.pickerId === selfId}
           canPick={self?.canPick === true}
           pickedId={turn.categoryId ?? ownPick}
           phaseStartedAt={lobby.phaseStartedAt}
@@ -155,6 +162,7 @@ function StageOverlay({
           waitingCount={answerWaitingCount(lobby, selfId)}
           runId={`${question.id}:${syncGeneration}`}
           onAnswer={(choice) => onAnswer(question.id, choice)}
+          onPromptUnfocused={onPromptUnfocused}
         />
       );
     case "answer_reveal":
@@ -191,19 +199,23 @@ function StageOverlay({
           phaseStartedAt={lobby.phaseStartedAt}
         />
       );
-    case "game_over":
-      return (
-        <GameOverOverlay
-          results={lobby.results}
-          participants={gameParticipants(lobby)}
-          board={lobby.board}
-          categories={categories}
-          questionsPerTurn={lobby.settings.questionsPerCategory}
-          selfId={selfId}
-          phaseStartedAt={lobby.phaseStartedAt}
-        />
-      );
     default:
+      // `none` und `game_over` (das Spielende liegt über der Bühne, siehe GameOverStage)
       return null;
   }
+}
+
+/**
+ * Spielende (docs/09 §6, §7.9) außerhalb der Bühne: gleicher Chunk und gleiche Lade-Regel wie die Overlays der
+ * Bühne (vorgeladen synchron, sonst `dynamic()`). game-screen.tsx legt es über Kategoriestreifen, Bühne und
+ * Spielerstreifen – die bleiben darunter unverändert stehen, während das letzte Overlay ausblendet.
+ */
+export function GameOverStage(props: GameOverOverlayProps) {
+  const [modules] = useState(preloadedOverlays);
+  const GameOverOverlay = modules.gameOver?.GameOverOverlay ?? GameOverOverlayLazy;
+  return (
+    <MotionProvider>
+      <GameOverOverlay {...props} />
+    </MotionProvider>
+  );
 }

@@ -27,6 +27,12 @@ const SPREAD_MAX = 4;
  * offline, aufgegeben), eigene Person zuerst mit 2 px orangem Unterstrich. Ersetzt im Spiel die
  * Aktionsleiste. Steigt ein angezeigter Punktestand, zeigt die ScorePill „+1“ (16 px nach oben, 480 ms)
  * und zählt hoch (400 ms).
+ *
+ * Ab 5 Personen scrollt die Liste horizontal – ein Scroll-Container schneidet auch senkrecht ab. Damit Ring
+ * (4 px über dem Avatar) und „+1“ (steigt bis 20 px über die Liste) sichtbar bleiben, reicht die Liste dann
+ * per Innenabstand 20 px nach oben in die Bühne (negativer Rand, gleiche Streifenhöhe). Die Liste selbst ist
+ * nicht positioniert: Die Bühne liegt in diesem Rand oben und bekommt jedes Tippen; Avatare und ScorePills
+ * (positioniert) zeichnen darüber.
  */
 export function PlayerStrip({ players, selfId, answeredIds, scores }: PlayerStripProps) {
   const ordered = playersSelfFirst(players, selfId);
@@ -39,8 +45,11 @@ export function PlayerStrip({ players, selfId, answeredIds, scores }: PlayerStri
         // Ab 5 Personen horizontal scrollbar – dann per Tastatur erreichbar (WCAG 2.1.1), wie die Tafel.
         tabIndex={spread ? undefined : 0}
         className={cx(
-          "mx-auto flex h-11 w-full max-w-column items-center px-gutter",
-          spread ? "justify-around" : "gap-4 overflow-x-auto overscroll-x-contain",
+          "mx-auto flex w-full max-w-column items-center px-gutter",
+          // Bis 4 Personen verteilt; passen sie bei großer Schrift nicht in eine Zeile, brechen sie um.
+          spread
+            ? "min-h-11 flex-wrap justify-around gap-y-2"
+            : "-mt-5 h-16 gap-4 overflow-x-auto overscroll-x-contain pt-5",
         )}
       >
         {ordered.map((player) => {
