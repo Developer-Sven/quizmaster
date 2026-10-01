@@ -189,7 +189,7 @@ describe("next.config.ts headers()", () => {
     });
     expect(headersFor("/api/:path*")["Content-Security-Policy"]).toBe("default-src 'none'; frame-ancestors 'none'");
     expect(headersFor("/sw.js")).toEqual({
-      "Cache-Control": "no-cache, no-store, must-revalidate",
+      "Cache-Control": "no-cache",
       "Content-Type": "application/javascript; charset=utf-8",
     });
     expect(nextConfig.poweredByHeader).toBe(false);

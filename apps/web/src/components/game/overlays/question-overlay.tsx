@@ -14,6 +14,7 @@ import { QuestionCard } from "../../ui/question-card";
 import { CHOREOGRAPHY, enterMotion } from "../choreography";
 import { useKeyboardModality, useOverlayClock, useTimerRun } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
+import { StatusLine } from "./status-line";
 
 export interface QuestionOverlayProps {
   question: PublicQuestion;
@@ -39,8 +40,9 @@ const QUESTION = CHOREOGRAPHY.question;
  * Frage (Phase `question` ab `startsAt`, 20 s, docs/09 §7.4–5): `QuestionCard` fährt 16 px von unten ein
  * (200 ms), die Antworten folgen gestaffelt (40 ms); die `TimerBar` läuft als CSS über die Restzeit bis
  * `deadline` (ab 5 s Rest rot, dazu `tick` je Sekunde – Cues der Bühne). Tippen loggt sofort ein: getippte
- * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), unter der Karte live
- * „Warte auf 2 weitere …“ (Zeile immer reserviert – nichts springt). Nach der Deadline nicht mehr bedienbar.
+ * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), in der Statuszeile unter der
+ * Karte live „Warte auf 2 weitere …“ (ADR-034: Zeile immer reserviert und mit der Auflösung geteilt – dort steht
+ * „Zeit abgelaufen“; Karte und Antworten springen nicht). Nach der Deadline nicht mehr bedienbar.
  *
  * Screenreader (WCAG 1.3.1, 4.1.2): Die Antwortgruppe heißt wie die Frage und ist mit „Frage 2 von 3“
  * beschrieben; darüber steht dieselbe Angabe als Überschrift (nur Screenreader). Die Gruppe übernimmt beim
@@ -124,7 +126,9 @@ export function QuestionOverlay({
           }}
         />
       </m.div>
-      <StatusLine>{myChoice !== null && waitingCount > 0 ? de.game.waitingForOthers(waitingCount) : ""}</StatusLine>
+      <StatusLine live testId="question-waiting">
+        {myChoice !== null && waitingCount > 0 ? de.game.waitingForOthers(waitingCount) : ""}
+      </StatusLine>
       <fieldset
         ref={groupRef}
         aria-labelledby={promptId}
@@ -150,22 +154,5 @@ export function QuestionOverlay({
         ))}
       </fieldset>
     </OverlayFrame>
-  );
-}
-
-/**
- * Statuszeile direkt unter der Karte (docs/09 §7.5, `caption`, text-2): „Warte auf 2 weitere …“, live
- * angesagt. Ihre Höhe ist immer reserviert – die Auflösung hält denselben Abstand, Karte und Antworten
- * bleiben beim „cut“ stehen (answer-reveal-overlay.tsx).
- */
-function StatusLine({ children }: { children: string }) {
-  return (
-    <p
-      aria-live="polite"
-      data-testid="question-waiting"
-      className="mt-1 flex min-h-4 items-center justify-center text-center text-caption text-text-2"
-    >
-      {children}
-    </p>
   );
 }

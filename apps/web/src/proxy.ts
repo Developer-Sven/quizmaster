@@ -37,10 +37,11 @@ export const config = {
     {
       /*
        * Alle Seiten – außer API-Routen (JSON, eigene strikte CSP aus next.config.ts), statischen Next-Assets,
-       * Service Worker, Flaggen und Dateien mit Endung (Icons, Manifest, robots.txt …).
+       * Service Worker, Flaggen und Dateien mit Endung (Icons, Sounds, Schriften, Manifest, robots.txt, Lizenztexte …):
+       * Statische Dateien brauchen weder Nonce noch CSP und sparen so je Abruf einen Proxy-Lauf.
        */
       source:
-        "/((?!api(?:/|$)|_next/static|_next/image|sw\\.js|flags/|.*\\.(?:ico|png|svg|jpg|jpeg|gif|webp|avif|txt|xml|json|webmanifest|js|css|map|woff2?)$).*)",
+        "/((?!api(?:/|$)|_next/static|_next/image|sw\\.js|flags/|.*\\.(?:ico|png|svg|jpg|jpeg|gif|webp|avif|txt|xml|json|webmanifest|js|css|map|woff2?|ttf|otf|mp3|webm|ogg|wav|m4a|mp4|md|pdf)$).*)",
       // Prefetches (next/link) liefern kein HTML → keine Nonce nötig (Next-CSP-Leitfaden).
       missing: [
         { type: "header", key: "next-router-prefetch" },

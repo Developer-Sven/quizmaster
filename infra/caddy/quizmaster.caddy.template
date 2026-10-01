@@ -18,7 +18,9 @@
 	@metrics path /metrics /metrics/*
 
 	# Reihenfolge ist Absicht (route = genau so abarbeiten). Keine Access-Logs (Datensparsamkeit, docs/06).
-	# Kein encode: Next.js komprimiert selbst, Cloudflare liefert Brotli aus, /socket.io nie komprimieren.
+	# Kein encode: HTML trägt Cache-Control „… no-transform“ (Nonce-CSP, docs/06/ADR-008, security-headers.ts) und
+	# bleibt deshalb unkomprimiert – weder Next noch Caddy noch Cloudflare komprimieren es. JS/CSS unter
+	# /_next/static komprimiert Next selbst. /socket.io nie komprimieren.
 	# lb_try_*: Neustartlücken (Deploy, max_memory_restart, Absturz im Fork-Modus) werden bis 8 s überbrückt –
 	# die Anfrage wartet auf den Upstream, statt sofort mit 502 zu scheitern.
 	route {

@@ -118,16 +118,41 @@ export function isCachedRoute(route: SwRoute): route is "rules" | "navigation" |
   return route === "rules" || route === "navigation" || route === "next-static" || route === "static-asset";
 }
 
+/** `<script … nomodule …>` (Attribut, nicht Teil eines anderen Namens wie `data-nomodule`) – auch `noModule=""`. */
+const NOMODULE_SCRIPT_TAG = /<script\b(?=[^>]*\snomodule(?:=(?:"[^"]*"|'[^']*'|[^\s>]*))?(?:\s|\/?>))[^>]*>/gi;
+
+/** `src` eines Tags (nicht `data-src`). */
+const SRC_ATTRIBUTE = /\ssrc=(?:"([^"]*)"|'([^']*)')/i;
+
+/** Ein `/_next/static/…`-Pfad im HTML (Ende an Anführungszeichen, Leerraum, Klammern und Escape-Zeichen). */
+const NEXT_STATIC_PATH = /\/_next\/static\/[^"'\s<>()\\]+/g;
+
+/**
+ * Pfade der `nomodule`-Skripte einer Seite: Nexts Polyfill-Bundle für Browser ohne ES-Module (~110 KB, ~40 KB
+ * gzip). Browser mit Service Worker führen es nie aus – vorab gecacht wäre es bei jeder Installation umsonst geladen.
+ */
+export function noModuleScriptPaths(html: string): Set<string> {
+  const paths = new Set<string>();
+  for (const tag of html.matchAll(NOMODULE_SCRIPT_TAG)) {
+    const match = SRC_ATTRIBUTE.exec(tag[0]);
+    const src = match?.[1] ?? match?.[2] ?? "";
+    for (const path of src.matchAll(NEXT_STATIC_PATH)) paths.add(path[0].replace(/&amp;/g, "&"));
+  }
+  return paths;
+}
+
 /**
  * `/_next/static/…`-Verweise aus dem HTML einer vorgewärmten Seite (Offline, Regeln: Skripte, CSS, vorgeladene
  * Schriften, Chunks im RSC-Payload) – sie werden beim Install vorab gecacht, damit die Seite ohne Netz
- * vollständig rendert. Nur eigene, relative Pfade; Duplikate und Escape-Reste fallen weg.
+ * vollständig rendert. Nur eigene, relative Pfade; Duplikate und Escape-Reste fallen weg, ebenso die
+ * `nomodule`-Polyfills (nie ausgeführt, siehe {@link noModuleScriptPaths}).
  */
 export function extractStaticAssetUrls(html: string, limit = OFFLINE_ASSET_LIMIT): string[] {
+  const skipped = noModuleScriptPaths(html);
   const found = new Set<string>();
-  for (const match of html.matchAll(/\/_next\/static\/[^"'\s<>()\\]+/g)) {
+  for (const match of html.matchAll(NEXT_STATIC_PATH)) {
     const path = match[0].replace(/&amp;/g, "&");
-    if (path.includes("..")) continue;
+    if (path.includes("..") || skipped.has(path)) continue;
     found.add(path);
     if (found.size >= limit) break;
   }

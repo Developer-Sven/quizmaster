@@ -139,6 +139,10 @@ export const de = {
     unknownCategory: "Kategorie",
     /** Toast: Die getippte Antwort kam (Verbindung weg) nie beim Server an – die Frage läuft aber noch */
     answerNotReceived: "Deine Antwort kam nicht an. Tippe noch einmal.",
+    /** Gleichbleibender Name des Ton-Umschalters im HUD; an/aus trägt der Schalter-Zustand (`aria-checked`) */
+    sound: "Ton",
+    /** Name der Bühne, solange sie selbst scrollt und dafür per Tab erreichbar ist (WCAG 2.1.1) */
+    stage: "Spielfläche",
   },
 
   result: {

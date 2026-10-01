@@ -107,6 +107,93 @@ describe("AnswerButton", () => {
     expect(html).toContain(">+2<");
     expect(html).toContain("gewählt von Pa, Pb, Pc, Pd, Pe, Pf");
   });
+
+  /** Der sichtbare Teil der Antwort ohne Zustandsfarben: Buchstaben-Kästchen, Textspalte, Icon-Slot. */
+  const LONG = "Die Schifffahrtsgesellschaft aus Hamburg";
+  const STATES: readonly AnswerState[] = ["idle", "locked", "dimmed", "correct", "wrong", "disabled"];
+  const anatomy = (state: AnswerState) => {
+    const html = renderToStaticMarkup(h(AnswerButton, { index: 3, text: LONG, state }));
+    const letterBox = /<span class="(flex size-7 shrink-0 [^"]*?) border-[a-z-]+ text-[a-z0-9-]+">D<\/span>/.exec(html);
+    const textColumn = /<span class="([^"]*flex-1[^"]*)">Die Schifffahrtsgesellschaft aus Hamburg/.exec(html);
+    const slot = /<span aria-hidden="true" data-slot="answer-icon" class="([^"]+)">(.*?)<\/span><\/button>$/.exec(html);
+    return { html, letterBox: letterBox?.[1], textColumn: textColumn?.[1], slot: slot?.[1], icon: slot?.[2] ?? null };
+  };
+
+  it("hält rechts in allen Zuständen denselben Icon-Slot frei (20 × 20) – leer bei idle, dimmed und disabled", () => {
+    const icons: Record<string, string | null> = {};
+    for (const state of STATES) {
+      const { slot, icon } = anatomy(state);
+      expect(slot, state).toBe("flex size-5 shrink-0 items-center justify-center");
+      icons[state] = icon === "" ? "" : (/lucide-([a-z-]+)/.exec(icon ?? "")?.[1] ?? icon);
+    }
+    expect(icons).toEqual({
+      idle: "",
+      locked: "lock",
+      dimmed: "",
+      correct: "circle-check",
+      wrong: "circle-x",
+      disabled: "",
+    });
+    expect(anatomy("locked").icon).toContain('width="16"');
+    expect(anatomy("correct").icon).toContain('width="20"');
+    expect(anatomy("wrong").icon).toContain('width="20"');
+  });
+
+  it("40-Zeichen-Antwort: in idle, locked, correct und wrong dieselbe Textbreite und damit dieselbe Zeilenzahl", () => {
+    // Ohne Layout-Engine: Gleiche Zeilenzahl folgt aus gleicher Breite der Textspalte – Buchstaben-Kästchen,
+    // Abstände, Innenabstand, Rahmen und Icon-Slot sind in allen Zuständen gleich; nur Farben wechseln. Gemessen
+    // im Browser (E2E, screen-checks.ts → `answerLines`) gilt dasselbe für die Zeilenzahl selbst.
+    expect(LONG).toHaveLength(40);
+    const reference = anatomy("idle");
+    expect(reference.letterBox).toBe(
+      "flex size-7 shrink-0 items-center justify-center rounded-sm border text-label transition-control",
+    );
+    expect(reference.textColumn).toBe("min-w-0 flex-1 text-answer text-text hyphens-auto wrap-break-word");
+    const outer = (html: string) =>
+      (/^<button[^>]*class="([^"]+)"/.exec(html)?.[1] ?? "")
+        .split(" ")
+        .filter((token) => !/^(?:border-(?!2$)|bg-|opacity-|is-|motion-safe:)/.test(token));
+    for (const state of ["locked", "correct", "wrong"] as const) {
+      const other = anatomy(state);
+      expect(other.letterBox, state).toBe(reference.letterBox);
+      expect(other.textColumn, state).toBe(reference.textColumn);
+      expect(other.slot, state).toBe(reference.slot);
+      expect(outer(other.html), state).toEqual(outer(reference.html));
+    }
+  });
+
+  it("trennt lange Wörter (hyphens-auto, Sprache de aus <html>) statt sie über den Rand ragen zu lassen", () => {
+    expect(anatomy("idle").textColumn).toContain("hyphens-auto");
+    expect(anatomy("idle").textColumn).toContain("wrap-break-word");
+    const layout = readFileSync(new URL("../../app/layout.tsx", import.meta.url), "utf8");
+    expect(layout).toMatch(/<html lang="de"/);
+  });
+
+  it("nimmt den sichtbaren Buchstaben in den zugänglichen Namen auf – vorn, wie sichtbar (WCAG 2.5.3)", () => {
+    for (const state of STATES) {
+      const html = render(state);
+      const button = /^<button[^>]*>/.exec(html)?.[0] ?? "";
+      expect(button, state).not.toContain("aria-label");
+      // Name aus dem Inhalt: zuerst das Buchstaben-Kästchen (nicht versteckt), dann der Antworttext
+      const letter = /<span class="flex size-7[^"]*"[^>]*>C<\/span>/.exec(html)?.[0] ?? "";
+      expect(letter, state).not.toBe("");
+      expect(letter, state).not.toContain("aria-hidden");
+      expect(html.indexOf(">C</span>"), state).toBeLessThan(html.indexOf("Canberra"));
+    }
+    expect(render("correct")).toMatch(/>C<\/span><span class="[^"]*">Canberra<span class="sr-only">, richtig<\/span>/);
+  });
+
+  it("nimmt nicht bedienbare Antworten aus dem Tab-Pfad (bleiben fokussierbar, der Fokus springt nicht weg)", () => {
+    expect(render("idle")).not.toContain("tabindex");
+    expect(render("idle")).not.toContain("aria-disabled");
+    for (const state of ["locked", "dimmed", "correct", "wrong", "disabled"] as const) {
+      const button = /^<button[^>]*>/.exec(render(state))?.[0] ?? "";
+      expect(button, state).toContain('tabindex="-1"');
+      expect(button, state).toContain('aria-disabled="true"');
+      // kein `disabled`-Attribut: das würde den Fokus der gerade eingeloggten Antwort auf <body> werfen
+      expect(button, state).not.toMatch(/\sdisabled(=|\s|>)/);
+    }
+  });
 });
 
 describe("TimerBar und TimerRing", () => {

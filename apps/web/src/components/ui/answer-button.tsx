@@ -69,10 +69,27 @@ const stateText: Partial<Record<AnswerState, string>> = {
 
 const MAX_VISIBLE_PICKERS = 4;
 
+/** Icon im festen Slot rechts: `lock` 16, `circle-check`/`circle-x` 20; idle, dimmed und disabled bleiben leer. */
+function StateIcon({ state }: { state: AnswerState }) {
+  if (state === "locked") return <LockIcon size={16} className="text-primary" />;
+  if (state === "correct") return <CircleCheckIcon size={20} className="text-success" />;
+  if (state === "wrong") return <CircleXIcon size={20} className="text-danger" />;
+  return null;
+}
+
 /**
  * AnswerButton (docs/09 §5): Mindesthöhe 64, `surface-2`, 2 px Rahmen `line-strong`, links
  * Buchstabe A–D (28 × 28), Text `answer` (bis 2 Zeilen). Richtig/falsch zusätzlich per Icon und
  * Screenreader-Text (docs/09 §12). Nur `idle` ist bedienbar.
+ *
+ * - **Fester Icon-Slot rechts (20 × 20) in allen Zuständen** – leer bei idle/dimmed/disabled. Der Text hat so in
+ *   jedem Zustand dieselbe Breite und bricht beim Einloggen und in der Auflösung nicht neu um (gleiche
+ *   Zeilenzahl, nichts springt). Lange Komposita trennt der Browser (`hyphens: auto`, Sprache `de` aus `<html>`).
+ * - **Buchstabe im zugänglichen Namen** (WCAG 2.5.3 „Label in Name“): Sichtbar steht „C Canberra“, der Name
+ *   beginnt deshalb mit dem Buchstaben – Sprachsteuerung trifft die Antwort auch mit „C“.
+ * - **Nicht bedienbar = nicht im Tab-Pfad:** Außer `idle` sind alle Zustände `aria-disabled` und `tabIndex=-1`.
+ *   Der Fokus bleibt dabei, wo er ist (z. B. auf der gerade eingeloggten Antwort oder der Antwortgruppe) –
+ *   er springt nicht ins Leere, nur Tab führt nicht mehr durch die gesperrten Antworten.
  */
 export function AnswerButton({
   index,
@@ -92,6 +109,7 @@ export function AnswerButton({
     <button
       {...rest}
       type="button"
+      tabIndex={interactive ? undefined : -1}
       aria-disabled={interactive ? undefined : true}
       aria-keyshortcuts={`${index + 1} ${letter}`}
       onClick={interactive ? onSelect : undefined}
@@ -102,7 +120,6 @@ export function AnswerButton({
       )}
     >
       <span
-        aria-hidden="true"
         className={cx(
           "flex size-7 shrink-0 items-center justify-center rounded-sm border text-label transition-control",
           letterClasses[state],
@@ -110,13 +127,13 @@ export function AnswerButton({
       >
         {letter}
       </span>
-      <span className="min-w-0 flex-1 text-answer text-text">
+      <span className="min-w-0 flex-1 text-answer text-text hyphens-auto wrap-break-word">
         {text}
         {srText ? <span className="sr-only">, {srText}</span> : null}
       </span>
-      {state === "locked" ? <LockIcon size={16} className="shrink-0 text-primary" /> : null}
-      {state === "correct" ? <CircleCheckIcon size={20} className="shrink-0 text-success" /> : null}
-      {state === "wrong" ? <CircleXIcon size={20} className="shrink-0 text-danger" /> : null}
+      <span aria-hidden="true" data-slot="answer-icon" className="flex size-5 shrink-0 items-center justify-center">
+        <StateIcon state={state} />
+      </span>
       {pickedBy.length > 0 ? <Pickers pickers={pickedBy} /> : null}
     </button>
   );

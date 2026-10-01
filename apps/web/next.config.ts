@@ -37,11 +37,28 @@ const API_HEADERS = [
   { key: "X-Robots-Tag", value: "noindex, nofollow" },
 ];
 
-/** Service Worker: immer frisch prüfen (docs/06, docs/10). */
+/**
+ * Service Worker (ADR-036, docs/06, docs/10): `no-cache` – jede Update-Prüfung fragt beim Server nach und nutzt
+ * nie ungeprüft eine Kopie. Anders als `no-store` erlaubt das die bedingte Anfrage: Der ETag (Nexts statische
+ * Auslieferung setzt ihn) macht aus einer Prüfung ohne neue Version ein 304 statt eines Volldownloads.
+ */
 const SERVICE_WORKER_HEADERS = [
-  { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+  { key: "Cache-Control", value: "no-cache" },
   { key: "Content-Type", value: "application/javascript; charset=utf-8" },
 ];
+
+/**
+ * Statische Dateien aus `public/` ohne Hash im Namen: eine Woche frisch, danach einen Tag lang veraltet nutzbar,
+ * während im Hintergrund neu geladen wird. Ändert sich eine Datei, sieht jede:r sie spätestens nach gut einer
+ * Woche (Next selbst liefert `public/` mit `max-age=0` aus – jede Flagge, jeder Ton wäre sonst eine Anfrage).
+ * Der Service Worker cached sie zusätzlich (CacheFirst, docs/10).
+ */
+const STATIC_ASSET_CACHE_CONTROL = "public, max-age=604800, stale-while-revalidate=86400";
+
+/** Ordner unter `public/` mit diesen Dateien: Flaggen (prebuild), Sounds, App-Icons, Manifest-Screenshots. */
+const STATIC_ASSET_DIRS = ["flags", "sounds", "icons", "screenshots"] as const;
+
+const STATIC_ASSET_HEADERS = [{ key: "Cache-Control", value: STATIC_ASSET_CACHE_CONTROL }];
 
 /**
  * Web-App-Manifest (app/manifest.ts, docs/10): immer revalidieren, nie lange im CDN – Name, Icons und Kurzbefehle
@@ -69,6 +86,7 @@ const nextConfig: NextConfig = {
       { source: "/api/:path*", headers: API_HEADERS },
       { source: "/sw.js", headers: SERVICE_WORKER_HEADERS },
       { source: "/manifest.webmanifest", headers: MANIFEST_HEADERS },
+      ...STATIC_ASSET_DIRS.map((dir) => ({ source: `/${dir}/:path*`, headers: STATIC_ASSET_HEADERS })),
     ];
   },
 };

@@ -17,7 +17,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/?source=pwa",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
+    // keine feste Ausrichtung (ADR-035, WCAG 2.2 SC 1.3.4): Hochformat ist die Gestaltungsreferenz, Querformat
+    // bleibt bedienbar (Flow-Modus für niedrige Viewports)
     background_color: THEME_COLOR,
     theme_color: THEME_COLOR,
     categories: ["games", "education", "entertainment"],

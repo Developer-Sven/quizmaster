@@ -45,7 +45,6 @@ describe("Web-App-Manifest (docs/10)", () => {
       start_url: "/?source=pwa",
       scope: "/",
       display: "standalone",
-      orientation: "portrait",
       background_color: "#0B1426",
       theme_color: "#0B1426",
       categories: ["games", "education", "entertainment"],
@@ -75,6 +74,10 @@ describe("Web-App-Manifest (docs/10)", () => {
         { name: "Lobby beitreten", url: "/?action=join" },
       ],
     });
+  });
+
+  it("legt keine Bildschirmausrichtung fest (ADR-035, WCAG 1.3.4 – Querformat bleibt möglich)", () => {
+    expect(manifest()).not.toHaveProperty("orientation");
   });
 
   it("wird immer revalidiert (next.config.ts), damit Änderungen nach einem Deploy sofort gelten", async () => {

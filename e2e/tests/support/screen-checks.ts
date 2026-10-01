@@ -7,7 +7,8 @@
  * - höchstens eine orange Hauptaktion (`Button`/`ButtonLink` mit `variant="primary"`) – bei offenem Modal zählt
  *   nur die oberste Ebene,
  * - keine Emojis im sichtbaren Text, keine beliebigen Tailwind-Werte (`[…]`) oder Hex-Farben in Klassen,
- * - Fragen: Fragetext und Antworten passen (nichts abgeschnitten, nichts ragt über den Rand).
+ * - Fragen: Fragetext und Antworten passen (nichts abgeschnitten, nichts ragt über den Rand); jede Antwort hat in
+ *   allen Zuständen dieselbe Zeilenzahl, die letzte steht auf der Bühne vollständig über dem Spielerstreifen.
  *
  * Befunde werden per `expect.soft` gemeldet (ein Lauf zeigt alle Probleme) und als JSON an den Test gehängt;
  * dazu ein Screenshot je Screen und Viewport (`<name>-<breite>x<höhe>.png`, siehe {@link screenshotDir}).
@@ -245,6 +246,89 @@ export async function questionTextFit(overlay: Locator): Promise<TextFit> {
   });
 }
 
+export interface AnswerLines {
+  /** eigener Text der Antwort (ohne Screenreader-Zusätze) */
+  text: string;
+  /** `data-state` in der Auflösung, sonst idle/gesperrt nach `aria-disabled` */
+  state: string;
+  lines: number;
+}
+
+export interface AnswerGeometry {
+  /** `data-layout` des Spielscreens: `stage` (Bühne zwischen festen Leisten) oder `flow` (niedriger Viewport) */
+  layout: string | null;
+  /** Frage mit Bild (Flagge) – dann darf die letzte Antwort unter den Streifen rücken (Bühne scrollt) */
+  media: boolean;
+  answers: AnswerLines[];
+  /** Unterkante der letzten Antwort (D) und Oberkante des Spielerstreifens im Viewport */
+  lastAnswerBottom: number;
+  stripTop: number | null;
+}
+
+/** Antworten der aktuellen Frage bzw. Auflösung: Zeilen je Antwort und Lage der letzten Antwort (D). */
+export async function answerGeometry(page: Page): Promise<AnswerGeometry | null> {
+  return page.evaluate(() => {
+    const overlay = document.querySelector(
+      '[data-testid="overlay-question"]:not([data-exiting]), [data-testid="overlay-answer-reveal"]:not([data-exiting])',
+    );
+    if (!overlay) return null;
+    const buttons = [...overlay.querySelectorAll<HTMLElement>('[data-testid^="answer-"]')];
+    const answers = buttons.flatMap((button) => {
+      const text = button.querySelector("span.flex-1");
+      if (!text) return [];
+      const own = [...text.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent ?? "")
+        .join("");
+      const lineHeight = Number.parseFloat(getComputedStyle(text).lineHeight);
+      const state =
+        button.getAttribute("data-state") ?? (button.getAttribute("aria-disabled") === "true" ? "gesperrt" : "idle");
+      return [{ text: own, state, lines: Math.round(text.getBoundingClientRect().height / lineHeight) }];
+    });
+    const strip = document.querySelector('[data-testid="player-strip"]');
+    return {
+      layout: document.querySelector('[data-testid="game-screen"]')?.getAttribute("data-layout") ?? null,
+      media: overlay.querySelector("img") !== null,
+      answers,
+      lastAnswerBottom: buttons.at(-1)?.getBoundingClientRect().bottom ?? 0,
+      stripTop: strip ? strip.getBoundingClientRect().top : null,
+    };
+  });
+}
+
+/**
+ * Zeilen je Antworttext und Viewport, wie zuerst gemessen (je Worker): Derselbe Text muss in jedem Zustand gleich
+ * viele Zeilen haben – idle, eingeloggt, gedimmt, richtig, falsch (AnswerButton mit festem Icon-Slot).
+ */
+const answerLinesSeen = new Map<string, { lines: number; state: string; screen: string }>();
+
+/**
+ * Frage und Auflösung (ADR-034, AnswerButton): gleiche Zeilenzahl je Antwort in allen Zuständen und – auf der Bühne
+ * ohne Bildfrage – die letzte Antwort vollständig über dem Spielerstreifen (Frage und Auflösung stehen gleich).
+ */
+function checkAnswers(geometry: AnswerGeometry | null, name: string, size: string): void {
+  if (!geometry) return;
+  for (const answer of geometry.answers) {
+    const key = `${size}|${answer.text}`;
+    const seen = answerLinesSeen.get(key);
+    if (!seen) {
+      answerLinesSeen.set(key, { lines: answer.lines, state: answer.state, screen: name });
+      continue;
+    }
+    expect
+      .soft(
+        answer.lines,
+        `${name} (${size}): „${answer.text}“ (${answer.state}) – Zeilen wie in ${seen.screen} (${seen.state})`,
+      )
+      .toBe(seen.lines);
+  }
+  if (geometry.layout === "stage" && !geometry.media && geometry.stripTop !== null) {
+    expect
+      .soft(geometry.lastAnswerBottom, `${name} (${size}): letzte Antwort vollständig über dem Spielerstreifen`)
+      .toBeLessThanOrEqual(geometry.stripTop + 0.5);
+  }
+}
+
 export interface ScreenCheckOptions {
   /** Teil-Locator, der während der Prüfung sichtbar bleiben muss (z. B. das Overlay der Phase) */
   stays?: Locator;
@@ -258,6 +342,8 @@ export interface ScreenResult {
   name: string;
   axe: AxeReport;
   layout: LayoutReport;
+  /** Frage/Auflösung: Zeilen je Antwort und Lage der letzten Antwort (sonst `null`) */
+  answers: AnswerGeometry | null;
   /** Bewegungen kamen vor der Prüfung zur Ruhe */
   settled: boolean;
   axeMs: number;
@@ -281,6 +367,7 @@ export async function checkScreen(
   const axe = await axeReport(page);
   const axeMs = Date.now() - started;
   const layout = await layoutReport(page, options.allowHorizontalScroll);
+  const answers = await answerGeometry(page);
   const viewport = page.viewportSize();
   const size = viewport ? `${viewport.width}x${viewport.height}` : "unbekannt";
   if (options.screenshot !== false) {
@@ -290,7 +377,7 @@ export async function checkScreen(
   }
   // Die Prüfung muss die Phase selbst erfasst haben – nicht schon den Übergang zur nächsten.
   const phaseStayed = options.stays === undefined || (await options.stays.count()) === 1;
-  const result: ScreenResult = { name, axe, layout, settled, axeMs, totalMs: Date.now() - begin };
+  const result: ScreenResult = { name, axe, layout, answers, settled, axeMs, totalMs: Date.now() - begin };
   await testInfo.attach(`screen-${name}-${size}.json`, {
     body: JSON.stringify(result, null, 2),
     contentType: "application/json",
@@ -305,5 +392,6 @@ export async function checkScreen(
     .toBeLessThanOrEqual(1);
   expect.soft(layout.emojis, `${name} (${size}): Emojis`).toEqual([]);
   expect.soft(layout.arbitraryClasses, `${name} (${size}): beliebige Werte/Hex in Klassen`).toEqual([]);
+  checkAnswers(answers, name, size);
   return result;
 }

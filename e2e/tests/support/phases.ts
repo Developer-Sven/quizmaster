@@ -4,7 +4,7 @@
  * `playUntilGameOver` (game.ts) steuert der Test jeden Schritt selbst, damit er in jeder Phase prüfen kann.
  */
 import { expect, type Locator } from "@playwright/test";
-import { stageOverlay } from "./game.ts";
+import { CORRECT_ANSWER_NAME, OTHER_ANSWER_NAME, stageOverlay } from "./game.ts";
 import type { Player } from "./player.ts";
 
 /** Overlay-Namen der Bühne (docs/09 §7, `data-testid="overlay-<name>"`). */
@@ -73,11 +73,12 @@ export function openAnswers(player: Player): Locator {
 }
 
 /**
- * Antwortet gezielt: `correct` = Antwort „Richtig …“ (Fixtures und Langtext-Variante), `wrong` = eine andere.
+ * Antwortet gezielt: `correct` = Antwort „Richtig …“ (Fixtures und Langtext-Variante), `wrong` = eine andere
+ * (zugängliche Namen beginnen mit dem Buchstaben, siehe `CORRECT_ANSWER_NAME`).
  * Wartet, bis die Antwort eingeloggt ist.
  */
 export async function answer(player: Player, which: "correct" | "wrong"): Promise<void> {
-  const name = which === "correct" ? /^Richtig/ : /^(?!Richtig)/;
+  const name = which === "correct" ? CORRECT_ANSWER_NAME : OTHER_ANSWER_NAME;
   const question = stageOverlay(player.page, "question");
   await question.getByRole("button", { name, disabled: false }).first().click();
   await expect(openAnswers(player), `${player.name}: Antwort eingeloggt`).toHaveCount(0);
@@ -161,7 +162,7 @@ export async function playQuicklyUntil(
             });
         }
         const index = answered.get(player) ?? 0;
-        const name = plan(player, index) === "correct" ? /^Richtig/ : /^(?!Richtig)/;
+        const name = plan(player, index) === "correct" ? CORRECT_ANSWER_NAME : OTHER_ANSWER_NAME;
         const choice = stageOverlay(player.page, "question").getByRole("button", { name, disabled: false });
         if ((await choice.count()) > 0) {
           const clicked = await choice

@@ -80,10 +80,10 @@ export const CHOREOGRAPHY = {
     pointsAtMs: 400,
     exitAtMs: 3_000,
   },
-  /** 7 · Zug-Ergebnis (Phase `turn_summary`, 4 s) */
+  /** 7 · Zug-Ergebnis (Phase `turn_summary`, 4 s): Sheet fährt von unten hoch (um die eigene Höhe, 320 ms) */
   turnSummary: {
     sheetMs: DURATION_MS.slow,
-    sheetRisePx: 48,
+    sheetFrom: "100%",
     squaresAtMs: DURATION_MS.slow,
     squareMs: DURATION_MS.base,
   },
@@ -118,12 +118,13 @@ export type Bezier = readonly [number, number, number, number];
 
 /**
  * Startwerte einer Einblendung (nur `transform`-Anteile und Deckkraft). Bewusst ein Typ-Alias statt
- * `interface`: nur so ist er den motion-Zielen (mit Index-Signatur für CSS-Variablen) zuweisbar.
+ * `interface`: nur so ist er den motion-Zielen (mit Index-Signatur für CSS-Variablen) zuweisbar. `y` in px oder
+ * relativ zur eigenen Höhe (`"100%"`: ein Sheet fährt um seine ganze Höhe hoch).
  */
 export type MotionFrom = {
   opacity?: number;
   x?: number;
-  y?: number;
+  y?: number | `${number}%`;
   scale?: number;
 };
 

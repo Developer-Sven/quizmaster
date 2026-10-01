@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Dialog } from "@/components/ui/dialog";
-import { IconButton } from "@/components/ui/icon-button";
-import { de } from "@/i18n/de";
-import { Volume2Icon, VolumeXIcon, XIcon } from "@/lib/ui/icons";
+import { de } from "../../i18n/de";
+import { Volume2Icon, VolumeXIcon, XIcon } from "../../lib/ui/icons";
+import { Dialog } from "../ui/dialog";
+import { IconButton } from "../ui/icon-button";
 
 export interface HudProps {
   /** „Runde 2/3 · Zug 3/4“ oder leer */
@@ -22,7 +22,8 @@ export interface HudProps {
 
 /**
  * HUD (docs/09 §7 Grundgerüst): 56 px, links `x` = Aufgeben (Dialog), Mitte Fortschritt, rechts der
- * Ton-Umschalter (`volume-2`/`volume-x`, docs/09 §10: Standard an, gespeichert). Enthält die höfliche
+ * Ton-Umschalter (`volume-2`/`volume-x`, docs/09 §10: Standard an, gespeichert) – ein Schalter (`role="switch"`)
+ * namens „Ton“, dessen Zustand `aria-checked` trägt (der Name wechselt nicht mit dem Zustand). Enthält die höfliche
  * Live-Region für die Ansagen (Runde/Wahl, Kategorie + Frage, Richtig/Falsch, Rundenende, Spielende).
  * Bei großer Schrift (150–200 %) bricht der Fortschritt um und das HUD wächst, statt ihn abzuschneiden
  * (WCAG 1.4.4); 56 px bleiben die Mindesthöhe.
@@ -51,9 +52,13 @@ export function Hud({
         >
           {progress}
         </p>
+        {/* Schalter mit gleichbleibendem Namen „Ton“ (WCAG 4.1.2): an/aus sagt `aria-checked`, sichtbar das Icon.
+            Kein `pressed` des IconButton – das färbte das Icon dauerhaft orange. */}
         <IconButton
           icon={soundOn ? Volume2Icon : VolumeXIcon}
-          label={soundOn ? de.game.soundOn : de.game.soundOff}
+          label={de.game.sound}
+          role="switch"
+          aria-checked={soundOn}
           onClick={onToggleSound}
           data-testid="hud-sound"
         />

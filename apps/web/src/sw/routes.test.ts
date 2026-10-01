@@ -11,6 +11,7 @@ import {
   isRulesPage,
   isStaticAsset,
   NAVIGATION_TIMEOUT_SECONDS,
+  noModuleScriptPaths,
   OFFLINE_ASSET_LIMIT,
   outdatedCaches,
   type RequestFacts,
@@ -143,6 +144,30 @@ describe("Offline-Seite vorwärmen", () => {
       "/_next/static/chunks/app/offline/page-9z8y.js",
       "/_next/static/evil.js",
     ]);
+  });
+
+  it("lässt das nomodule-Polyfill-Bundle aus (nie ausgeführt, ~40 KB gzip) – nur echte nomodule-Skripte", () => {
+    // So rendert Next 16 (Turbopack) die Offline-Seite: Name ohne „polyfill“, erkennbar nur am Attribut.
+    const html = [
+      '<script src="/_next/static/chunks/131dok63dyzsn.js" async="" nonce="abc"></script>',
+      '<script src="/_next/static/chunks/0cz1d0mv5g_q7.js" noModule="" nonce="abc"></script>',
+      "<script nomodule src='/_next/static/chunks/legacy-2.js'></script>",
+      '<script data-nomodule-hint="1" src="/_next/static/chunks/keep-1.js"></script>',
+      '<script src="/_next/static/chunks/keep-2.js" data-src="/_next/static/chunks/x.js"></script>',
+      '<script src="/_next/static/chunks/32ay3y8p6hz-y.js" nonce="abc" id="_R_" async=""></script>',
+    ].join("");
+    expect(noModuleScriptPaths(html)).toEqual(
+      new Set(["/_next/static/chunks/0cz1d0mv5g_q7.js", "/_next/static/chunks/legacy-2.js"]),
+    );
+    expect(extractStaticAssetUrls(html)).toEqual([
+      "/_next/static/chunks/131dok63dyzsn.js",
+      "/_next/static/chunks/keep-1.js",
+      "/_next/static/chunks/keep-2.js",
+      "/_next/static/chunks/x.js",
+      "/_next/static/chunks/32ay3y8p6hz-y.js",
+    ]);
+    // Ohne nomodule-Skript bleibt alles wie bisher
+    expect(noModuleScriptPaths('<script src="/_next/static/chunks/a.js" type="module"></script>').size).toBe(0);
   });
 
   it("übernimmt nur Pfade (die Origin ist immer die eigene) und begrenzt die Anzahl", () => {

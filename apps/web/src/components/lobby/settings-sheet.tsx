@@ -1,11 +1,11 @@
 "use client";
 
 import { formatGameEstimate, type LobbySettings, SETTINGS_BOUNDS, type SettingsUpdate } from "@quizmaster/shared";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Sheet } from "@/components/ui/sheet";
-import { Stepper } from "@/components/ui/stepper";
-import { de } from "@/i18n/de";
+import { Fragment, useState } from "react";
+import { de } from "../../i18n/de";
+import { Button } from "../ui/button";
+import { Sheet } from "../ui/sheet";
+import { Stepper } from "../ui/stepper";
 
 export interface SettingsSheetProps {
   open: boolean;
@@ -66,11 +66,50 @@ export function SettingsSheet({ open, settings, playerCount, onChange, onClose }
           max={SETTINGS_BOUNDS.maxPlayers.max}
           onChange={(maxPlayers) => change({ maxPlayers })}
         />
-        <p className="pt-2 pb-2 text-label text-text-2" data-testid="settings-summary">
-          {de.lobby.settingsSummary(shown.rounds, shown.questionsPerCategory)} ·{" "}
-          {formatGameEstimate(shown.rounds, players, shown.questionsPerCategory)}
-        </p>
+        <SettingsSummary settings={shown} players={players} />
       </div>
     </Sheet>
+  );
+}
+
+/** Trenner der Zusammenfassung („3 Runden · 3 Fragen je Kat.“, „27 Fragen · ca. 9 Min.“). */
+const SUMMARY_SEPARATOR = " · ";
+
+/** Geschütztes Leerzeichen (U+00A0) vor dem Trenner: „·“ beginnt nie eine Zeile. */
+const NO_BREAK_SPACE = String.fromCharCode(0xa0);
+
+/** Teile der Zusammenfassung, z. B. „3 Runden“, „3 Fragen je Kat.“, „18 Fragen“, „ca. 6 Min.“. */
+export function settingsSummaryParts(
+  settings: Pick<LobbySettings, "rounds" | "questionsPerCategory">,
+  players: number,
+): string[] {
+  return [
+    ...de.lobby.settingsSummary(settings.rounds, settings.questionsPerCategory).split(SUMMARY_SEPARATOR),
+    ...formatGameEstimate(settings.rounds, players, settings.questionsPerCategory).split(SUMMARY_SEPARATOR),
+  ];
+}
+
+/**
+ * Zusammenfassungszeile (docs/09 §6): bricht nur zwischen den Teilen um, nie mitten in „ca. 6 Min.“ – jeder Teil
+ * hält zusammen, der Trenner „·“ bleibt am Ende der Zeile (geschütztes Leerzeichen davor). `text-balance` legt den
+ * Umbruch bei 360 px zwischen Einstellungen und Schätzung; bei 430 px passt alles in eine Zeile.
+ */
+export function SettingsSummary({
+  settings,
+  players,
+}: {
+  settings: Pick<LobbySettings, "rounds" | "questionsPerCategory">;
+  players: number;
+}) {
+  const parts = settingsSummaryParts(settings, players);
+  return (
+    <p className="pt-2 pb-2 text-label text-balance text-text-2" data-testid="settings-summary">
+      {parts.map((part, index) => (
+        <Fragment key={part}>
+          {index > 0 ? `${NO_BREAK_SPACE}· ` : null}
+          <span className="whitespace-nowrap">{part}</span>
+        </Fragment>
+      ))}
+    </p>
   );
 }

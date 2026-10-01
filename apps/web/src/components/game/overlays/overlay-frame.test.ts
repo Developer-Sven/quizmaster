@@ -24,12 +24,12 @@ function el<P extends object>(
  */
 function render(
   isPresent: boolean | null,
-  options: { custom?: "fade" | "cut"; leaving?: boolean; initial?: false } = {},
+  options: { custom?: "fade" | "cut"; leaving?: boolean; initial?: false; sheet?: boolean } = {},
 ): string {
   const frame = el(
     MotionProvider,
     {},
-    el(OverlayFrame, { testId: "overlay-question", leaving: options.leaving }, "Frage"),
+    el(OverlayFrame, { testId: "overlay-question", leaving: options.leaving, sheet: options.sheet }, "Frage"),
   );
   if (isPresent === null) return renderToStaticMarkup(frame);
   const presence: PresenceValue = {
@@ -74,6 +74,20 @@ describe("OverlayFrame", () => {
     const html = render(true, { leaving: true });
     expect(html).toContain('data-exiting="true"');
     expect(html).toMatch(/\sinert(=""|\s|>)/);
+  });
+
+  it("verankert ein Sheet unten ohne Seiten-/unteren Innenabstand und ohne eigene Einblendung (docs/09 §7.7)", () => {
+    const sheet = render(true, { custom: "fade", sheet: true });
+    const column = /<section[^>]*><div class="([^"]+)"/.exec(sheet)?.[1] ?? "";
+    expect(column.split(" ")).toEqual(
+      expect.arrayContaining(["mx-auto", "flex", "w-full", "max-w-column", "flex-col", "justify-end", "pt-4"]),
+    );
+    expect(column).not.toMatch(/\b(?:px-gutter|py-4|pb-|justify-center)\b/);
+    // Das Sheet fährt selbst hoch – der Rahmen blendet nicht zusätzlich ein (kein opacity 0, kein y 12)
+    expect(sheet).not.toMatch(/opacity:0/);
+    expect(sheet).not.toMatch(/translateY\(12px\)/);
+    const normal = /<section[^>]*><div class="([^"]+)"/.exec(render(true, { custom: "fade" }))?.[1] ?? "";
+    expect(normal).toContain("px-gutter py-4");
   });
 
   it("gibt die Bühne spätestens kurz nach dem Ausblenden (200 ms) frei", () => {

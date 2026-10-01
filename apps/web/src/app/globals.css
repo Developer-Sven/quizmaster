@@ -259,9 +259,22 @@
   padding-bottom: calc(var(--spacing) * 4 + env(safe-area-inset-bottom));
 }
 
-/* Toast unten über der Aktionsleiste bzw. dem Spielerstreifen */
+/*
+ * Toast unten über der Aktionsleiste bzw. dem Spielerstreifen: mindestens 96 px (+ Safe Area) – das reicht über
+ * den Spielerstreifen und eine einzeilige Aktionsleiste. Ist die Aktionsleiste höher (Spielende: Revanche,
+ * „Fragen ansehen“ und „Lobby verlassen“), steht der Toast 8 px über ihrer Oberkante; ihre Höhe (mit Safe Area)
+ * meldet sie selbst als --sticky-bottom (components/app/sticky-inset.tsx). Liegt ein Sheet oder Dialog offen
+ * darüber (`aria-modal`), ist die Leiste verdeckt – dann gilt nur der feste Abstand, der Toast rückt nicht weiter
+ * in den Inhalt des Sheets (z. B. „Fragen ansehen“ direkt nach dem Melden).
+ */
 @utility bottom-toast {
-  bottom: calc(var(--spacing) * 24 + env(safe-area-inset-bottom));
+  bottom: max(
+    calc(var(--spacing) * 24 + env(safe-area-inset-bottom)),
+    calc(var(--sticky-bottom, 0px) + var(--spacing) * 2)
+  );
+  :root:has([aria-modal="true"]) & {
+    bottom: calc(var(--spacing) * 24 + env(safe-area-inset-bottom));
+  }
 }
 
 /* Sheets lassen oben Luft für den Scrim */

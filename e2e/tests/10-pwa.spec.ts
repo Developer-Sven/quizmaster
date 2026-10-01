@@ -1,11 +1,11 @@
 /**
  * Szenario 10 (docs/11, docs/10): PWA im Prod-Build (`next start` des Test-Stacks) – Manifest erreichbar und
- * gültig, Service Worker registriert und steuert die Seite, Offline-Seite bei Netzverlust, Update-Banner „Neue
- * Version verfügbar“ nie während des laufenden Spiels (erst ab Spielende).
+ * gültig (ohne feste Ausrichtung, ADR-035), Service Worker registriert und steuert die Seite (`/sw.js` mit
+ * `no-cache` + ETag, ADR-036), statische Dateien mit Cache-Headern und ohne Proxy, Offline-Seite bei Netzverlust,
+ * Update-Banner „Neue Version verfügbar“ nie während des laufenden Spiels (erst ab Spielende).
  */
 import type { BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures.ts";
-import { stageOverlay } from "./support/game.ts";
 import { OFFLINE_ERRORS } from "./support/network.ts";
 import type { Player } from "./support/player.ts";
 
@@ -67,7 +67,6 @@ test("Manifest erreichbar und gültig, Service Worker registriert (Prod-Build)",
     start_url: string;
     scope: string;
     display: string;
-    orientation: string;
     background_color: string;
     theme_color: string;
     icons: { src: string; sizes: string; type: string; purpose?: string }[];
@@ -82,8 +81,9 @@ test("Manifest erreichbar und gültig, Service Worker registriert (Prod-Build)",
     start_url: "/?source=pwa",
     scope: "/",
     display: "standalone",
-    orientation: "portrait",
   });
+  // Keine feste Ausrichtung (ADR-035, WCAG 1.3.4): Querformat bleibt möglich.
+  expect(manifest).not.toHaveProperty("orientation");
   expect(manifest.background_color.toUpperCase()).toBe(STUDIO_NAVY);
   expect(manifest.theme_color.toUpperCase()).toBe(STUDIO_NAVY);
   expect(manifest.icons.map((icon) => `${icon.sizes}${icon.purpose ? ` ${icon.purpose}` : ""}`)).toEqual([
@@ -108,8 +108,13 @@ test("Manifest erreichbar und gültig, Service Worker registriert (Prod-Build)",
   const worker = await waitForServiceWorker(mia.page);
   expect(worker).toEqual({ script: `${origin}/sw.js`, scope: `${origin}/` });
   const script = await request.get("/sw.js");
-  expect(script.headers()["cache-control"]).toBe("no-cache, no-store, must-revalidate");
+  // ADR-036: immer beim Server prüfen (no-cache), dank ETag als bedingte Anfrage – ohne neue Version ein 304.
+  expect(script.headers()["cache-control"]).toBe("no-cache");
   expect(script.headers()["content-type"]).toBe("application/javascript; charset=utf-8");
+  const etag = script.headers().etag ?? "";
+  expect(etag, "ETag an /sw.js").not.toBe("");
+  const unchanged = await request.get("/sw.js", { headers: { "If-None-Match": etag } });
+  expect(unchanged.status(), "bedingte Update-Prüfung ohne neue Version").toBe(304);
 
   // Chromium bewertet Manifest und Installierbarkeit selbst (DevTools „Application → Manifest“).
   const cdp = await mia.page.context().newCDPSession(mia.page);
@@ -127,6 +132,33 @@ test("Manifest erreichbar und gültig, Service Worker registriert (Prod-Build)",
       }),
     )
     .toBe(true);
+});
+
+test("Statische Dateien: eine Woche gecacht und ohne Proxy, HTML-Seiten weiter mit Nonce-CSP", async ({ request }) => {
+  // Namen ohne Hash: eine Woche frisch, danach ein Tag stale-while-revalidate (der SW cached sie zusätzlich).
+  const cacheControl = "public, max-age=604800, stale-while-revalidate=86400";
+  for (const path of [
+    "/sounds/lock.webm",
+    "/sounds/lock.mp3",
+    "/sounds/LICENSE.md",
+    "/flags/de.svg",
+    "/icons/icon-192.png",
+    "/icons/favicon.svg",
+    "/screenshots/lobby.png",
+  ]) {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(200);
+    expect(response.headers()["cache-control"], path).toBe(cacheControl);
+    // Nicht durch den Proxy gelaufen: keine CSP mit Nonce (die setzt nur proxy.ts)
+    expect(response.headers()["content-security-policy"], path).toBeUndefined();
+  }
+
+  const page = await request.get("/", { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });
+  expect(page.status()).toBe(200);
+  const csp = page.headers()["content-security-policy"] ?? "";
+  const nonce = /'nonce-([A-Za-z0-9+/]{22}==)' 'strict-dynamic'/.exec(csp)?.[1];
+  expect(nonce, "Nonce-CSP der Startseite").toBeDefined();
+  expect(await page.text()).toContain(`nonce="${nonce}"`);
 });
 
 test("Offline-Seite bei Netzverlust, nach Rückkehr „Erneut versuchen“", async ({ players }) => {
@@ -180,13 +212,18 @@ test("Update-Banner erscheint nicht während des Spiels, erst ab Spielende", asy
 
   // … aber das Banner bleibt im laufenden Spiel aus (docs/10: nie während eines Spiels, erst ab game_over).
   const banner = mia.page.getByTestId("update-banner");
-  const gameOver = stageOverlay(mia.page, "game-over");
   const phases = new Set<string>();
-  while ((await gameOver.count()) === 0) {
-    const phase = await mia.gameScreen.getAttribute("data-phase");
-    if (phase === "game_over") break;
-    if (phase) phases.add(phase);
-    expect(await banner.count(), `Update-Banner in Phase ${phase}`).toBe(0);
+  for (;;) {
+    // Phase, Spielende und Banner in EINEM Schritt lesen: Zwischen getrennten Abfragen kann das Spiel enden –
+    // dann stünde das (ab Spielende erlaubte) Banner neben einer veralteten Phase und der Test schlüge fehl.
+    const sample = await mia.page.evaluate(() => ({
+      phase: document.querySelector('[data-testid="game-screen"]')?.getAttribute("data-phase") ?? null,
+      gameOver: document.querySelector('[data-testid="overlay-game-over"]:not([data-exiting])') !== null,
+      banners: document.querySelectorAll('[data-testid="update-banner"]').length,
+    }));
+    if (sample.gameOver || sample.phase === "game_over") break;
+    if (sample.phase) phases.add(sample.phase);
+    expect(sample.banners, `Update-Banner in Phase ${sample.phase}`).toBe(0);
     await mia.page.waitForTimeout(100);
   }
   expect([...phases], "Stichproben in laufenden Phasen").toEqual(

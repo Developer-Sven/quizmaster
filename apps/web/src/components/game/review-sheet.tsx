@@ -9,17 +9,9 @@ import {
   type ReviewItem,
 } from "@quizmaster/shared";
 import { useState } from "react";
-import { Avatar } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { CategoryBadge } from "@/components/ui/category-badge";
-import { EmptyState } from "@/components/ui/empty-state";
-import { IconButton } from "@/components/ui/icon-button";
-import { ListRow } from "@/components/ui/list-row";
-import { Sheet } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
-import { de, errorPresentations } from "@/i18n/de";
-import { type CategoryCatalog, categoryVisual, pickersByAnswer } from "@/lib/client/game-view";
-import { cx } from "@/lib/ui/cx";
+import { de, errorPresentations } from "../../i18n/de";
+import { type CategoryCatalog, categoryVisual, pickersByAnswer } from "../../lib/client/game-view";
+import { cx } from "../../lib/ui/cx";
 import {
   CircleCheckIcon,
   CircleXIcon,
@@ -28,7 +20,15 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
   TriangleAlertIcon,
-} from "@/lib/ui/icons";
+} from "../../lib/ui/icons";
+import { Avatar } from "../ui/avatar";
+import { Button } from "../ui/button";
+import { CategoryBadge } from "../ui/category-badge";
+import { EmptyState } from "../ui/empty-state";
+import { IconButton } from "../ui/icon-button";
+import { ListRow } from "../ui/list-row";
+import { Sheet } from "../ui/sheet";
+import { Skeleton } from "../ui/skeleton";
 
 export type ReviewStatus = "loading" | "ready" | "error";
 
@@ -138,7 +138,7 @@ export function ReviewSheet({
   );
 }
 
-interface ReviewRowProps {
+export interface ReviewRowProps {
   item: ReviewItem;
   players: readonly PublicPlayer[];
   categories: CategoryCatalog;
@@ -147,7 +147,7 @@ interface ReviewRowProps {
   onStartReport: () => void;
 }
 
-function ReviewRow({ item, players, categories, selfId, onRate, onStartReport }: ReviewRowProps) {
+export function ReviewRow({ item, players, categories, selfId, onRate, onStartReport }: ReviewRowProps) {
   const pickers = pickersByAnswer(item.picks, players);
   const myPick = selfId === null ? null : (item.picks[selfId] ?? null);
   const flag = item.media?.kind === "flag" && FLAG_CODE.test(item.media.code) ? item.media.code : null;
@@ -226,14 +226,33 @@ function ReviewRow({ item, players, categories, selfId, onRate, onStartReport }:
           onClick={() => onRate(item.questionId, -1)}
           data-testid="review-rate-down"
         />
-        <IconButton
-          icon={FlagIcon}
-          label={item.myReported ? de.review.reported : de.review.report}
-          disabled={item.myReported}
-          onClick={onStartReport}
-          data-testid="review-report"
-        />
+        {item.myReported ? (
+          <ReportedFlag />
+        ) : (
+          <IconButton icon={FlagIcon} label={de.review.report} onClick={onStartReport} data-testid="review-report" />
+        )}
       </div>
     </li>
+  );
+}
+
+/**
+ * Bereits gemeldet (docs/09 §6): Die Zeile zeigt `flag` in `text-3` – voll deckend statt der 40 % eines
+ * deaktivierten IconButton (docs/09 §5). Bleibt als gesperrter Button „Bereits gemeldet“ an derselben Stelle
+ * (aria-disabled, fokussierbar wie ein gesperrter IconButton, gleiche Größe 44 × 44), damit Screenreader und
+ * Tastatur den Zustand weiter finden; Tippen bewirkt nichts.
+ */
+function ReportedFlag() {
+  return (
+    <button
+      type="button"
+      aria-disabled="true"
+      aria-label={de.review.reported}
+      title={de.review.reported}
+      data-testid="review-report"
+      className="inline-flex size-11 shrink-0 cursor-default items-center justify-center rounded-lg text-text-3"
+    >
+      <FlagIcon size={24} aria-hidden="true" />
+    </button>
   );
 }

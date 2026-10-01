@@ -11,6 +11,13 @@ export function stageOverlay(page: Page, name: string): Locator {
   return page.locator(`[data-testid="overlay-${name}"]:not([data-exiting])`);
 }
 
+/**
+ * Zugängliche Namen der Antworten (WCAG 2.5.3 „Label in Name“): Sie beginnen wie sichtbar mit dem Buchstaben
+ * A–D, dann folgt der Text – „Richtig …“ ist die richtige Antwort der Fixtures und der Langtext-Variante.
+ */
+export const CORRECT_ANSWER_NAME = /^[A-D]\s*Richtig/;
+export const OTHER_ANSWER_NAME = /^[A-D]\s*(?!\s|Richtig)/;
+
 export type AnswerStrategy =
   /** Antwort „Richtig …“ (Fixtures: answers[0] beginnt mit „Richtig“), sonst die erste */
   | "correct"
@@ -63,7 +70,7 @@ export function gameLocators(player: Player): {
     pickTiles: stageOverlay(page, "category-pick").getByRole("button"),
     // Bedienbare Antworten (nach dem Einloggen bzw. nach der Deadline aria-disabled).
     openAnswers: question.getByRole("button", { disabled: false }),
-    correctAnswer: question.getByRole("button", { name: /^Richtig/, disabled: false }),
+    correctAnswer: question.getByRole("button", { name: CORRECT_ANSWER_NAME, disabled: false }),
     gameOver: stageOverlay(page, "game-over"),
     categoryStrip: page.getByTestId("category-strip"),
   };

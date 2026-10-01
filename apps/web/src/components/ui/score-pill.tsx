@@ -19,9 +19,21 @@ interface Gain {
 }
 
 /**
+ * Bewegung des „+1“ (docs/09 §8 „Punkte +1“): 16 px nach oben und ausblenden, 480 ms standard. Bei reduzierter
+ * Bewegung (docs/09 §7 „Bewegungsreduktion“) nur eine Überblendung von höchstens 200 ms – ohne Weg nach oben.
+ */
+export function gainMotion(reduce: boolean) {
+  return {
+    initial: { opacity: 1, y: 0 },
+    animate: { opacity: 0, y: reduce ? 0 : -OFFSET_PX.float },
+    transition: reduce ? transitions.fade : transitions.float,
+  };
+}
+
+/**
  * ScorePill (docs/09 §5, §8): Zahl im Stil `label`, tabular, 28 hoch. Steigt `score`, erscheint
  * „+1“ (16 px nach oben, ausblendend, 480 ms) und die Zahl zählt hoch (400 ms). Reduzierte
- * Bewegung: „+1“ blendet nur, die Zahl springt. Sinkt `score` (Revanche), springt die Zahl.
+ * Bewegung: „+1“ blendet nur aus (≤ 200 ms), die Zahl springt. Sinkt `score` (Revanche), springt die Zahl.
  */
 export function ScorePill({ score }: ScorePillProps) {
   const reduce = useReducedMotion() ?? false;
@@ -53,9 +65,7 @@ export function ScorePill({ score }: ScorePillProps) {
               key={gain.key}
               aria-hidden="true"
               className="pointer-events-none absolute -top-1 left-1/2 -translate-x-1/2 text-label text-success tabular-nums"
-              initial={{ opacity: 1, y: 0 }}
-              animate={{ opacity: 0, y: reduce ? 0 : -OFFSET_PX.float }}
-              transition={transitions.float}
+              {...gainMotion(reduce)}
               onAnimationComplete={() => setGains((current) => current.filter((entry) => entry.key !== gain.key))}
             >
               {de.game.pointsGained(gain.amount)}
