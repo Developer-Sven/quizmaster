@@ -10,11 +10,22 @@ import { Button } from "@/components/ui/button";
 import { Podium } from "@/components/ui/podium";
 import { type RankingEntry, RankingList } from "@/components/ui/ranking-list";
 import { de } from "@/i18n/de";
-import { type CategoryCatalog, duelOutcome, duelSides, findPlayer } from "@/lib/client/game-view";
+import { type CategoryCatalog, duelSides, findPlayer } from "@/lib/client/game-view";
+import { elapsedMs } from "@/lib/client/phase-clock";
 import { cx } from "@/lib/ui/cx";
 import { ChevronDownIcon, ChevronUpIcon, CrownIcon } from "@/lib/ui/icons";
-import { transitions } from "@/lib/ui/motion-presets";
-import { DURATION_MS, EASING, seconds } from "@/lib/ui/tokens";
+import { EASING, seconds } from "@/lib/ui/tokens";
+import {
+  CHOREOGRAPHY,
+  enterMotion,
+  entranceDone,
+  momentAhead,
+  motionPlan,
+  REDUCED_FADE_MS,
+  sideOffset,
+} from "../choreography";
+import { resultHeadline } from "../results";
+import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 import { boardPlayers, boardRowsUntil } from "./round-board-overlay";
 
@@ -22,6 +33,14 @@ type GameResults = NonNullable<PublicLobbyState["results"]>;
 
 /** Ab dieser Länge ist die Überschrift bei 360 px zu breit für `display` (44 px). */
 const LONG_HEADLINE_CHARS = 11;
+
+const END = CHOREOGRAPHY.gameOver;
+
+/** Podest wächst 3 → 2 → 1 (je 160 ms, 320 ms); danach erscheint die Rangliste. */
+const RANKING_AT_MS = END.podiumAtMs + 2 * END.podiumStaggerMs + END.columnMs;
+
+/** Das Podest startet seine Säulen beim Einhängen: Wer deutlich später einsteigt, sieht es fertig. */
+const PODIUM_LATE_MS = END.podiumStaggerMs;
 
 export interface GameOverOverlayProps {
   results: GameResults | null;
@@ -31,31 +50,10 @@ export interface GameOverOverlayProps {
   categories: CategoryCatalog;
   questionsPerTurn: number;
   selfId: string | null;
+  /** Serverzeit des Phasenbeginns – Anker der Choreografie */
+  phaseStartedAt: number;
   /** Vorschau: Tafel anfangs aufgeklappt */
   defaultBoardOpen?: boolean;
-}
-
-/** Überschrift aus Sicht der eigenen Person (docs/09 §11 Ergebnis-Texte). */
-export function resultHeadline(
-  results: GameResults,
-  participants: readonly PublicPlayer[],
-  selfId: string | null,
-): string {
-  if (participants.length === 2) {
-    const outcome = duelOutcome(results, selfId);
-    if (outcome === "won") return de.result.won;
-    if (outcome === "lost") return de.result.lost;
-    if (outcome === "draw") return de.result.draw;
-  }
-  const own = results.ranking.find((entry) => entry.playerId === selfId);
-  if (own) {
-    if (own.status === "resigned") return de.result.resigned;
-    if (results.outcome === "draw") return de.result.draw;
-    return own.place === 1 ? de.result.won : de.result.place(own.place);
-  }
-  const winners = results.ranking.filter((entry) => entry.place === 1 && entry.status === "active");
-  const winner = winners.length === 1 ? findPlayer(participants, winners[0]?.playerId) : undefined;
-  return winner ? de.result.playerWins(winner.name) : de.result.draw;
 }
 
 function rankingEntries(results: GameResults, participants: readonly PublicPlayer[]): RankingEntry[] {
@@ -76,10 +74,11 @@ function rankingEntries(results: GameResults, participants: readonly PublicPlaye
 }
 
 /**
- * Spielende (Phase `game_over`, docs/09 §6 + §7.9): Scrim, Ergebnis-Headline blendet ein (0,96 → 1).
- * 2 Personen: „Gewonnen“/„Verloren“/„Unentschieden“, „7 : 5“, beide Avatare 88 px, Sieger:in mit Krone
- * (Pop). 3–8: Podest (Säulen wachsen 3 → 2 → 1) und Rangliste. Darunter die Tafel, eingeklappt
- * („Spielverlauf“). Die Aktionen (Revanche, Fragen ansehen, Lobby verlassen) stehen in der Aktionsleiste.
+ * Spielende (Phase `game_over`, docs/09 §6 + §7.9): 0–480 ms Scrim, die Ergebnis-Headline blendet ein
+ * (0,96 → 1). 2 Personen: „7 : 5“, beide Avatare 88 px fahren von außen ein, die Krone poppt danach über der
+ * Sieger:in (0 → 1,15 → 1, 320 ms). 3–8: Podest-Säulen wachsen gestaffelt (Platz 3 → 2 → 1, je 160 ms), dann
+ * erscheint die Rangliste. Darunter die Tafel, eingeklappt („Spielverlauf“). Kein Konfetti, kein Lichteffekt.
+ * Ton `win`/`lose`/`turn` als Cue der Bühne. Wer später einsteigt, sieht den Endzustand ohne Wiederholung.
  */
 export function GameOverOverlay({
   results,
@@ -88,11 +87,13 @@ export function GameOverOverlay({
   categories,
   questionsPerTurn,
   selfId,
+  phaseStartedAt,
   defaultBoardOpen = false,
 }: GameOverOverlayProps) {
   const reduce = useReducedMotion() ?? false;
   const [boardOpen, setBoardOpen] = useState(defaultBoardOpen);
   const boardId = useId();
+  const { now, enteredAt } = useOverlayClock(phaseStartedAt, [phaseStartedAt + END.podiumAtMs]);
   if (!results)
     return (
       <OverlayFrame testId="overlay-game-over" scrim>
@@ -104,15 +105,23 @@ export function GameOverOverlay({
   const entries = rankingEntries(results, participants);
   const duel = duelSides(participants, selfId);
   const headline = resultHeadline(results, participants, selfId);
+  const headlineMotion = enterMotion(
+    { at: 0, duration: END.headlineMs, from: { opacity: 0, scale: END.headlineFromScale } },
+    enteredAt,
+    reduce,
+  );
+  // Das Podest erscheint nach der Headline (480 ms); bis dahin hält eine unsichtbare Kopie den Platz frei.
+  // Podium wächst selbst (bei reduzierter Bewegung blendet es nur ein, docs/09 §7 „Podest ohne Wachstum“).
+  const podiumShown = elapsedMs(phaseStartedAt, now) >= END.podiumAtMs;
+  const podiumAnimates = momentAhead(END.podiumAtMs, enteredAt, PODIUM_LATE_MS);
+  const ranking = enterMotion({ at: RANKING_AT_MS, duration: END.columnMs, from: { opacity: 0 } }, enteredAt, reduce);
 
   return (
     <OverlayFrame testId="overlay-game-over" scrim>
       <div className="flex flex-col gap-6 pb-4">
         <m.p
+          {...headlineMotion}
           data-testid="game-over-headline"
-          initial={{ opacity: 0, scale: reduce ? 1 : 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: seconds(DURATION_MS.overlay), ease: EASING.emphasized }}
           className={cx(
             "pt-4 text-center text-text",
             // „Unentschieden“ passt in `display` erst ab 390 px Breite – darunter `h1`, statt abzuschneiden.
@@ -123,15 +132,17 @@ export function GameOverOverlay({
         </m.p>
 
         {duel ? (
-          <DuelResult results={results} left={duel[0]} right={duel[1]} reduce={reduce} />
+          <DuelResult results={results} left={duel[0]} right={duel[1]} reduce={reduce} enteredAt={enteredAt} />
         ) : (
           <>
-            <Podium entries={entries.slice(0, 3)} animate />
-            <m.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ ...transitions.fade, delay: seconds(DURATION_MS.overlay + DURATION_MS.slow) }}
-            >
+            {podiumShown ? (
+              <Podium entries={entries.slice(0, 3)} animate={podiumAnimates} />
+            ) : (
+              <div aria-hidden="true" className="invisible">
+                <Podium entries={entries.slice(0, 3)} />
+              </div>
+            )}
+            <m.div {...ranking}>
               <RankingList entries={entries} />
             </m.div>
           </>
@@ -177,10 +188,15 @@ interface DuelResultProps {
   left: PublicPlayer;
   right: PublicPlayer;
   reduce: boolean;
+  /** Einstieg relativ zum Phasenbeginn (ms) */
+  enteredAt: number;
 }
 
-/** Duell-Ergebnis: „7 : 5“ und beide Avatare 88 px; die Krone poppt über der Sieger:in (docs/09 §7.9). */
-function DuelResult({ results, left, right, reduce }: DuelResultProps) {
+/**
+ * Duell-Ergebnis: „7 : 5“ und beide Avatare 88 px (fahren von außen ein); die Krone poppt danach über der
+ * Sieger:in (docs/09 §7.9 / §8: 0 → 1,15 → 1, 320 ms emphasized), bei reduzierter Bewegung nur Überblendung.
+ */
+function DuelResult({ results, left, right, reduce, enteredAt }: DuelResultProps) {
   const scoreOf = (player: PublicPlayer) =>
     results.ranking.find((entry) => entry.playerId === player.id)?.score ?? player.score;
   const winnerId =
@@ -188,26 +204,28 @@ function DuelResult({ results, left, right, reduce }: DuelResultProps) {
       ? null
       : (results.ranking.find((entry) => entry.place === 1 && entry.status === "active")?.playerId ?? null);
   const sides = [left, right] as const;
+  const score = enterMotion({ at: END.avatarsAtMs, duration: END.columnMs, from: { opacity: 0 } }, enteredAt, reduce);
   return (
     <div className="flex flex-col items-center gap-6">
-      <p data-testid="game-over-score" className="text-h1 text-text tabular-nums">
+      <m.p {...score} data-testid="game-over-score" className="text-h1 text-text tabular-nums">
         {de.game.duelScore(scoreOf(left), scoreOf(right))}
-      </p>
+      </m.p>
       <div className="flex w-full justify-center gap-10">
         {sides.map((player, side) => {
           const winner = player.id === winnerId;
+          const entrance = enterMotion(
+            {
+              at: END.avatarsAtMs,
+              duration: END.avatarMs,
+              from: { opacity: 0, x: sideOffset(side === 0 ? 0 : 1) },
+            },
+            enteredAt,
+            reduce,
+          );
           return (
-            <m.div
-              key={player.id}
-              initial={{ opacity: 0, x: reduce ? 0 : side === 0 ? -24 : 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ ...(reduce ? transitions.fade : transitions.enter), delay: seconds(DURATION_MS.overlay) }}
-              className="flex min-w-0 flex-col items-center gap-2"
-            >
+            <m.div key={player.id} {...entrance} className="flex min-w-0 flex-col items-center gap-2">
               <span className="flex h-6 items-end">
-                {winner ? (
-                  <CrownIcon size={24} aria-hidden="true" className="text-primary motion-safe:animate-crown-pop" />
-                ) : null}
+                {winner ? <Crown reduce={reduce} enteredAt={enteredAt} /> : null}
               </span>
               <Avatar
                 name={player.name}
@@ -230,5 +248,28 @@ function DuelResult({ results, left, right, reduce }: DuelResultProps) {
         })}
       </div>
     </div>
+  );
+}
+
+/** Krone der Sieger:in: poppt nach dem Einfahren der Avatare (0 → 1,15 → 1); reduziert nur Überblendung. */
+function Crown({ reduce, enteredAt }: { reduce: boolean; enteredAt: number }) {
+  const done = entranceDone(END.crownAtMs, END.crownMs, enteredAt);
+  const delay = seconds(END.crownAtMs - enteredAt);
+  if (done) return <CrownIcon size={24} aria-hidden="true" className="text-primary" />;
+  const pop = motionPlan(reduce).crownPop;
+  return (
+    <m.span
+      aria-hidden="true"
+      className="flex text-primary"
+      initial={pop ? { scale: 0 } : { opacity: 0 }}
+      animate={pop ? { scale: [0, 1.15, 1] } : { opacity: 1 }}
+      transition={
+        pop
+          ? { duration: seconds(END.crownMs), times: [0, 0.6, 1], ease: EASING.emphasized, delay }
+          : { duration: seconds(REDUCED_FADE_MS), ease: EASING.standard, delay }
+      }
+    >
+      <CrownIcon size={24} />
+    </m.span>
   );
 }

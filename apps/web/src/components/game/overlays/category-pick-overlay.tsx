@@ -3,16 +3,15 @@
 import type { CategoryOption, PublicPlayer } from "@quizmaster/shared";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { CategoryTile } from "@/components/ui/category-tile";
 import { TimerRing } from "@/components/ui/timer-ring";
 import { de } from "@/i18n/de";
-import { elapsedMs, PICK_HIGHLIGHT_STEP_MS, pickHighlightIndex, remainingMs } from "@/lib/client/phase-clock";
-import { useServerNow, useTicker } from "@/lib/client/use-server-clock";
+import { categoryShortcut, claimGroupFocus, readShortcutGuard } from "@/lib/client/keyboard";
 import { transitions } from "@/lib/ui/motion-presets";
-import { categoryIndexForKey } from "@/lib/ui/shortcuts";
-import { OFFSET_PX, STAGGER_MS, seconds } from "@/lib/ui/tokens";
+import { CHOREOGRAPHY, enterMotion, motionPlan, PANEL_FROM, pickHighlight, wanderBoundaries } from "../choreography";
+import { useOverlayClock, useTimerRun } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 
 export interface CategoryPickOverlayProps {
@@ -24,6 +23,7 @@ export interface CategoryPickOverlayProps {
   canPick: boolean;
   /** gewählte Kategorie (Server oder eigene, gerade gesendete Wahl) */
   pickedId: string | null;
+  /** Serverzeit des Phasenbeginns – Anker der Choreografie */
   phaseStartedAt: number;
   phaseEndsAt: number | null;
   /** Identität des Timer-Laufs (neu nach Resync) */
@@ -31,12 +31,15 @@ export interface CategoryPickOverlayProps {
   onPick: (categoryId: string) => void;
 }
 
+const PICK = CHOREOGRAPHY.pick;
+
 /**
  * Kategoriewahl (Phase `category_pick`, 15 s, docs/09 §7.2): wählende Person „Wähle eine Kategorie“,
- * alle anderen „Mia wählt eine Kategorie“ mit Avatar; drei Kacheln (gestaffelt 40 ms), `TimerRing`
- * rechts oben. Zuschauende sehen die Kacheln view-only mit einem ruhig wandernden Rahmen (1,2 s), der bei
- * der Wahl stoppt; nach der Wahl bleibt die gewählte Kachel `selected`, die anderen blenden aus (200 ms).
- * Tastatur: 1–3 (Fokus in der Kachelgruppe).
+ * alle anderen „Mia wählt eine Kategorie“ mit Avatar; drei Kacheln (Einflug gestaffelt 40 ms), `TimerRing`
+ * rechts oben. Zuschauende sehen die Kacheln view-only mit einem ruhig wandernden 2-px-Rahmen (1,2-s-Takt ab
+ * Phasenbeginn – bei allen gleichzeitig), der bei der Wahl sofort stoppt; nach der Wahl bleibt die gewählte
+ * Kachel `selected`, die anderen blenden aus (200 ms). Reduzierte Bewegung: kein wandernder Rahmen.
+ * Tastatur: `1`–`3`, solange der Fokus in der Kachelgruppe liegt (WCAG 2.1.4, lib/client/keyboard.ts).
  */
 export function CategoryPickOverlay({
   options,
@@ -49,26 +52,29 @@ export function CategoryPickOverlay({
   onPick,
 }: CategoryPickOverlayProps) {
   const reduce = useReducedMotion() ?? false;
-  const now = useServerNow([]);
-  const [enteredAt] = useState(() => elapsedMs(phaseStartedAt, now));
   const picked = pickedId !== null;
   const interactive = canPick && !picked;
-  const wandering = !canPick && !picked && !reduce;
-  const tick = useTicker(PICK_HIGHLIGHT_STEP_MS, wandering);
-  const highlight = wandering ? (pickHighlightIndex(enteredAt, options.length) + tick) % options.length : -1;
-  const remaining = remainingMs(phaseEndsAt, now);
+  const wandering = !canPick && !picked && motionPlan(reduce).wander;
+  const { now, enteredAt } = useOverlayClock(
+    phaseStartedAt,
+    wandering ? wanderBoundaries(phaseStartedAt, phaseEndsAt) : [],
+  );
+  const highlight = wandering ? pickHighlight(phaseStartedAt, now, options.length).index : -1;
+  const timer = useTimerRun(phaseEndsAt, timerRunId);
   const duration = phaseEndsAt === null ? 0 : phaseEndsAt - phaseStartedAt;
   const title = canPick ? de.game.pickSelf : de.game.pickOther(picker?.name ?? "");
   const groupRef = useRef<HTMLFieldSetElement>(null);
 
-  // Wer wählt, bekommt den Fokus in die Kachelgruppe: Kürzel 1–3 wirken sofort, Screenreader sagen die Gruppe an.
+  // Wer wählt, bekommt den Fokus in die Kachelgruppe (nur wenn er frei ist): Kürzel 1–3 wirken sofort,
+  // Screenreader sagen die Gruppe an.
   useEffect(() => {
-    if (interactive) groupRef.current?.focus({ preventScroll: true });
+    const group = groupRef.current;
+    if (interactive && group) claimGroupFocus(group, group.closest("[data-stage]"));
   }, [interactive]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLFieldSetElement>) => {
     if (!interactive) return;
-    const index = categoryIndexForKey(event);
+    const index = categoryShortcut(event, readShortcutGuard(event.currentTarget), options.length);
     const option = index === null ? undefined : options[index];
     if (!option) return;
     event.preventDefault();
@@ -80,8 +86,8 @@ export function CategoryPickOverlay({
       <div className="flex min-h-12 items-center gap-3 pb-4">
         {!canPick && picker ? <Avatar name={picker.name} color={picker.color} size={40} /> : null}
         <h2 className="min-w-0 flex-1 text-h2 text-text">{title}</h2>
-        {!picked && remaining !== null && duration > 0 ? (
-          <TimerRing runId={timerRunId} remainingMs={remaining} durationMs={duration} />
+        {!picked && timer.remainingMs !== null && duration > 0 ? (
+          <TimerRing runId={timer.runId} remainingMs={timer.remainingMs} durationMs={duration} />
         ) : null}
       </div>
       <fieldset
@@ -89,23 +95,24 @@ export function CategoryPickOverlay({
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="min-w-0 flex flex-col gap-3 outline-none"
+        className="flex min-w-0 flex-col gap-3 rounded-lg"
       >
         {options.map((option, position) => {
           const selected = option.id === pickedId;
           const faded = picked && !selected;
+          const entrance = enterMotion(
+            { at: position * PICK.tileStaggerMs, duration: PICK.enterMs, from: PANEL_FROM },
+            enteredAt,
+            reduce,
+          );
           return (
             <m.div
               key={option.id}
               data-testid="category-option"
               data-category-id={option.id}
-              initial={{ opacity: 0, y: reduce ? 0 : OFFSET_PX.enter }}
-              animate={{ opacity: faded ? 0 : 1, y: 0 }}
-              transition={
-                faded
-                  ? transitions.fade
-                  : { ...(reduce ? transitions.fade : transitions.enter), delay: seconds(position * STAGGER_MS.list) }
-              }
+              initial={entrance.initial}
+              animate={{ ...entrance.animate, opacity: faded ? 0 : 1 }}
+              transition={faded ? transitions.fade : entrance.transition}
               aria-hidden={faded || undefined}
             >
               <CategoryTile

@@ -7,7 +7,9 @@
     "dev": "node scripts/prebuild.ts && next dev --turbopack -H 127.0.0.1 -p ${PORT:-3000}",
     "build": "node scripts/prebuild.ts && next build",
     "start": "next start -H 127.0.0.1 -p ${PORT:-3000}",
-    "typecheck": "next typegen && tsc --noEmit -p tsconfig.json"
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.json",
+    "sounds:generate": "node scripts/generate-sounds.ts",
+    "sounds:check": "node scripts/generate-sounds.ts --check"
   },
   "dependencies": {
     "@quizmaster/db": "workspace:*",

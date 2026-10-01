@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
 import { useLobbyActions } from "@/components/lobby/use-lobby-actions";
+import { markFirstGameFinished } from "@/components/pwa/install-state";
 import { de } from "@/i18n/de";
 import { actionErrorPlacement } from "@/lib/client/errors";
-import { reviewSheetOpen } from "@/lib/client/game-view";
+import { isRunningPhase, reviewSheetOpen } from "@/lib/client/game-view";
 import { getRealtimeClient } from "@/lib/client/realtime-client";
+import { getSoundManager } from "@/lib/client/sound";
 import { writeStoredSoundOn } from "@/lib/client/storage";
+import { useWakeLock } from "@/lib/client/wake-lock";
 import {
   gameActions,
   selectCategories,
@@ -23,20 +26,23 @@ import {
   useGameStore,
 } from "@/stores/game-store";
 import { GameScreen } from "./game-screen";
-import { overlayLoaders } from "./overlays/loaders";
+import { loadOverlay } from "./overlays/loaders";
 import type { ReviewStatus } from "./review-sheet";
 
 /** Wartezeit vor dem zweiten Versuch nach TOO_EARLY (Uhrenabgleich minimal ungenau). */
 const TOO_EARLY_RETRY_MS = 150;
 
 // Gleicher Loader wie preloadOverlays() (ein Chunk, beim Betreten der Lobby vorgeladen).
-const ReviewSheet = dynamic(() => overlayLoaders.reviewSheet().then((mod) => mod.ReviewSheet), { ssr: false });
+const ReviewSheet = dynamic(() => loadOverlay("reviewSheet").then((mod) => mod.ReviewSheet), { ssr: false });
 
 export interface LiveGameProps {
   realtimeUrl: string;
 }
 
-/** Spiel (Phasen `intro` … `game_over`) mit Live-Zustand aus dem Store und Aktionen über den Realtime-Client. */
+/**
+ * Spiel (Phasen `intro` … `game_over`) mit Live-Zustand aus dem Store und Aktionen über den Realtime-Client.
+ * Hält während des laufenden Spiels den Bildschirm wach (docs/10, Wake Lock) und speichert den Ton-Umschalter.
+ */
 export function LiveGame({ realtimeUrl }: LiveGameProps) {
   const router = useRouter();
   const lobby = useGameStore(selectLobby);
@@ -50,6 +56,12 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
   /** `phaseStartedAt` des Spielendes, zu dem „Fragen ansehen“ geöffnet wurde (sonst `null`) */
   const [reviewFor, setReviewFor] = useState<number | null>(null);
   const [busy, setBusy] = useState<{ rematch?: boolean; leave?: boolean; resign?: boolean }>({});
+  useWakeLock(lobby !== null && isRunningPhase(lobby.phase));
+  const gameOver = lobby?.phase === "game_over";
+  // Ein Spiel bis zum Ende gespielt: Ab jetzt darf die Startseite „Als App installieren“ anbieten (docs/10).
+  useEffect(() => {
+    if (gameOver) markFirstGameFinished();
+  }, [gameOver]);
   if (!lobby) return null;
 
   const pick = async (categoryId: string) => {
@@ -117,8 +129,11 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
           onAnswer: (questionId, choice) => void answer(questionId, choice),
           onResign: () => void leave("resign"),
           onToggleSound: () => {
+            // Der Sound-Manager speichert die Einstellung (storage.ts) und stoppt beim Ausschalten laufende Töne.
+            const manager = getSoundManager();
+            if (manager) manager.setEnabled(!soundOn);
+            else writeStoredSoundOn(!soundOn);
             gameActions.setSoundOn(!soundOn);
-            writeStoredSoundOn(!soundOn);
           },
           onRematch: () => void rematch(),
           onLeave: () => void leave("leave"),

@@ -3,6 +3,7 @@
 import type { AnswerIndex, PrivatePlayerState, PublicLobbyState } from "@quizmaster/shared";
 import { AnimatePresence } from "motion/react";
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import {
   answerWaitingCount,
   type CategoryCatalog,
@@ -13,34 +14,42 @@ import {
   myChoiceFor,
   summarizeTurn,
 } from "@/lib/client/game-view";
-import { type StageKind, stageAt, stageBoundaries } from "@/lib/client/phase-clock";
-import { useServerNow } from "@/lib/client/use-server-clock";
+import type { StageKind } from "@/lib/client/phase-clock";
 import { MotionProvider } from "@/lib/ui/motion";
 import type { PendingAnswer, PendingPick } from "@/stores/game-store";
-import { overlayLoaders } from "./overlays/loaders";
+import { stageTransition } from "./choreography";
+import { loadOverlay, preloadedOverlays } from "./overlays/loaders";
 
 // Overlays in eigenen Chunks (docs/07) – über dieselben Loader, die preloadOverlays() beim Betreten der Lobby
-// aufruft (ein Chunk je Overlay, im Spiel wird nichts nachgeladen).
-const IntroOverlay = dynamic(() => overlayLoaders.intro().then((mod) => mod.IntroOverlay), { ssr: false });
-const CategoryPickOverlay = dynamic(() => overlayLoaders.categoryPick().then((mod) => mod.CategoryPickOverlay), {
+// aufruft (ein Chunk je Overlay, im Spiel wird nichts nachgeladen). Ist ein Modul schon vorgeladen, rendert
+// die Bühne es synchron (siehe `preloadedOverlays`), sonst greift `dynamic()`.
+const IntroOverlayLazy = dynamic(() => loadOverlay("intro").then((mod) => mod.IntroOverlay), { ssr: false });
+const CategoryPickOverlayLazy = dynamic(() => loadOverlay("categoryPick").then((mod) => mod.CategoryPickOverlay), {
   ssr: false,
 });
-const CategoryRevealOverlay = dynamic(() => overlayLoaders.categoryReveal().then((mod) => mod.CategoryRevealOverlay), {
+const CategoryRevealOverlayLazy = dynamic(
+  () => loadOverlay("categoryReveal").then((mod) => mod.CategoryRevealOverlay),
+  { ssr: false },
+);
+const QuestionOverlayLazy = dynamic(() => loadOverlay("question").then((mod) => mod.QuestionOverlay), {
   ssr: false,
 });
-const QuestionOverlay = dynamic(() => overlayLoaders.question().then((mod) => mod.QuestionOverlay), { ssr: false });
-const AnswerRevealOverlay = dynamic(() => overlayLoaders.answerReveal().then((mod) => mod.AnswerRevealOverlay), {
+const AnswerRevealOverlayLazy = dynamic(() => loadOverlay("answerReveal").then((mod) => mod.AnswerRevealOverlay), {
   ssr: false,
 });
-const TurnSummaryOverlay = dynamic(() => overlayLoaders.turnSummary().then((mod) => mod.TurnSummaryOverlay), {
+const TurnSummaryOverlayLazy = dynamic(() => loadOverlay("turnSummary").then((mod) => mod.TurnSummaryOverlay), {
   ssr: false,
 });
-const RoundBoardOverlay = dynamic(() => overlayLoaders.roundBoard().then((mod) => mod.RoundBoardOverlay), {
+const RoundBoardOverlayLazy = dynamic(() => loadOverlay("roundBoard").then((mod) => mod.RoundBoardOverlay), {
   ssr: false,
 });
-const GameOverOverlay = dynamic(() => overlayLoaders.gameOver().then((mod) => mod.GameOverOverlay), { ssr: false });
+const GameOverOverlayLazy = dynamic(() => loadOverlay("gameOver").then((mod) => mod.GameOverOverlay), {
+  ssr: false,
+});
 
 export interface StageProps {
+  /** was die Bühne gerade zeigt (`stageAt` aus Phase und Serverzeit) */
+  kind: StageKind;
   lobby: PublicLobbyState;
   self: PrivatePlayerState | null;
   categories: CategoryCatalog;
@@ -54,19 +63,20 @@ export interface StageProps {
 
 /**
  * Die Bühne (docs/09 §7): zeigt je nach Phase und Serverzeit genau ein Overlay. Übergänge innerhalb einer
- * Phase (Kategorie-Reveal → Frage ab `startsAt`) passieren zum Serverzeitpunkt – für alle gleichzeitig.
+ * Phase (Kategorie-Einblendung → Frage ab `startsAt`) passieren zum Serverzeitpunkt – für alle gleichzeitig.
+ *
+ * Ein Overlay bleibt eingehängt, solange seine Phase (bzw. Frage) läuft – auch über eine Wiederaufnahme hinweg:
+ * Nach einem Reconnect wird nichts wiederholt; nur Timer starten mit der Restzeit neu (`syncGeneration` in
+ * ihrer Lauf-ID). Ein Overlay, das erst mitten in seiner Phase erscheint, setzt die Choreografie an der
+ * richtigen Stelle fort (choreography.ts). Von der Frage in die Auflösung gibt es kein Aus-/Einblenden („cut“).
  */
 export function Stage(props: StageProps) {
-  const { lobby } = props;
-  const now = useServerNow(stageBoundaries(lobby));
-  const kind = stageAt(lobby, now);
-  // Nach einer Wiederaufnahme (`syncGeneration`) neu einblenden: Timer und Choreografie rechnen dann von der
-  // aktuellen Serverzeit aus weiter (docs/09 §7.4 „bei Reconnect mit verbleibender Dauer neu gestartet“).
-  const key = `${kind}:${lobby.phaseStartedAt}:${lobby.question?.id ?? ""}:${props.syncGeneration}`;
+  const { kind, lobby } = props;
+  const key = `${kind}:${lobby.phaseStartedAt}:${lobby.question?.id ?? ""}`;
   return (
     <MotionProvider>
-      <AnimatePresence initial={false}>
-        <StageOverlay key={key} kind={kind} {...props} />
+      <AnimatePresence custom={stageTransition(kind)}>
+        <StageOverlay key={key} {...props} />
       </AnimatePresence>
     </MotionProvider>
   );
@@ -82,7 +92,18 @@ function StageOverlay({
   syncGeneration,
   onPick,
   onAnswer,
-}: StageProps & { kind: StageKind }) {
+}: StageProps) {
+  // Je Overlay einmal beim Einhängen entschieden: vorgeladenes Modul synchron oder `dynamic()` (nie ein Wechsel
+  // mitten im Overlay – das würde es neu einhängen und die Choreografie wiederholen).
+  const [modules] = useState(preloadedOverlays);
+  const IntroOverlay = modules.intro?.IntroOverlay ?? IntroOverlayLazy;
+  const CategoryPickOverlay = modules.categoryPick?.CategoryPickOverlay ?? CategoryPickOverlayLazy;
+  const CategoryRevealOverlay = modules.categoryReveal?.CategoryRevealOverlay ?? CategoryRevealOverlayLazy;
+  const QuestionOverlay = modules.question?.QuestionOverlay ?? QuestionOverlayLazy;
+  const AnswerRevealOverlay = modules.answerReveal?.AnswerRevealOverlay ?? AnswerRevealOverlayLazy;
+  const TurnSummaryOverlay = modules.turnSummary?.TurnSummaryOverlay ?? TurnSummaryOverlayLazy;
+  const RoundBoardOverlay = modules.roundBoard?.RoundBoardOverlay ?? RoundBoardOverlayLazy;
+  const GameOverOverlay = modules.gameOver?.GameOverOverlay ?? GameOverOverlayLazy;
   const selfId = self?.playerId ?? null;
   const selfPlayer = findPlayer(lobby.players, selfId);
   const question = lobby.question;
@@ -120,6 +141,7 @@ function StageOverlay({
           category={categoryVisual(categories, question.categoryId)}
           questionCount={question.total}
           pickerName={findPlayer(lobby.players, turn?.pickerId)?.name ?? ""}
+          phaseStartedAt={lobby.phaseStartedAt}
           startsAt={question.startsAt}
         />
       );
@@ -152,6 +174,7 @@ function StageOverlay({
           summary={row ? summarizeTurn(row) : null}
           players={lobby.players}
           category={categoryVisual(categories, row?.categoryId ?? turn?.categoryId)}
+          phaseStartedAt={lobby.phaseStartedAt}
         />
       );
     }
@@ -165,6 +188,7 @@ function StageOverlay({
           categories={categories}
           questionsPerTurn={lobby.settings.questionsPerCategory}
           selfId={selfId}
+          phaseStartedAt={lobby.phaseStartedAt}
         />
       );
     case "game_over":
@@ -176,6 +200,7 @@ function StageOverlay({
           categories={categories}
           questionsPerTurn={lobby.settings.questionsPerCategory}
           selfId={selfId}
+          phaseStartedAt={lobby.phaseStartedAt}
         />
       );
     default:

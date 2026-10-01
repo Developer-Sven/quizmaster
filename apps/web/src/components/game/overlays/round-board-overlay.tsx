@@ -18,8 +18,9 @@ import {
 } from "@/lib/client/game-view";
 import { cx } from "@/lib/ui/cx";
 import { ArrowDownIcon, ArrowUpIcon } from "@/lib/ui/icons";
-import { transitions } from "@/lib/ui/motion-presets";
 import { squareResult } from "@/lib/ui/results";
+import { CHOREOGRAPHY, enterMotion, momentAhead, PANEL_FROM, remainingDelayMs } from "../choreography";
+import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 
 export interface RoundBoardOverlayProps {
@@ -33,7 +34,15 @@ export interface RoundBoardOverlayProps {
   /** Fragen pro Zug (K) */
   questionsPerTurn: number;
   selfId: string | null;
+  /** Serverzeit des Phasenbeginns – Anker der Choreografie */
+  phaseStartedAt: number;
 }
+
+/**
+ * Die Tafel (Board) füllt ihre neuen Zeilen ab dem Einhängen. Wer später einsteigt (Reconnect), sieht sie
+ * sofort gefüllt – ein Nachholen der ganzen Füll-Animation wäre eine Wiederholung.
+ */
+const BOARD_FILL_LATE_MS = 200;
 
 /** Tafelzeilen bis einschließlich Runde `round` mit Kategorie-Darstellung. */
 export function boardRowsUntil(board: readonly BoardRow[], round: number, categories: CategoryCatalog): BoardRowData[] {
@@ -65,9 +74,9 @@ export function boardPlayers(
 }
 
 /**
- * Rundentafel (Phase `round_board`, 6 s, docs/09 §7.8): „Runde 1 von 3“; 2 Personen im Duell-Layout
- * (links Person A, Mitte Kategorie, rechts Person B, oben „5 : 4“), 3–8 als `Board`-Tabelle. Die neuen
- * Zeilen der Runde füllen sich animiert; Platzwechsel mit `arrow-up`/`arrow-down` neben den Summen.
+ * Rundentafel (Phase `round_board`, 6 s, docs/09 §7.8): Vollbild-Panel „Runde 1 von 3“; 2 Personen im
+ * Duell-Layout (links Person A, Mitte Kategorie, rechts Person B, oben „5 : 4“), 3–8 als `Board`-Tabelle.
+ * Die neuen Zeilen der Runde füllen sich animiert; Platzwechsel mit `arrow-up`/`arrow-down` neben den Summen.
  */
 export function RoundBoardOverlay({
   board,
@@ -77,8 +86,12 @@ export function RoundBoardOverlay({
   categories,
   questionsPerTurn,
   selfId,
+  phaseStartedAt,
 }: RoundBoardOverlayProps) {
   const reduce = useReducedMotion() ?? false;
+  const { enteredAt } = useOverlayClock(phaseStartedAt, []);
+  const panel = enterMotion({ at: 0, duration: CHOREOGRAPHY.roundBoard.panelMs, from: PANEL_FROM }, enteredAt, reduce);
+  const animateFill = momentAhead(0, enteredAt, BOARD_FILL_LATE_MS);
   const rows = boardRowsUntil(board, round, categories);
   const players = boardPlayers(board, participants, round);
   const newFrom = firstRowOfRound(
@@ -88,12 +101,7 @@ export function RoundBoardOverlay({
   const sides = duelSides(participants, selfId);
   return (
     <OverlayFrame testId="overlay-round-board">
-      <m.div
-        initial={{ opacity: 0, y: reduce ? 0 : 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={reduce ? transitions.fade : transitions.enter}
-        className="flex flex-col gap-4"
-      >
+      <m.div {...panel} className="flex flex-col gap-4">
         <h2 className="text-h2 text-text">{de.game.roundBoardTitle(round, rounds)}</h2>
         {sides ? (
           <DuelBoard
@@ -102,9 +110,15 @@ export function RoundBoardOverlay({
             rows={rows}
             newFrom={newFrom}
             questionsPerTurn={questionsPerTurn}
+            enteredAt={enteredAt}
           />
         ) : (
-          <Board players={players} rows={rows} questionsPerTurn={questionsPerTurn} animateFromRow={newFrom} />
+          <Board
+            players={players}
+            rows={rows}
+            questionsPerTurn={questionsPerTurn}
+            animateFromRow={animateFill ? newFrom : undefined}
+          />
         )}
       </m.div>
     </OverlayFrame>
@@ -117,6 +131,8 @@ interface DuelBoardProps {
   rows: readonly BoardRowData[];
   newFrom: number;
   questionsPerTurn: number;
+  /** Einstieg relativ zum Phasenbeginn (ms): bereits gefüllte Kästchen erscheinen sofort */
+  enteredAt: number;
 }
 
 /** Kästchen je Zeile im Duell: bis 3 nebeneinander (wie die Tafel), darüber bricht es um. */
@@ -139,7 +155,7 @@ function RankArrow({ change }: { change: "up" | "down" | null | undefined }) {
 }
 
 /** Duell-Layout der Tafel (2 Personen, docs/01 §Rundentafel). */
-function DuelBoard({ left, right, rows, newFrom, questionsPerTurn }: DuelBoardProps) {
+function DuelBoard({ left, right, rows, newFrom, questionsPerTurn, enteredAt }: DuelBoardProps) {
   if (!left || !right) return null;
   const sides = [left, right] as const;
   const lines = squareLines(Math.max(1, questionsPerTurn));
@@ -177,7 +193,15 @@ function DuelBoard({ left, right, rows, newFrom, questionsPerTurn }: DuelBoardPr
                         <ResultSquare
                           key={position}
                           result={squareResult(row.results[player.id]?.[position])}
-                          appearDelayMs={fresh < 0 ? undefined : fillDelayMs(fresh, side, position)}
+                          appearDelayMs={
+                            fresh < 0
+                              ? undefined
+                              : remainingDelayMs(
+                                  fillDelayMs(fresh, side, position),
+                                  CHOREOGRAPHY.roundBoard.squareMs,
+                                  enteredAt,
+                                )
+                          }
                         />
                       ))}
                     </span>

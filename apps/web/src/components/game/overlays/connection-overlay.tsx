@@ -20,7 +20,9 @@ export interface ConnectionPanelProps {
 
 /**
  * Inhalt des Verbindungs-Overlays (docs/09 §7.10): Ebene 70, Scrim + Panel mit `wifi-off` 32,
- * „Verbindung unterbrochen“ (assertiv angesagt) und dem Countdown der Frist (Stil `code`, tabular).
+ * „Verbindung unterbrochen“ und dem Countdown der Frist (Stil `code`, tabular). Die assertive Ansage
+ * übernimmt die dauerhafte Live-Region von {@link ConnectionOverlay} (sie existiert schon vor dem Verlust –
+ * nur so sagen Screenreader zuverlässig an, ohne doppelte Ansage durch `role="alert"`).
  */
 export function ConnectionPanel({ remainingMs, message }: ConnectionPanelProps) {
   const titleId = useId();
@@ -35,11 +37,9 @@ export function ConnectionPanel({ remainingMs, message }: ConnectionPanelProps) 
         className="relative flex w-full max-w-dialog flex-col items-center gap-3 rounded-xl border border-line bg-surface-1 p-6 text-center shadow-level-2"
       >
         <WifiOffIcon size={32} className="text-text-2" />
-        <div role="alert">
-          <h2 id={titleId} className="text-h2 text-text">
-            {de.connection.lost}
-          </h2>
-        </div>
+        <h2 id={titleId} className="text-h2 text-text">
+          {de.connection.lost}
+        </h2>
         {remainingMs === null ? (
           <LoaderCircleIcon size={24} className="animate-spin text-text-2 motion-reduce:animate-none" />
         ) : (
@@ -61,7 +61,8 @@ export function ConnectionPanel({ remainingMs, message }: ConnectionPanelProps) 
 /**
  * Verbindungs-Overlay (Haupt-Bundle, docs/07): erscheint sofort bei Verbindungsverlust in Lobby oder
  * Spiel, zählt die Reconnect-Frist herunter (Lobby 30 s, Spiel 90 s) und blendet bei Erfolg ohne
- * weiteren Hinweis aus.
+ * weiteren Hinweis aus. Der Verlust wird über eine dauerhafte `aria-live="assertive"`-Region angesagt
+ * (docs/09 §7 „Screenreader“); die Rückkehr bleibt still (kein extra Hinweis, wie das Overlay).
  */
 export function ConnectionOverlay() {
   const visible = useGameStore(selectConnectionOverlayVisible);
@@ -71,6 +72,9 @@ export function ConnectionOverlay() {
   const message = presentation?.kind === "message" ? presentation.text : null;
   return (
     <MotionProvider>
+      <p className="sr-only" aria-live="assertive" aria-atomic="true" data-testid="connection-announcer">
+        {visible ? de.announcements.connectionLost : ""}
+      </p>
       <AnimatePresence>
         {visible ? (
           <m.div key="connection" {...scrimMotion}>

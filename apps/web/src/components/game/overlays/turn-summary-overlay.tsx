@@ -11,9 +11,9 @@ import { de } from "@/i18n/de";
 import { findPlayer, type TurnSummary } from "@/lib/client/game-view";
 import type { CategoryVisual } from "@/lib/ui/category";
 import { cx } from "@/lib/ui/cx";
-import { transitions } from "@/lib/ui/motion-presets";
 import { squareResult } from "@/lib/ui/results";
-import { DURATION_MS } from "@/lib/ui/tokens";
+import { CHOREOGRAPHY, enterMotion, remainingDelayMs } from "../choreography";
+import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 
 export interface TurnSummaryOverlayProps {
@@ -21,10 +21,11 @@ export interface TurnSummaryOverlayProps {
   summary: TurnSummary | null;
   players: readonly PublicPlayer[];
   category: CategoryVisual;
+  /** Serverzeit des Phasenbeginns – Anker der Choreografie */
+  phaseStartedAt: number;
 }
 
-/** Panel fährt von unten hoch (docs/09 §7.7). */
-const PANEL_RISE_PX = 48;
+const SUMMARY = CHOREOGRAPHY.turnSummary;
 
 /** Kästchen je Zeile: bis 3 nebeneinander wie auf der Tafel (ADR-032), darüber bricht es um (K 1–10). */
 const SQUARES_PER_LINE = 3;
@@ -39,21 +40,23 @@ function lines(count: number): number[][] {
 }
 
 /**
- * Zug-Ergebnis (Phase `turn_summary`, 4 s, docs/09 §7.7): Panel fährt hoch (320 ms); Kopf = Kategorie,
- * Zeilen = Personen nach Punkten dieses Zuges mit K Kästchen (füllen sich nacheinander, 80 ms) und „+2“;
- * die beste(n) Person(en) mit 1 px orangem Rahmen. Kein Lob-Text.
+ * Zug-Ergebnis (Phase `turn_summary`, 4 s, docs/09 §7.7): Das Panel fährt wie ein Sheet von unten hoch
+ * (320 ms); Kopf = Kategorie, Zeilen = Personen nach Punkten dieses Zuges mit K Kästchen, die sich danach
+ * nacheinander füllen (80 ms Abstand), rechts „+2“; die beste(n) Person(en) mit 1 px orangem Rahmen.
+ * Kein Lob-Text. Nach einem späten Einstieg sind bereits gefüllte Kästchen sofort gefüllt.
  */
-export function TurnSummaryOverlay({ summary, players, category }: TurnSummaryOverlayProps) {
+export function TurnSummaryOverlay({ summary, players, category, phaseStartedAt }: TurnSummaryOverlayProps) {
   const reduce = useReducedMotion() ?? false;
+  const { enteredAt } = useOverlayClock(phaseStartedAt, []);
   const best = new Set(summary?.bestPlayerIds ?? []);
+  const sheet = enterMotion(
+    { at: 0, duration: SUMMARY.sheetMs, from: { opacity: 0, y: SUMMARY.sheetRisePx } },
+    enteredAt,
+    reduce,
+  );
   return (
     <OverlayFrame testId="overlay-turn-summary" center>
-      <m.div
-        initial={{ opacity: 0, y: reduce ? 0 : PANEL_RISE_PX }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={reduce ? transitions.fade : transitions.enter}
-        className="rounded-xl border border-line bg-surface-1 p-5 shadow-level-2"
-      >
+      <m.div {...sheet} className="rounded-xl border border-line bg-surface-1 p-5 shadow-level-2">
         <div className="flex items-center gap-3">
           <CategoryIcon icon={category.icon} color={category.color} frame="tile" />
           <h2 className="min-w-0 flex-1 text-h2 text-text">{category.name}</h2>
@@ -88,7 +91,11 @@ export function TurnSummaryOverlay({ summary, players, category }: TurnSummaryOv
                         <ResultSquare
                           key={position}
                           result={squareResult(entry.results[position])}
-                          appearDelayMs={DURATION_MS.slow + fillDelayMs(0, row, position)}
+                          appearDelayMs={remainingDelayMs(
+                            SUMMARY.squaresAtMs + fillDelayMs(0, row, position),
+                            SUMMARY.squareMs,
+                            enteredAt,
+                          )}
                         />
                       ))}
                     </span>

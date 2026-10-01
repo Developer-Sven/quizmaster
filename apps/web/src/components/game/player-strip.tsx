@@ -12,16 +12,23 @@ export interface PlayerStripProps {
   selfId: string | null;
   /** Personen mit „geantwortet“-Ring (während der Frage) */
   answeredIds: readonly string[];
+  /**
+   * Angezeigte Punkte je Person (Choreografie: das „+1“ der Auflösung erscheint erst nach 400 ms,
+   * docs/09 §7.6); ohne Eintrag gilt `player.score`.
+   */
+  scores?: Readonly<Record<string, number>>;
 }
 
 /** Bis zu 4 Personen verteilt, ab 5 horizontal scrollbar (docs/09 §7). */
 const SPREAD_MAX = 4;
 
 /**
- * Spielerstreifen (docs/09 §7): Avatar 40 + ScorePill je Person, Status-Ringe (geantwortet, offline,
- * aufgegeben), eigene Person zuerst mit 2 px orangem Unterstrich. Ersetzt im Spiel die Aktionsleiste.
+ * Spielerstreifen (docs/09 §7): Avatar 40 + ScorePill je Person, Status-Ringe (geantwortet mit Pop,
+ * offline, aufgegeben), eigene Person zuerst mit 2 px orangem Unterstrich. Ersetzt im Spiel die
+ * Aktionsleiste. Steigt ein angezeigter Punktestand, zeigt die ScorePill „+1“ (16 px nach oben, 480 ms)
+ * und zählt hoch (400 ms).
  */
-export function PlayerStrip({ players, selfId, answeredIds }: PlayerStripProps) {
+export function PlayerStrip({ players, selfId, answeredIds, scores }: PlayerStripProps) {
   const ordered = playersSelfFirst(players, selfId);
   const answered = new Set(answeredIds);
   const spread = ordered.length <= SPREAD_MAX;
@@ -58,7 +65,7 @@ export function PlayerStrip({ players, selfId, answeredIds }: PlayerStripProps) 
                 resigned={player.status === "resigned"}
                 label={player.name}
               />
-              <ScorePill score={player.score} />
+              <ScorePill score={scores?.[player.id] ?? player.score} />
             </li>
           );
         })}

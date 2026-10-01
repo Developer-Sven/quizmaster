@@ -18,15 +18,25 @@ function el<P extends object>(
   return h(component as ComponentType<Omit<P, "children">>, props, ...children);
 }
 
-/** Rendert den Rahmen ohne AnimatePresence (`null`) oder mit einem Präsenz-Kontext wie in `AnimatePresence`. */
-function render(isPresent: boolean | null): string {
-  const frame = el(MotionProvider, {}, el(OverlayFrame, { testId: "overlay-question" }, "Frage"));
+/**
+ * Rendert den Rahmen ohne AnimatePresence (`null`) oder mit einem Präsenz-Kontext wie in `AnimatePresence`
+ * (`custom` = Übergang der Bühne, siehe `stageTransition`).
+ */
+function render(
+  isPresent: boolean | null,
+  options: { custom?: "fade" | "cut"; leaving?: boolean; initial?: false } = {},
+): string {
+  const frame = el(
+    MotionProvider,
+    {},
+    el(OverlayFrame, { testId: "overlay-question", leaving: options.leaving }, "Frage"),
+  );
   if (isPresent === null) return renderToStaticMarkup(frame);
   const presence: PresenceValue = {
     id: "p",
-    initial: false,
+    initial: options.initial,
     isPresent,
-    custom: undefined,
+    custom: options.custom,
     onExitComplete: noop,
     register: () => noop,
   };
@@ -44,6 +54,24 @@ describe("OverlayFrame", () => {
 
   it("markiert ausblendende Overlays als inert und data-exiting (keine Klicks, kein Vorlesen, E2E-Filter)", () => {
     const html = render(false);
+    expect(html).toContain('data-exiting="true"');
+    expect(html).toMatch(/\sinert(=""|\s|>)/);
+  });
+
+  it("blendet beim Übergang „fade“ ein (opacity 0, y 12), beim Übergang „cut“ steht der Inhalt sofort", () => {
+    expect(render(true, { custom: "fade" })).toMatch(/opacity:0/);
+    expect(render(true, { custom: "cut" })).not.toMatch(/opacity:0/);
+  });
+
+  it("ist beim „cut“ hinaus im selben Commit unsichtbar (nie zwei Karten übereinander)", () => {
+    const html = render(false, { custom: "cut" });
+    expect(html).toContain('data-exiting="true"');
+    expect(html).toMatch(/class="[^"]*\binvisible\b/);
+    expect(render(false, { custom: "fade" })).not.toMatch(/class="[^"]*\binvisible\b/);
+  });
+
+  it("blendet innerhalb der Phase aus (Intro, Kategorie, Auflösung): inert und data-exiting", () => {
+    const html = render(true, { leaving: true });
     expect(html).toContain('data-exiting="true"');
     expect(html).toMatch(/\sinert(=""|\s|>)/);
   });

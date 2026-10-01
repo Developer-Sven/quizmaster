@@ -8,10 +8,9 @@ import { AnswerButton } from "@/components/ui/answer-button";
 import { QuestionCard } from "@/components/ui/question-card";
 import { de } from "@/i18n/de";
 import { questionAnswerStates } from "@/lib/client/game-view";
-import { useServerNow } from "@/lib/client/use-server-clock";
-import { transitions } from "@/lib/ui/motion-presets";
-import { answerIndexForKey } from "@/lib/ui/shortcuts";
-import { DURATION_MS, EASING, STAGGER_MS, seconds } from "@/lib/ui/tokens";
+import { answerShortcut, claimGroupFocus, readShortcutGuard } from "@/lib/client/keyboard";
+import { CHOREOGRAPHY, enterMotion } from "../choreography";
+import { useOverlayClock, useTimerRun } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 
 export interface QuestionOverlayProps {
@@ -22,19 +21,21 @@ export interface QuestionOverlayProps {
   canAnswer: boolean;
   /** verbundene aktive Personen, die noch antworten müssen (ohne die eigene) */
   waitingCount: number;
-  /** Identität des Timer-Laufs, z. B. `${question.id}:${syncGeneration}` */
+  /** Identität des Timer-Laufs, z. B. `${question.id}:${syncGeneration}` – neu → TimerBar mit frischer Restzeit */
   runId: string;
   onAnswer: (choice: AnswerIndex) => void;
 }
 
-/** Karte fährt 16 px von unten ein (docs/09 §7.4). */
-const CARD_RISE_PX = 16;
+const QUESTION = CHOREOGRAPHY.question;
 
 /**
- * Frage (Phase `question` ab `startsAt`, 20 s, docs/09 §7.4–5): `QuestionCard` mit `TimerBar` (CSS über
- * die Restzeit bis `deadline`), vier Antworten (gestaffelt 40 ms). Tippen loggt sofort ein: getippte
- * Antwort `locked`, übrige `dimmed`, darunter „Warte auf 2 weitere …“. Nach der Deadline nicht mehr
- * bedienbar. Tastatur: 1–4 / A–D (Fokus in der Antwortgruppe).
+ * Frage (Phase `question` ab `startsAt`, 20 s, docs/09 §7.4–5): `QuestionCard` fährt 16 px von unten ein
+ * (200 ms), die Antworten folgen gestaffelt (40 ms); die `TimerBar` läuft als CSS über die Restzeit bis
+ * `deadline` (ab 5 s Rest rot, dazu `tick` je Sekunde – Cues der Bühne). Tippen loggt sofort ein: getippte
+ * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), darunter live
+ * „Warte auf 2 weitere …“. Nach der Deadline nicht mehr bedienbar.
+ * Tastatur: `1`–`4`/`A`–`D`, solange der Fokus in der Antwortgruppe liegt (WCAG 2.1.4, lib/client/keyboard.ts);
+ * die Gruppe übernimmt beim Öffnen den Fokus, wenn er frei ist.
  */
 export function QuestionOverlay({
   question,
@@ -45,19 +46,16 @@ export function QuestionOverlay({
   onAnswer,
 }: QuestionOverlayProps) {
   const reduce = useReducedMotion() ?? false;
-  const now = useServerNow([question.deadline]);
+  const { now, enteredAt } = useOverlayClock(question.startsAt, [question.deadline]);
+  const timer = useTimerRun(question.deadline, runId);
   const expired = now >= question.deadline;
   const states = questionAnswerStates(myChoice, canAnswer && !expired);
   const groupRef = useRef<HTMLFieldSetElement>(null);
   const open = canAnswer && myChoice === null && !expired;
 
-  // Fokus in die Antwortgruppe, damit 1–4/A–D sofort wirken – nur, wenn er nicht gerade woanders steht.
   useEffect(() => {
-    if (!open) return;
-    const active = document.activeElement;
-    if (active === null || active === document.body || groupRef.current?.parentElement?.contains(active)) {
-      groupRef.current?.focus({ preventScroll: true });
-    }
+    const group = groupRef.current;
+    if (open && group) claimGroupFocus(group, group.closest("[data-stage]"));
   }, [open]);
 
   const select = (choice: AnswerIndex) => {
@@ -65,29 +63,37 @@ export function QuestionOverlay({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLFieldSetElement>) => {
-    const choice = answerIndexForKey(event);
+    const choice = answerShortcut(event, readShortcutGuard(event.currentTarget));
     if (choice === null || states[choice] !== "idle") return;
     event.preventDefault();
     onAnswer(choice);
   };
 
-  const enter = (delayMs: number) => ({
-    initial: { opacity: 0, y: reduce ? 0 : CARD_RISE_PX },
-    animate: { opacity: 1, y: 0 },
-    transition: reduce
-      ? { ...transitions.fade, delay: seconds(delayMs) }
-      : { duration: seconds(DURATION_MS.base), ease: EASING.emphasized, delay: seconds(delayMs) },
-  });
+  const card = enterMotion(
+    { at: 0, duration: QUESTION.cardMs, from: { opacity: 0, y: QUESTION.cardRisePx } },
+    enteredAt,
+    reduce,
+  );
+  const answer = (choice: AnswerIndex) =>
+    enterMotion(
+      {
+        at: QUESTION.answersAtMs + choice * QUESTION.answerStaggerMs,
+        duration: QUESTION.answerMs,
+        from: { opacity: 0, y: QUESTION.cardRisePx },
+      },
+      enteredAt,
+      reduce,
+    );
 
   return (
     <OverlayFrame testId="overlay-question">
-      <m.div {...enter(0)}>
+      <m.div {...card}>
         <QuestionCard
           prompt={question.prompt}
           media={question.media}
           timer={{
-            runId,
-            remainingMs: Math.max(0, question.deadline - now),
+            runId: timer.runId,
+            remainingMs: timer.remainingMs ?? 0,
             durationMs: question.deadline - question.startsAt,
           }}
         />
@@ -97,10 +103,10 @@ export function QuestionOverlay({
         aria-label={de.game.questionProgress(question.index, question.total)}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="min-w-0 mt-4 flex flex-col gap-4 outline-none"
+        className="mt-4 flex min-w-0 flex-col gap-4 rounded-lg"
       >
         {ANSWER_INDEXES.map((choice) => (
-          <m.div key={choice} {...enter(DURATION_MS.base + choice * STAGGER_MS.list)}>
+          <m.div key={choice} {...answer(choice)}>
             <AnswerButton
               index={choice}
               text={question.answers[choice]}

@@ -16,3 +16,29 @@ export const overlayLoaders = {
   gameOver: () => import("./game-over-overlay"),
   reviewSheet: () => import("../review-sheet"),
 } as const;
+
+export type OverlayName = keyof typeof overlayLoaders;
+
+export type OverlayModules = { [K in OverlayName]: Awaited<ReturnType<(typeof overlayLoaders)[K]>> };
+
+/** Bereits geladene Overlay-Module (nach dem Vorladen). */
+const loaded: Partial<OverlayModules> = {};
+
+/** Lädt ein Overlay-Modul (gleicher Chunk wie `dynamic()`) und merkt es sich für das synchrone Rendern. */
+export function loadOverlay<K extends OverlayName>(name: K): Promise<OverlayModules[K]> {
+  const pending = overlayLoaders[name]() as Promise<OverlayModules[K]>;
+  return pending.then((module) => {
+    loaded[name] = module;
+    return module;
+  });
+}
+
+/**
+ * Momentaufnahme der schon geladenen Module. Die Bühne rendert ein vorgeladenes Overlay damit synchron:
+ * `dynamic()` (React.lazy) würde beim ersten Einhängen sonst einmal „suspendieren“, und React gibt den
+ * fertigen Inhalt dann erst gedrosselt frei (bis ~300 ms) – das erste Intro, die erste Kategorie-Einblendung,
+ * Rundentafel und Spielende kamen so zu spät und ihre Choreografie lief nicht synchron.
+ */
+export function preloadedOverlays(): Partial<OverlayModules> {
+  return { ...loaded };
+}

@@ -22,8 +22,8 @@ export interface HudProps {
 
 /**
  * HUD (docs/09 §7 Grundgerüst): 56 px, links `x` = Aufgeben (Dialog), Mitte Fortschritt, rechts der
- * Ton-Umschalter (`volume-2`/`volume-x`, Zustand im Store – die Sounds folgen in der Choreografie-Phase).
- * Enthält die höfliche Live-Region für Ansagen.
+ * Ton-Umschalter (`volume-2`/`volume-x`, docs/09 §10: Standard an, gespeichert). Enthält die höfliche
+ * Live-Region für die Ansagen (Runde/Wahl, Kategorie + Frage, Richtig/Falsch, Rundenende, Spielende).
  */
 export function Hud({
   progress,
