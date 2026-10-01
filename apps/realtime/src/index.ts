@@ -1,18 +1,57 @@
-import { createServer } from "node:http";
-import { PROTOCOL_VERSION } from "@quizmaster/shared";
+/**
+ * Prozess-Einstieg des Realtime-Servers (docs/02 §Start-Checks, docs/12, ADR-024):
+ * Env (zod) → MongoClient (appName quizmaster-realtime, Pool 20) → Start-Checks → ensureIndexes → App →
+ * `listen(HOST, REALTIME_PORT)` → `process.send("ready")` (pm2 `wait_ready`).
+ *
+ * Graceful Shutdown bei SIGTERM und SIGINT (`installProcessShutdown`: `app.stop()`, dann MongoClient
+ * schließen, Exit < 10 s); ein zweites Signal beendet sofort. Unerwartete Fehler → Log `fatal`, Exit 1.
+ */
+import { closeMongoClient } from "@quizmaster/db";
+import pino from "pino";
+import { connectRealtimeDb, createRealtimeApp, installProcessShutdown, type RealtimeApp } from "./app.ts";
+import { parseRealtimeEnv } from "./env.ts";
+import { createLogger } from "./logger.ts";
+import type { RealtimeDb } from "./registry/types.ts";
 
-const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.REALTIME_PORT ?? 4000);
+const destination = pino.destination({ dest: 1, sync: false });
 
-const server = createServer((req, res) => {
-  if (req.method === "GET" && req.url === "/healthz") {
-    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-    res.end(JSON.stringify({ ok: true }));
-    return;
+function exit(code: number): never {
+  destination.flushSync();
+  process.exit(code);
+}
+
+async function main(): Promise<void> {
+  const parsed = parseRealtimeEnv(process.env);
+  if (!parsed.ok) {
+    console.error(`realtime – Env ungültig:\n${parsed.problems.map((problem) => `  - ${problem}`).join("\n")}`);
+    exit(1);
   }
-  res.writeHead(404).end();
-});
+  const env = parsed.env;
+  const logger = createLogger({ level: env.LOG_LEVEL, destination });
+  logger.info({ database: env.MONGODB_DB, timing: env.GAME_TIMING, rateLimits: env.RATE_LIMIT_MODE }, "Start");
 
-server.listen(port, host, () => {
-  console.info(`realtime listening on ${host}:${port} (protocol ${PROTOCOL_VERSION})`);
+  let db: RealtimeDb | undefined;
+  let app: RealtimeApp | undefined;
+  try {
+    db = await connectRealtimeDb(env, logger);
+    app = await createRealtimeApp({ env, db, logger });
+    const client = db.client;
+    installProcessShutdown({ app, logger, exit, afterStop: () => closeMongoClient(client) });
+    await app.start();
+  } catch (error) {
+    logger.fatal({ err: error }, "Start fehlgeschlagen");
+    try {
+      await app?.stop("start_failed");
+      if (db !== undefined) await closeMongoClient(db.client);
+    } catch (cleanupError) {
+      logger.error({ err: cleanupError }, "Aufräumen nach fehlgeschlagenem Start fehlgeschlagen");
+    }
+    exit(1);
+  }
+  process.send?.("ready");
+}
+
+main().catch((error: unknown) => {
+  console.error("realtime – unerwarteter Fehler beim Start", error instanceof Error ? error.message : error);
+  exit(1);
 });

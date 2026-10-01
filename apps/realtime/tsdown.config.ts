@@ -11,5 +11,5 @@ export default defineConfig({
   dts: false,
   sourcemap: true,
   fixedExtension: true,
-  noExternal: [/^@quizmaster\//],
+  deps: { alwaysBundle: [/^@quizmaster\//] },
 });
