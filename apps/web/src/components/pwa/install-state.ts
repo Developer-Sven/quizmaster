@@ -140,7 +140,11 @@ export function startInstallCapture(target: InstallCaptureTarget): () => void {
     target.__qmInstallPrompt = null;
     adopt(early);
   }
-  const onBeforeInstallPrompt = (event: Event) => adopt(event);
+  const onBeforeInstallPrompt = (event: Event) => {
+    // Das Inline-Skript hat es ebenfalls abgelegt – nie später ein schon benutztes Event übernehmen.
+    target.__qmInstallPrompt = null;
+    adopt(event);
+  };
   const onInstalled = () => {
     promptEvent = null;
     update({ installed: true, canPrompt: false });

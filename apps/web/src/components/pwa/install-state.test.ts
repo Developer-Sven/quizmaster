@@ -111,6 +111,23 @@ describe("Install-Zustand im Browser", () => {
     stop();
   });
 
+  it("ein nach dem Start eintreffendes Event wird übernommen und nie ein zweites Mal (Merker geleert)", async () => {
+    const target = fake as FakeWindow & { __qmInstallPrompt?: Event | null };
+    const stop = startInstallCapture(target);
+    const { event, prompt } = installPromptEvent("dismissed");
+    // Wie im Browser: Das Inline-Skript legt das Event ab, danach hört die App-Erfassung mit.
+    target.__qmInstallPrompt = event;
+    target.dispatchEvent(event);
+    expect(target.__qmInstallPrompt).toBeNull();
+    await expect(promptInstall()).resolves.toBe("dismissed");
+    expect(prompt).toHaveBeenCalledOnce();
+    stop();
+    // Erneuter Start (z. B. erneutes Einhängen): kein schon benutztes Event, keine Zeile.
+    const again = startInstallCapture(target);
+    expect(installStateForTests().canPrompt).toBe(false);
+    again();
+  });
+
   it("das Inline-Skript fängt das Event ab, bevor React lädt (ohne Mini-Infobar)", () => {
     const target = new EventTarget() as EventTarget & { __qmInstallPrompt?: Event | null };
     new Function("window", EARLY_INSTALL_CAPTURE_SCRIPT)(target);
