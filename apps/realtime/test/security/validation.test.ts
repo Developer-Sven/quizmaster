@@ -100,23 +100,34 @@ describe("Invariante 5 – jedes registrierte Event (Produktions-Handler)", () =
     it(`${event}: ungültige Payloads → VALIDATION_FAILED, Handler nie erreicht`, async () => {
       const variants = invalidVariants(event);
       expect(variants.length).toBeGreaterThan(8);
-      const metrics = server.app.services.metrics;
-      const failuresBefore = await metricValue(metrics, "qm_validation_failures_total", { event });
-      const lobbiesBefore = await server.db.collections.lobbies.countDocuments({});
-      for (const variant of variants) {
-        const ack = await emitRawWithAck(client.socket, event, variant.args);
-        expect(ack, `${event} (${variant.label})`).toMatchObject({ ok: false, error: { code: "VALIDATION_FAILED" } });
-        // Die Meldung nennt nur Pfad und Fehlerart, nie die Eingabe.
-        const message = (ack as { error: { message: string } }).error.message;
-        expect(message.length).toBeLessThan(400);
-        expect(message.includes("xxxxxxxxxx")).toBe(false);
+      // Eigener Socket je Event: Verstöße zählen je Socket (`socket.violations`, gelockert × 100). Über alle Events auf
+      // einem Socket summiert, trennte der Server – je mehr Einstellungsfelder, desto früher – zu Recht.
+      const eventClient = await server.connectClient();
+      try {
+        const metrics = server.app.services.metrics;
+        const failuresBefore = await metricValue(metrics, "qm_validation_failures_total", { event });
+        const lobbiesBefore = await server.db.collections.lobbies.countDocuments({});
+        for (const variant of variants) {
+          const ack = await emitRawWithAck(eventClient.socket, event, variant.args);
+          expect(ack, `${event} (${variant.label})`).toMatchObject({
+            ok: false,
+            error: { code: "VALIDATION_FAILED" },
+          });
+          // Die Meldung nennt nur Pfad und Fehlerart, nie die Eingabe.
+          const message = (ack as { error: { message: string } }).error.message;
+          expect(message.length).toBeLessThan(400);
+          expect(message.includes("xxxxxxxxxx")).toBe(false);
+        }
+        expect(await metricValue(metrics, "qm_validation_failures_total", { event })).toBe(
+          failuresBefore + variants.length,
+        );
+        // Keine Wirkung: kein Handler lief (sonst entstünde z. B. eine Lobby oder eine fachliche Antwort).
+        expect(await server.db.collections.lobbies.countDocuments({})).toBe(lobbiesBefore);
+        expect(eventClient.socket.connected).toBe(true);
+        expect(eventClient.contractViolations).toEqual([]);
+      } finally {
+        eventClient.close();
       }
-      expect(await metricValue(metrics, "qm_validation_failures_total", { event })).toBe(
-        failuresBefore + variants.length,
-      );
-      // Keine Wirkung: kein Handler lief (sonst entstünde z. B. eine Lobby oder eine fachliche Antwort).
-      expect(await server.db.collections.lobbies.countDocuments({})).toBe(lobbiesBefore);
-      expect(client.socket.connected).toBe(true);
     });
   }
 
