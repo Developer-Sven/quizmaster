@@ -305,6 +305,7 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     playedCategoryIds: [],
     usedQuestionIds: [],
     categoryIds: null,
+    difficulty: { min: 1, max: 5 },
   });
 
   it("Änderungen während eines Reloads werden nach dem Tausch erneut angewendet", async () => {
@@ -359,6 +360,20 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     const refill = await service.loadQuestions({ categoryId: "comics", count: 2, excludeQuestionIds: [], seen });
     expect(refill.questions).toHaveLength(2);
     expect(refill.refilledSeen).toBe(1);
+  });
+
+  it("loadQuestions hält den Schwierigkeitsbereich des Zuges ein (ADR-055)", async () => {
+    const rows = poolRows(["comics"], 20);
+    const service = setup({ pool: async () => rows, docs: docsFor(rows) });
+    await service.reload("test");
+    const loaded = await service.loadQuestions({
+      categoryId: "comics",
+      count: 4,
+      excludeQuestionIds: [],
+      seen: new Map(),
+      difficulty: { min: 2, max: 3, basis: "question", order: "ascending", turnNumber: 1, turns: 1 },
+    });
+    expect(loaded.questions.map((question) => question.difficulty)).toEqual([2, 2, 3, 3]);
   });
 
   it("ohne drei spielbare Kategorien gibt es kein Angebot; sonst drei verschiedene", async () => {

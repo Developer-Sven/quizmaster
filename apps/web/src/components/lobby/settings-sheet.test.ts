@@ -10,6 +10,8 @@ import { describe, expect, it } from "vitest";
 import { SettingsSummary, settingsSummaryParts } from "./settings-sheet";
 import {
   categorySummary,
+  difficultyPreview,
+  difficultySummary,
   settingValueText,
   sortedCategories,
   suggestionSummary,
@@ -92,5 +94,32 @@ describe("Vorschläge: Werte und Kurzfassung (ADR-053)", () => {
       suggestionSummary({ answerSec: 30, rounds: 5, categoryIds: ["sport", "musik"] }, DEFAULT_LOBBY_SETTINGS, catalog),
     ).toBe("Runden: 5 · Kategorien: 2 ausgewählt · Zeit pro Frage: 30 s");
     expect(suggestionSummary({ hostPlays: false }, DEFAULT_LOBBY_SETTINGS, catalog)).toBe("Host: zeigt nur an");
+  });
+});
+
+describe("Schwierigkeit: Zeile und Vorschau (ADR-055)", () => {
+  it("fasst den Bereich und die Art zusammen", () => {
+    expect(difficultySummary(DEFAULT_LOBBY_SETTINGS)).toBe("1–5, pro Frage aufsteigend");
+    expect(difficultySummary({ ...DEFAULT_LOBBY_SETTINGS, difficultyMin: 3, difficultyMax: 3 })).toBe("nur Stufe 3");
+    expect(
+      difficultySummary({
+        ...DEFAULT_LOBBY_SETTINGS,
+        difficultyMin: 2,
+        difficultyBasis: "category",
+        difficultyOrder: "random",
+      }),
+    ).toBe("2–5, pro Kategorie zufällig");
+  });
+
+  it("zeigt in der Vorschau, was tatsächlich passiert", () => {
+    const settings = { ...DEFAULT_LOBBY_SETTINGS, difficultyMax: 3 as const, questionsPerCategory: 6 };
+    expect(difficultyPreview(settings, 2)).toBe("So läuft jede Kategorie: Stufe 1 · 1 · 2 · 2 · 3 · 3");
+    expect(difficultyPreview({ ...settings, difficultyBasis: "category" }, 2)).toBe(
+      "Kategorien nacheinander: Stufe 1 · 1 · 2 · 2 · 3 · 3",
+    );
+    expect(difficultyPreview({ ...settings, difficultyOrder: "random" }, 2)).toBe(
+      "Jede Frage bekommt zufällig eine Stufe von 1 bis 3.",
+    );
+    expect(difficultyPreview({ ...settings, rounds: 10, difficultyBasis: "category" }, 8)).toMatch(/ …$/);
   });
 });

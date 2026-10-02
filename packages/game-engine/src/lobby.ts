@@ -214,6 +214,7 @@ export function onUpdateSettings(state: LobbyState, command: UpdateSettingsComma
   if (settings.maxPlayers < members(state).length) {
     reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
   }
+  if (settings.difficultyMin > settings.difficultyMax) reject("INVALID_OPTION", "Schwierigkeit „von“ über „bis“");
   requestPersist(tx, "settings");
   return { ...state, settings };
 }
@@ -297,6 +298,7 @@ function settingsWithChanges(state: LobbyState, changes: unknown): LobbySettings
   if (settings.maxPlayers < members(state).length) {
     reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
   }
+  if (settings.difficultyMin > settings.difficultyMax) reject("INVALID_OPTION", "Schwierigkeit „von“ über „bis“");
   return settings;
 }
 

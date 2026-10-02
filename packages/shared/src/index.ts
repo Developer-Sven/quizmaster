@@ -1,5 +1,5 @@
 /** Version des Realtime-Protokolls; jede Änderung an Payload-Formen erhöht sie (docs/05). */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 // Haupt-Export: clientfähig (keine node:-Importe). Server-only: "@quizmaster/shared/moderation",
 // "@quizmaster/shared/ip", "@quizmaster/shared/env"; DB-Dokumente ("/documents") und Content-Dateien
@@ -7,6 +7,7 @@ export const PROTOCOL_VERSION = 4;
 export * from "./ack.ts";
 export * from "./auth.ts";
 export * from "./constants.ts";
+export * from "./difficulty.ts";
 export * from "./duration.ts";
 export * from "./errors.ts";
 export * from "./events.ts";

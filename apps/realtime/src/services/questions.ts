@@ -35,7 +35,7 @@ import {
   type SeenQuestions,
   type TurnRef,
 } from "@quizmaster/game-engine";
-import { type CategoryOption, categoryOptionSchema } from "@quizmaster/shared";
+import { type CategoryOption, categoryOptionSchema, type DifficultyRule } from "@quizmaster/shared";
 import { isPlayableStatus } from "@quizmaster/shared/content";
 import type { CategoryDoc, QuestionDoc } from "@quizmaster/shared/documents";
 import { categoryDocSchema, questionDocSchema } from "@quizmaster/shared/documents";
@@ -96,6 +96,8 @@ export interface LoadQuestionsRequest {
   /** Im Spiel bereits benutzte Fragen (nie doppelt). */
   excludeQuestionIds: readonly string[];
   seen: SeenQuestions;
+  /** Schwierigkeit des Zuges (ADR-055); ohne: alle Stufen, pro Frage aufsteigend */
+  difficulty?: DifficultyRule;
 }
 
 export interface LoadedQuestions {
@@ -583,6 +585,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
           seen: request.seen,
           usedQuestionIds: exclude,
           difficultyMix: deps.appConfig.get().catalog.difficultyMix,
+          difficulty: request.difficulty,
           rng: deps.rng,
         });
         if (drawn.length === 0) break;

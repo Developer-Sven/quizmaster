@@ -531,6 +531,66 @@ describe("Spielende und Revanche", () => {
   });
 });
 
+describe("Schwierigkeit (ADR-055)", () => {
+  it("„von“ über „bis“ wird abgelehnt; Angebot und Ziehung tragen Bereich und Regel des Zuges", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    expect(
+      errorCode(
+        sim.dispatch({
+          type: "UPDATE_SETTINGS",
+          guestId: sim.host,
+          update: { difficultyMin: 4, difficultyMax: 3 },
+        }),
+      ),
+    ).toBe("INVALID_OPTION");
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { rounds: 2, difficultyMin: 2, difficultyMax: 4, difficultyBasis: "category" },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    const offer = sim.requests[0];
+    if (offer?.kind !== "options") throw new Error("Anfrage fehlt");
+    expect(offer.effect.turn.difficulty).toEqual({ min: 2, max: 4 });
+    sim.respond();
+    const option = currentTurn(sim.state.game)?.options[0]?.id ?? "";
+    sim.ok({ type: "PICK", guestId: pickerGuest(sim), categoryId: option });
+    const load = sim.requests[0];
+    if (load?.kind !== "questions") throw new Error("Anfrage fehlt");
+    // 2 Runden × 2 Personen = 4 geplante Züge; der erste läuft.
+    expect(load.effect.difficulty).toEqual({
+      min: 2,
+      max: 4,
+      basis: "category",
+      order: "ascending",
+      turnNumber: 1,
+      turns: 4,
+    });
+  });
+
+  it("pro Frage, zufällig: die Reihenfolge der Shell bleibt (nicht leicht → schwer)", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { difficultyOrder: "random" } });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.fireNext();
+    sim.respond();
+    const option = currentTurn(sim.state.game)?.options[0]?.id ?? "";
+    sim.ok({ type: "PICK", guestId: pickerGuest(sim), categoryId: option });
+    const request = sim.requests[0];
+    if (request?.kind !== "questions") throw new Error("Anfrage fehlt");
+    const docs = [...(sim.catalog.pool.get(option) ?? [])]
+      .map((entry) => sim.catalog.docs.get(entry.id))
+      .filter((doc) => doc !== undefined);
+    const hard = docs.find((doc) => doc.difficulty === 5);
+    const easy = docs.find((doc) => doc.difficulty === 1);
+    const middle = docs.find((doc) => doc.difficulty === 3);
+    if (!hard || !easy || !middle) throw new Error("Fixture");
+    sim.ok({ type: "QUESTIONS_READY", token: request.effect.token, questions: [hard, easy, middle] });
+    expect(currentTurn(sim.state.game)?.questions.map((question) => question.difficulty)).toEqual([5, 1, 3]);
+  });
+});
+
 describe("Weiter nach Frage, Kategorie und Zwischenstand (ADR-045)", () => {
   it("Standard: automatisch nach 5 / 5 / 7 s – das Spieltempo aus ADR-044", () => {
     const sim = lobbyWith(2);

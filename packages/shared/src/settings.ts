@@ -2,7 +2,8 @@
  * Lobby-Einstellungen (docs/01 §Einstellungen, ADR-017): nur Host, nur vor Spielbeginn. Alles andere
  * ist fest wie beim Vorbild (`GAME_RULES`).
  */
-import type { Phase } from "./constants.ts";
+import { DIFFICULTIES, type Phase } from "./constants.ts";
+import { DIFFICULTY_BASES, DIFFICULTY_ORDERS } from "./difficulty.ts";
 import { categoryIdSchema } from "./primitives.ts";
 import * as z from "./zod.ts";
 
@@ -54,7 +55,7 @@ export const CONTINUE_PHASES = ["question", ...ADVANCE_PHASES] as const satisfie
 export type ContinuePhase = (typeof CONTINUE_PHASES)[number];
 
 /** Zeit pro Frage in Sekunden (ADR-049); 0 = „Host“: kein Countdown, der Host tippt „Auflösen“. */
-export const ANSWER_SECONDS = [0, 10, 15, 20, 30, 45, 60] as const;
+export const ANSWER_SECONDS = [0, 5, 10, 15, 20, 30, 45, 60] as const;
 /** Sicherheitsnetz bei „Host“: spätestens dann löst der Server selbst auf (Host weg, Gerät aus). */
 export const MANUAL_ANSWER_CAP_MS = 10 * 60_000;
 
@@ -69,6 +70,9 @@ const answerSeconds = z
   .min(0)
   .max(60)
   .refine((value) => (ANSWER_SECONDS as readonly number[]).includes(value), { message: "keine erlaubte Stufe" });
+
+/** Schwierigkeitsstufe 1 (sehr leicht) bis 5 (sehr schwer). */
+const difficultyLevel = z.literal(DIFFICULTIES);
 
 /** Höchstzahl ausgewählter Kategorien (Katalog: 19 – mit Luft für neue). */
 export const MAX_SELECTED_CATEGORIES = 50;
@@ -86,7 +90,7 @@ const categoryIdsSchema = z
 
 /**
  * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Spätere Felder haben
- * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048/049/053 bleiben lesbar.
+ * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048/049/053/055 bleiben lesbar.
  */
 export const lobbySettingsSchema = z.strictObject({
   rounds: bounded(SETTINGS_BOUNDS.rounds),
@@ -102,6 +106,13 @@ export const lobbySettingsSchema = z.strictObject({
   answerSec: answerSeconds.default(GAME_RULES_ANSWER_SEC),
   /** Alle außer dem Host dürfen Änderungen vorschlagen (ADR-053); der Host schaltet es ab */
   allowSuggestions: z.boolean().default(true),
+  /** Schwierigkeit von–bis (ADR-055); `difficultyMin` ≤ `difficultyMax` prüft der Server */
+  difficultyMin: difficultyLevel.default(1),
+  difficultyMax: difficultyLevel.default(5),
+  /** Stufe wechselt pro Frage oder pro Kategorie (ADR-055) */
+  difficultyBasis: z.enum(DIFFICULTY_BASES).default("question"),
+  /** aufsteigend oder zufällig (ADR-055) */
+  difficultyOrder: z.enum(DIFFICULTY_ORDERS).default("ascending"),
 });
 export type LobbySettings = z.output<typeof lobbySettingsSchema>;
 
@@ -114,6 +125,10 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = Object.freeze({
   categoryIds: null,
   answerSec: GAME_RULES_ANSWER_SEC,
   allowSuggestions: true,
+  difficultyMin: 1,
+  difficultyMax: 5,
+  difficultyBasis: "question",
+  difficultyOrder: "ascending",
 });
 
 /** Antwortzeit in ms – `null` bei „Host“ (kein Countdown, ADR-049). */
@@ -157,6 +172,10 @@ const settingsChangeShape = {
   hostPlays: z.boolean().optional(),
   categoryIds: categoryIdsSchema.optional(),
   answerSec: answerSeconds.optional(),
+  difficultyMin: difficultyLevel.optional(),
+  difficultyMax: difficultyLevel.optional(),
+  difficultyBasis: z.enum(DIFFICULTY_BASES).optional(),
+  difficultyOrder: z.enum(DIFFICULTY_ORDERS).optional(),
 };
 
 /** Einstellungen, die ein Vorschlag ändern kann – in der Reihenfolge des Einstellungen-Sheets (ADR-053). */
@@ -165,6 +184,10 @@ export const SUGGESTABLE_SETTINGS = [
   "questionsPerCategory",
   "maxPlayers",
   "categoryIds",
+  "difficultyMin",
+  "difficultyMax",
+  "difficultyBasis",
+  "difficultyOrder",
   "answerSec",
   "afterQuestionSec",
   "afterTurnSec",
@@ -213,6 +236,10 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
     categoryIds: update.categoryIds === undefined ? current.categoryIds : update.categoryIds,
     answerSec: update.answerSec ?? current.answerSec,
     allowSuggestions: update.allowSuggestions ?? current.allowSuggestions,
+    difficultyMin: update.difficultyMin ?? current.difficultyMin,
+    difficultyMax: update.difficultyMax ?? current.difficultyMax,
+    difficultyBasis: update.difficultyBasis ?? current.difficultyBasis,
+    difficultyOrder: update.difficultyOrder ?? current.difficultyOrder,
   };
 }
 

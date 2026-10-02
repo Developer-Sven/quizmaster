@@ -182,7 +182,9 @@ function buildQuestions(
       outcomes: null,
     };
   });
-  // Innerhalb des Zuges leicht → schwer (stabil: gleiche Stufe behält die Reihenfolge der Shell).
+  // „Pro Frage, zufällig“ (ADR-055): die zufällige Reihenfolge der Shell bleibt.
+  if (state.settings.difficultyBasis === "question" && state.settings.difficultyOrder === "random") return questions;
+  // Sonst innerhalb des Zuges leicht → schwer (stabil: gleiche Stufe behält die Reihenfolge der Shell).
   return questions.sort((a, b) => a.difficulty - b.difficulty);
 }
 

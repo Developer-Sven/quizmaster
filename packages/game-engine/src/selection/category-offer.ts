@@ -10,6 +10,7 @@
  * (Shell: `LOAD_FAILED`) – die Kategorie des letzten Zuges wird auch dann nie angeboten.
  * 5. Auswahl des Hosts (`turn.categoryIds`, ADR-048): nur diese Kategorien; reicht sie nicht für 3 ohne die des
  *    letzten Zuges, ist diese dabei, und es dürfen 1–2 Optionen sein (genau 1 = feste Kategorie).
+ * 6. Schwierigkeitsbereich (`turn.difficulty`, ADR-055): gezählt werden nur Fragen darin.
  */
 import type { CategoryOption } from "@quizmaster/shared";
 import type { TurnRef } from "../effects.ts";
@@ -24,6 +25,7 @@ export interface CategoryOfferInput {
   /** Aus dem Effect `offerCategories` (`categoryIds`: Auswahl des Hosts, `null`/fehlt = alle – ADR-048). */
   turn: Pick<TurnRef, "questionsPerTurn" | "playedCategoryIds" | "usedQuestionIds"> & {
     categoryIds?: readonly string[] | null;
+    difficulty?: TurnRef["difficulty"];
   };
   rng: Rng;
 }
@@ -54,6 +56,11 @@ function rank(candidates: readonly Candidate[], rng: Rng): Candidate[] {
   return [...unplayed, ...played];
 }
 
+/** Liegt die Stufe im Bereich des Zuges (ohne Bereich: immer)? */
+function inDifficultyRange(level: number, range: TurnRef["difficulty"] | undefined): boolean {
+  return range === undefined || (level >= range.min && level <= range.max);
+}
+
 /** Kandidaten aus `categories` – ohne die des letzten Zuges, wenn `excludeLast`. */
 function candidatesOf(input: CategoryOfferInput, categories: readonly CategoryOption[], excludeLast: boolean) {
   const { turn } = input;
@@ -71,7 +78,7 @@ function candidatesOf(input: CategoryOfferInput, categories: readonly CategoryOp
     let unseen = 0;
     let unused = 0;
     for (const question of input.pool.get(option.id) ?? []) {
-      if (used.has(question.id)) continue;
+      if (used.has(question.id) || !inDifficultyRange(question.difficulty, turn.difficulty)) continue;
       unused++;
       if (!input.seen.has(question.id)) unseen++;
     }

@@ -19,7 +19,15 @@ import { CategoryBadge } from "../ui/category-badge";
 import { ListRow } from "../ui/list-row";
 import { Sheet } from "../ui/sheet";
 import { Stepper } from "../ui/stepper";
-import { categorySummary, settingValueText, sortedCategories, toggleCategory } from "./settings-text";
+import {
+  asDifficulty,
+  categorySummary,
+  difficultyPreview,
+  difficultySummary,
+  settingValueText,
+  sortedCategories,
+  toggleCategory,
+} from "./settings-text";
 
 export interface SettingsSheetProps {
   open: boolean;
@@ -55,7 +63,8 @@ export interface SettingsSheetProps {
 /**
  * Einstellungen-Sheet (docs/09 §6): Runden, Fragen pro Kategorie, Personen maximal, Zusammenfassung;
  * „Zeit und Weiter“ – Zeit pro Frage (ADR-049) und Weiter nach Frage, Kategorie und Zwischenstand (ADR-045), je
- * Sekunden oder „Host“; „Kategorien“ (Unteransicht, ADR-048); „Du spielst mit“ / „Du zeigst nur an“ (ADR-046);
+ * Sekunden oder „Host“; „Kategorien“ (Unteransicht, ADR-048); „Schwierigkeit“ (Unteransicht: von–bis, pro Frage
+ * oder Kategorie, aufsteigend oder zufällig, mit Vorschau – ADR-055); „Du spielst mit“ / „Du zeigst nur an“ (ADR-046);
  * für den Host „Vorschläge“ an/aus (ADR-053). Beim Host wirken Änderungen sofort für alle (gebündelt, ADR-042);
  * alle anderen sehen es nur lesbar (ADR-050) oder stellen einen Vorschlag zusammen (`baseline`, ADR-053).
  */
@@ -75,7 +84,7 @@ export function SettingsSheet({
   onChange,
   onClose,
 }: SettingsSheetProps) {
-  const [view, setView] = useState<"main" | "categories">("main");
+  const [view, setView] = useState<"main" | "categories" | "difficulty">("main");
   // Nur lesbar (ADR-050): Zeilen ohne Handler sind statisch, Stepper deaktiviert – die Werte bleiben lesbar.
   const change = (update: SettingsUpdate) => {
     if (!readOnly) onChange(update);
@@ -88,6 +97,14 @@ export function SettingsSheet({
       : de.suggestions.currently(settingValueText(baseline, key, categories));
   const categoriesNote = changedNote("categoryIds");
   const hostNote = changedNote("hostPlays");
+  // Schwierigkeit (ADR-055): die Zeile der Hauptansicht zeigt „Aktuell: …“, sobald eins der vier Felder abweicht.
+  const difficultyChanged =
+    baseline !== undefined &&
+    (["difficultyMin", "difficultyMax", "difficultyBasis", "difficultyOrder"] as const).some(
+      (key) => changedNote(key) !== undefined,
+    );
+  const difficultyNote =
+    difficultyChanged && baseline !== undefined ? de.suggestions.currently(difficultySummary(baseline)) : undefined;
   // Mitspielende für die Schätzung: ohne den Host, wenn er nur anzeigt.
   const players = Math.max(settings.hostPlays ? playerCount : playerCount - 1, 1);
   const close = () => {
@@ -135,6 +152,95 @@ export function SettingsSheet({
           ))}
         </ul>
         <p className="pt-2 pb-2 text-caption text-text-2">{de.settings.categoriesHint}</p>
+      </Sheet>
+    );
+  }
+  if (view === "difficulty") {
+    const range = settings.difficultyMin < settings.difficultyMax;
+    const basisNote = changedNote("difficultyBasis");
+    const orderNote = changedNote("difficultyOrder");
+    return (
+      <Sheet
+        open={open}
+        onClose={close}
+        title={de.settings.difficultyTitle}
+        view="difficulty"
+        onBack={() => setView("main")}
+        footer={
+          <Button
+            variant={readOnly ? "secondary" : "primary"}
+            block
+            onClick={() => setView("main")}
+            data-testid="settings-difficulty-done"
+          >
+            {readOnly ? de.actions.back : de.actions.done}
+          </Button>
+        }
+      >
+        <div className="flex flex-col" data-testid="settings-difficulty">
+          <Stepper
+            label={de.settings.difficultyMin}
+            value={settings.difficultyMin}
+            min={1}
+            max={settings.difficultyMax}
+            disabled={readOnly}
+            changedNote={changedNote("difficultyMin")}
+            onChange={(level) => change({ difficultyMin: asDifficulty(level) })}
+          />
+          <Stepper
+            label={de.settings.difficultyMax}
+            value={settings.difficultyMax}
+            min={settings.difficultyMin}
+            max={5}
+            disabled={readOnly}
+            changedNote={changedNote("difficultyMax")}
+            onChange={(level) => change({ difficultyMax: asDifficulty(level) })}
+          />
+          <p className="pt-1 text-caption text-text-2">{de.settings.difficultyScale}</p>
+          {range ? (
+            <>
+              <h3 className="pt-4 text-label text-text-2">{de.settings.difficultyBasisTitle}</h3>
+              {basisNote ? <p className="text-caption text-text-2">{basisNote}</p> : null}
+              <ul className="flex flex-col" data-testid="settings-difficulty-basis">
+                {(["question", "category"] as const).map((basis) => (
+                  <li key={basis}>
+                    <ListRow
+                      selected={settings.difficultyBasis === basis}
+                      onClick={selectable({ difficultyBasis: basis })}
+                    >
+                      <span className="flex min-w-0 flex-col py-2">
+                        <span>{de.settings.difficultyBases[basis]}</span>
+                        <span className="text-caption text-text-2">{de.settings.difficultyBasisHints[basis]}</span>
+                      </span>
+                    </ListRow>
+                  </li>
+                ))}
+              </ul>
+              <h3 className="pt-4 text-label text-text-2">{de.settings.difficultyOrderTitle}</h3>
+              {orderNote ? <p className="text-caption text-text-2">{orderNote}</p> : null}
+              <ul className="flex flex-col" data-testid="settings-difficulty-order">
+                {(["ascending", "random"] as const).map((order) => (
+                  <li key={order}>
+                    <ListRow
+                      selected={settings.difficultyOrder === order}
+                      onClick={selectable({ difficultyOrder: order })}
+                    >
+                      <span className="flex min-w-0 flex-col py-2">
+                        <span>{de.settings.difficultyOrders[order]}</span>
+                        <span className="text-caption text-text-2">
+                          {de.settings.difficultyOrderHints[settings.difficultyBasis][order]}
+                        </span>
+                      </span>
+                    </ListRow>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          <p className="pt-4 pb-2 text-body text-text" data-testid="settings-difficulty-preview">
+            {difficultyPreview(settings, players)}
+          </p>
+        </div>
       </Sheet>
     );
   }
@@ -194,6 +300,17 @@ export function SettingsSheet({
             </span>
             <span className={cx("truncate text-label", categoriesNote ? "text-primary" : "text-text-2")}>
               {categorySummary(settings.categoryIds, categories)}
+            </span>
+          </span>
+        </ListRow>
+        <ListRow onClick={() => setView("difficulty")} data-testid="settings-difficulty-row">
+          <span className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 flex-col">
+              <span>{de.settings.difficulty}</span>
+              {difficultyNote ? <span className="text-caption text-text-2">{difficultyNote}</span> : null}
+            </span>
+            <span className={cx("truncate text-label", difficultyNote ? "text-primary" : "text-text-2")}>
+              {difficultySummary(settings)}
             </span>
           </span>
         </ListRow>

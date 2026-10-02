@@ -1,13 +1,17 @@
-import type { PublicLobbyState } from "@quizmaster/shared";
+import type { LobbySettings } from "@quizmaster/shared";
 import { de } from "../../i18n/de";
 import type { CategoryCatalog } from "../../lib/client/game-view";
+import { difficultySummary, isCustomDifficulty } from "./settings-text";
 
 /**
- * Zusatzzeile der Zusammenfassung – nur, was vom Standard abweicht: Kategorie-Auswahl (ADR-048), Zeit pro Frage
- * (ADR-049) und der anzeigende Host (ADR-046).
+ * Zusatzzeile der Zusammenfassung – nur, was vom Standard abweicht: Kategorie-Auswahl (ADR-048), Schwierigkeit
+ * (ADR-055), Zeit pro Frage (ADR-049) und der anzeigende Host (ADR-046).
  */
 export function settingsExtras(
-  settings: Pick<PublicLobbyState["settings"], "categoryIds" | "answerSec">,
+  settings: Pick<
+    LobbySettings,
+    "categoryIds" | "answerSec" | "difficultyMin" | "difficultyMax" | "difficultyBasis" | "difficultyOrder"
+  >,
   categories: CategoryCatalog,
   presenterName: string | null,
 ): string[] {
@@ -19,6 +23,7 @@ export function settingsExtras(
   } else if (ids !== null) {
     parts.push(de.lobby.categoryCount(ids.length));
   }
+  if (isCustomDifficulty(settings)) parts.push(de.lobby.difficulty(difficultySummary(settings)));
   if (settings.answerSec !== 20) parts.push(de.lobby.answerTime(settings.answerSec));
   if (presenterName !== null) parts.push(de.lobby.hostPresents(presenterName));
   return parts;

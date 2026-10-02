@@ -8,7 +8,7 @@
  * - `guestId` an `kick`/`sendPrivate` (Socket-Zuordnung, auch wenn die Person schon entfernt ist),
  * - `gameFinished` trägt das fertige games-Dokument und die Statistik-Deltas.
  */
-import type { KickReason, NoticeCode } from "@quizmaster/shared";
+import type { Difficulty, DifficultyRule, KickReason, NoticeCode } from "@quizmaster/shared";
 import type { GameDoc } from "@quizmaster/shared/documents";
 import type { CloseReason, TimerKind } from "./types.ts";
 
@@ -29,6 +29,8 @@ export interface TurnRef {
   usedQuestionIds: string[];
   /** Auswahl des Hosts (`settings.categoryIds`, ADR-048); `null` = alle spielbaren Kategorien. */
   categoryIds: string[] | null;
+  /** Schwierigkeitsbereich (ADR-055): angeboten werden nur Kategorien mit Fragen darin. */
+  difficulty: { min: Difficulty; max: Difficulty };
 }
 
 /** Anlass eines Snapshots (Shell speichert entprellt in `lobbies`). */
@@ -86,7 +88,15 @@ export type Effect =
   /** 3 Kategorien wählen (`offerCategories()`) → `OPTIONS_READY { token, options }`. */
   | { type: "offerCategories"; token: number; turn: TurnRef }
   /** Fragen ziehen (`drawQuestions()`), Volldokumente laden → `QUESTIONS_READY { token, questions }`. */
-  | { type: "loadQuestions"; token: number; categoryId: string; count: number; excludeQuestionIds: string[] }
+  | {
+      type: "loadQuestions";
+      token: number;
+      categoryId: string;
+      count: number;
+      excludeQuestionIds: string[];
+      /** Schwierigkeit des Zuges (ADR-055) */
+      difficulty: DifficultyRule;
+    }
   /** Snapshot in `lobbies` schreiben (`toLobbySnapshot(state)`, entprellt). */
   | { type: "persist"; reason: PersistReason }
   /** Spiel beendet: games-Dokument + Gast-/Fragen-Statistik in einer Transaktion schreiben. */

@@ -4,10 +4,13 @@
  */
 import {
   applySettingsUpdate,
+  DIFFICULTIES,
+  type Difficulty,
   type LobbySettings,
   type SettingsChanges,
   SUGGESTABLE_SETTINGS,
   type SuggestableSetting,
+  spreadDifficulties,
 } from "@quizmaster/shared";
 import { de } from "../../i18n/de";
 import type { CategoryCatalog } from "../../lib/client/game-view";
@@ -35,6 +38,65 @@ export function categorySummary(categoryIds: readonly string[] | null, catalog: 
   return de.settings.categoriesCount(categoryIds.length);
 }
 
+/** Stepper-Wert als Schwierigkeitsstufe (die Stepper-Grenzen halten ihn ohnehin in 1–5). */
+export function asDifficulty(value: number): Difficulty {
+  return DIFFICULTIES.find((level) => level === value) ?? (value < 1 ? 1 : 5);
+}
+
+type DifficultySettings = Pick<
+  LobbySettings,
+  "difficultyMin" | "difficultyMax" | "difficultyBasis" | "difficultyOrder"
+>;
+
+/** Wert der Zeile „Schwierigkeit“ (ADR-055): „1–5, pro Frage aufsteigend“ bzw. „nur Stufe 2“. */
+export function difficultySummary(settings: DifficultySettings): string {
+  const { difficultyMin: min, difficultyMax: max } = settings;
+  if (min === max) return de.settings.difficultyOnly(min);
+  return de.settings.difficultyRange(
+    min,
+    max,
+    de.settings.difficultyModes[settings.difficultyBasis][settings.difficultyOrder],
+  );
+}
+
+/** Zeigt die Schwierigkeit nicht den Standard (alle Stufen, pro Frage aufsteigend)? */
+export function isCustomDifficulty(settings: DifficultySettings): boolean {
+  return (
+    settings.difficultyMin !== 1 ||
+    settings.difficultyMax !== 5 ||
+    settings.difficultyBasis !== "question" ||
+    settings.difficultyOrder !== "ascending"
+  );
+}
+
+/** Höchstens so viele Stufen zeigt die Vorschau „Kategorien nacheinander“, danach „…“. */
+const PREVIEW_MAX_TURNS = 12;
+
+/**
+ * Vorschau unter den Schwierigkeits-Optionen (ADR-055): was tatsächlich passiert – je Kategorie „1 · 3 · 5“,
+ * nacheinander über alle geplanten Züge (`rounds` × Mitspielende) oder „zufällig von … bis …“.
+ */
+export function difficultyPreview(
+  settings: DifficultySettings & Pick<LobbySettings, "rounds" | "questionsPerCategory">,
+  players: number,
+): string {
+  const { difficultyMin: min, difficultyMax: max } = settings;
+  if (min === max) return de.settings.difficultyPreviewOnly(min);
+  if (settings.difficultyOrder === "random") {
+    return settings.difficultyBasis === "question"
+      ? de.settings.difficultyPreviewQuestionRandom(min, max)
+      : de.settings.difficultyPreviewCategoryRandom(min, max);
+  }
+  if (settings.difficultyBasis === "question") {
+    return de.settings.difficultyPreviewQuestion(
+      spreadDifficulties(min, max, settings.questionsPerCategory).join(" · "),
+    );
+  }
+  const turns = spreadDifficulties(min, max, settings.rounds * Math.max(players, 1));
+  const shown = turns.slice(0, PREVIEW_MAX_TURNS).join(" · ");
+  return de.settings.difficultyPreviewCategory(turns.length > PREVIEW_MAX_TURNS ? `${shown} …` : shown);
+}
+
 /** Beschriftung einer Einstellung wie im Sheet. */
 export function settingLabel(key: SuggestableSetting): string {
   switch (key) {
@@ -56,6 +118,14 @@ export function settingLabel(key: SuggestableSetting): string {
       return de.settings.afterRound;
     case "hostPlays":
       return de.settings.hostTitleOther;
+    case "difficultyMin":
+      return de.settings.difficultyMin;
+    case "difficultyMax":
+      return de.settings.difficultyMax;
+    case "difficultyBasis":
+      return de.settings.difficultyBasisTitle;
+    case "difficultyOrder":
+      return de.settings.difficultyOrderTitle;
   }
 }
 
@@ -71,6 +141,10 @@ export function settingValueText(settings: LobbySettings, key: SuggestableSettin
       return de.settings.advanceValue(settings[key]);
     case "hostPlays":
       return settings.hostPlays ? de.suggestions.hostPlaysValue : de.suggestions.hostPresentsValue;
+    case "difficultyBasis":
+      return de.settings.difficultyBases[settings.difficultyBasis];
+    case "difficultyOrder":
+      return de.settings.difficultyOrders[settings.difficultyOrder];
     default:
       return String(settings[key]);
   }

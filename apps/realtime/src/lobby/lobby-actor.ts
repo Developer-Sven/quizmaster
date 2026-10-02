@@ -339,6 +339,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
         categoryId: effect.categoryId,
         count: effect.count,
         excludeQuestionIds: effect.excludeQuestionIds,
+        difficulty: effect.difficulty,
         seen: await seenQuestions(),
       });
       if (loaded.refilledSeen > 0) {

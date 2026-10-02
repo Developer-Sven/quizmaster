@@ -109,6 +109,8 @@ export const de = {
     categoryCount: (count: number) => `${count} Kategorien`,
     answerTime: (seconds: number) => (seconds === 0 ? "Auflösen per Host" : `${seconds} s pro Frage`),
     hostPresents: (name: string) => `${name} zeigt nur an`,
+    /** Schwierigkeit, wenn nicht alle Stufen pro Frage aufsteigend (ADR-055) */
+    difficulty: (text: string) => `Schwierigkeit ${text}`,
     copyCode: "Code kopieren",
     shareLink: "Link teilen",
     showQrCode: "QR-Code zeigen",
@@ -160,6 +162,45 @@ export const de = {
     hostPlaysOther: (host: string) => `${host} spielt mit`,
     hostPresentsOther: (host: string) => `${host} zeigt nur an (großer Bildschirm)`,
     advanceHintOther: "„Host“: Es geht erst weiter, wenn der Host auf „Auflösen“ bzw. „Weiter“ tippt.",
+    /** Schwierigkeit (ADR-055): Unteransicht wie „Kategorien“ */
+    difficulty: "Schwierigkeit",
+    difficultyTitle: "Schwierigkeit",
+    difficultyMin: "Von Stufe",
+    difficultyMax: "Bis Stufe",
+    difficultyScale: "Stufe 1 = sehr leicht, Stufe 5 = sehr schwer.",
+    difficultyBasisTitle: "Stufe wechselt",
+    difficultyBases: { question: "Pro Frage", category: "Pro Kategorie" },
+    difficultyBasisHints: {
+      question: "Jede Frage hat ihre eigene Stufe.",
+      category: "Alle Fragen einer Kategorie haben dieselbe Stufe.",
+    },
+    difficultyOrderTitle: "Reihenfolge",
+    difficultyOrders: { ascending: "Aufsteigend", random: "Zufällig" },
+    difficultyOrderHints: {
+      question: {
+        ascending: "In jeder Kategorie von leicht nach schwer.",
+        random: "Jede Frage zufällig – mal leicht, mal schwer.",
+      },
+      category: {
+        ascending: "Von Kategorie zu Kategorie schwerer.",
+        random: "Jede Kategorie bekommt eine zufällige Stufe.",
+      },
+    },
+    /** Kurzform für Zeile und Lobby, z. B. „1–5, pro Frage aufsteigend“ */
+    difficultyModes: {
+      question: { ascending: "pro Frage aufsteigend", random: "pro Frage zufällig" },
+      category: { ascending: "pro Kategorie aufsteigend", random: "pro Kategorie zufällig" },
+    },
+    difficultyRange: (min: number, max: number, mode: string) => `${min}–${max}, ${mode}`,
+    difficultyOnly: (level: number) => `nur Stufe ${level}`,
+    /** Vorschau unter den Optionen – zeigt, was tatsächlich passiert */
+    difficultyPreviewQuestion: (levels: string) => `So läuft jede Kategorie: Stufe ${levels}`,
+    difficultyPreviewCategory: (levels: string) => `Kategorien nacheinander: Stufe ${levels}`,
+    difficultyPreviewQuestionRandom: (min: number, max: number) =>
+      `Jede Frage bekommt zufällig eine Stufe von ${min} bis ${max}.`,
+    difficultyPreviewCategoryRandom: (min: number, max: number) =>
+      `Jede Kategorie bekommt zufällig eine Stufe von ${min} bis ${max}.`,
+    difficultyPreviewOnly: (level: number) => `Alle Fragen haben Stufe ${level}.`,
   },
 
   /** Vorschläge für die Einstellungen (ADR-053) */

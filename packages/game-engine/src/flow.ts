@@ -5,7 +5,13 @@
  * Regeln: Reihenfolge wird beim Start ausgelost und gilt für alle Runden; jede aktive Person wählt genau
  * einmal pro Runde; Aufgegebene werden übersprungen; weniger als 2 Aktive → sofort `game_over`.
  */
-import { answerWindowMs, GAME_RULES, MANUAL_ANSWER_CAP_MS, questionLeadInMs } from "@quizmaster/shared";
+import {
+  answerWindowMs,
+  type DifficultyRule,
+  GAME_RULES,
+  MANUAL_ANSWER_CAP_MS,
+  questionLeadInMs,
+} from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import type { TurnRef } from "./effects.ts";
 import { advancePhaseEnd, clearPhaseTimer, enterPhase } from "./phases.ts";
@@ -108,6 +114,7 @@ function requestOptions(state: LobbyState, round: number, orderIndex: number, tx
     playedCategoryIds: game.turns.flatMap((entry) => (entry.categoryId === null ? [] : [entry.categoryId])),
     usedQuestionIds: usedQuestionIds(game),
     categoryIds: state.settings.categoryIds === null ? null : [...state.settings.categoryIds],
+    difficulty: { min: state.settings.difficultyMin, max: state.settings.difficultyMax },
   };
   tx.effects.push({ type: "offerCategories", token, turn });
   const requested = updateGame(next, (current) => ({
@@ -135,6 +142,22 @@ export function advanceFrom(state: LobbyState, round: number, afterIndex: number
   return finishGame(cleared, "not_enough_players", tx);
 }
 
+/**
+ * Schwierigkeit für den Zug `turnNumber` (ADR-055): Bereich, pro Frage oder Kategorie, aufsteigend oder zufällig;
+ * geplant sind Runden × Personen der Reihenfolge Züge (für „pro Kategorie, aufsteigend“).
+ */
+function difficultyRule(state: LobbyState, game: GameState, turnNumber: number): DifficultyRule {
+  const { difficultyMin, difficultyMax, difficultyBasis, difficultyOrder, rounds } = state.settings;
+  return {
+    min: difficultyMin,
+    max: difficultyMax,
+    basis: difficultyBasis,
+    order: difficultyOrder,
+    turnNumber,
+    turns: rounds * game.order.length,
+  };
+}
+
 /** Übernimmt die Kategorie des aktuellen Zuges und fordert die Fragen an (Effect `loadQuestions`). */
 export function applyPick(state: LobbyState, categoryId: string, pickedBy: PickedBy, tx: Tx): LobbyState {
   const picked = updateCurrentTurn(clearPhaseTimer(state), (turn) => ({ ...turn, categoryId, pickedBy }));
@@ -146,6 +169,7 @@ export function applyPick(state: LobbyState, categoryId: string, pickedBy: Picke
     categoryId,
     count: state.settings.questionsPerCategory,
     excludeQuestionIds: usedQuestionIds(game),
+    difficulty: difficultyRule(state, game, currentTurn(game)?.number ?? game.turns.length),
   });
   const requested = updateGame(next, (current) => ({ ...current, pending: { kind: "questions", token, categoryId } }));
   return scheduleRequestTimeout(requested, tx);

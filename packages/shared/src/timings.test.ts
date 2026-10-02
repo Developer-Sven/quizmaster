@@ -75,6 +75,10 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       categoryIds: null,
       answerSec: 20,
       allowSuggestions: true,
+      difficultyMin: 1,
+      difficultyMax: 5,
+      difficultyBasis: "question",
+      difficultyOrder: "ascending",
     });
     expect(Object.isFrozen(DEFAULT_LOBBY_SETTINGS)).toBe(true);
   });
@@ -121,12 +125,13 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
     expect(lobbySettingsSchema.safeParse({ rounds: 3, questionsPerCategory: 3 }).success).toBe(false);
   });
 
-  it("Zeit pro Frage: 10–60 s oder „Host“ (0 = der Host löst auf, ADR-049)", () => {
-    expect(ANSWER_SECONDS).toEqual([0, 10, 15, 20, 30, 45, 60]);
+  it("Zeit pro Frage: 5–60 s oder „Host“ (0 = der Host löst auf, ADR-049, 5 s seit ADR-055)", () => {
+    expect(ANSWER_SECONDS).toEqual([0, 5, 10, 15, 20, 30, 45, 60]);
     expect(DEFAULT_LOBBY_SETTINGS.answerSec).toBe(20);
     expect(updateSettingsPayloadSchema.parse({ answerSec: 0 })).toEqual({ answerSec: 0 });
     expect(updateSettingsPayloadSchema.parse({ answerSec: 45 })).toEqual({ answerSec: 45 });
-    for (const bad of [{ answerSec: 5 }, { answerSec: 25 }, { answerSec: 61 }, { answerSec: -1 }]) {
+    expect(updateSettingsPayloadSchema.parse({ answerSec: 5 })).toEqual({ answerSec: 5 });
+    for (const bad of [{ answerSec: 3 }, { answerSec: 25 }, { answerSec: 61 }, { answerSec: -1 }]) {
       expect(updateSettingsPayloadSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
     }
     expect(answerWindowMs(DEFAULT_LOBBY_SETTINGS)).toBe(20_000);
@@ -182,6 +187,10 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       categoryIds: null,
       answerSec: 20,
       allowSuggestions: true,
+      difficultyMin: 1,
+      difficultyMax: 5,
+      difficultyBasis: "question",
+      difficultyOrder: "ascending",
     });
     expect(advanceDurationMs(DEFAULT_LOBBY_SETTINGS, "reveal")).toBe(5_000);
     expect(advanceDurationMs({ ...DEFAULT_LOBBY_SETTINGS, afterTurnSec: 0 }, "turn_summary")).toBeNull();

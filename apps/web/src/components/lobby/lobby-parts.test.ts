@@ -1,3 +1,4 @@
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import { renderHtml } from "../ui/ssr-render";
 import { InvitePanel } from "./invite-panel";
@@ -31,15 +32,31 @@ describe("Zusatzzeile der Lobby-Zusammenfassung (ADR-046/048/049)", () => {
   const catalog = { sport: { id: "sport", name: "Sport", icon: "trophy", color: "#336699" } };
 
   it("nur Abweichungen vom Standard: feste Kategorie, Zeit pro Frage, anzeigender Host", () => {
-    expect(settingsExtras({ categoryIds: null, answerSec: 20 }, catalog, null)).toEqual([]);
-    expect(settingsExtras({ categoryIds: ["sport"], answerSec: 0 }, catalog, "Mia")).toEqual([
-      "Nur Sport",
-      "Auflösen per Host",
-      "Mia zeigt nur an",
-    ]);
-    expect(settingsExtras({ categoryIds: ["sport", "erdkunde"], answerSec: 45 }, catalog, null)).toEqual([
-      "2 Kategorien",
-      "45 s pro Frage",
-    ]);
+    expect(settingsExtras({ ...DEFAULT_LOBBY_SETTINGS, categoryIds: null, answerSec: 20 }, catalog, null)).toEqual([]);
+    expect(settingsExtras({ ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport"], answerSec: 0 }, catalog, "Mia")).toEqual(
+      ["Nur Sport", "Auflösen per Host", "Mia zeigt nur an"],
+    );
+    expect(
+      settingsExtras({ ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport", "erdkunde"], answerSec: 45 }, catalog, null),
+    ).toEqual(["2 Kategorien", "45 s pro Frage"]);
+  });
+
+  it("Schwierigkeit nur, wenn nicht alle Stufen pro Frage aufsteigend (ADR-055); 5 s pro Frage", () => {
+    expect(
+      settingsExtras({ ...DEFAULT_LOBBY_SETTINGS, difficultyMin: 2, difficultyMax: 2, answerSec: 5 }, catalog, null),
+    ).toEqual(["Schwierigkeit nur Stufe 2", "5 s pro Frage"]);
+    expect(
+      settingsExtras(
+        {
+          ...DEFAULT_LOBBY_SETTINGS,
+          difficultyMin: 2,
+          difficultyMax: 4,
+          difficultyBasis: "category",
+          difficultyOrder: "random",
+        },
+        catalog,
+        null,
+      ),
+    ).toEqual(["Schwierigkeit 2–4, pro Kategorie zufällig"]);
   });
 });

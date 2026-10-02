@@ -1,4 +1,4 @@
-import type { CategoryOption, Difficulty } from "@quizmaster/shared";
+import type { CategoryOption, Difficulty, DifficultyRule } from "@quizmaster/shared";
 import { DEFAULT_DIFFICULTY_MIX } from "@quizmaster/shared/content";
 import { describe, expect, it } from "vitest";
 import {
@@ -197,6 +197,11 @@ describe("offerCategories mit begrenzter Auswahl (ADR-048)", () => {
   });
 });
 
+/** Regel mit Standardwerten: alle Stufen, pro Frage aufsteigend. */
+function rule(patch: Partial<DifficultyRule> = {}): DifficultyRule {
+  return { min: 1, max: 5, basis: "question", order: "ascending", turnNumber: 1, turns: 1, ...patch };
+}
+
 describe("drawQuestions (docs/04 Schritt 5)", () => {
   // 4 Themen bei 5 Stufen: Thema und Stufe sind unabhängig (i % 4 vs. i % 5).
   const catalog = makeCatalog({ categories: 2, perCategory: 100, topics: 4 });
@@ -282,7 +287,7 @@ describe("drawQuestions (docs/04 Schritt 5)", () => {
     ).toEqual([]);
   });
 
-  it("gewichtet die Schwierigkeit nach dem Katalog-Mix", () => {
+  it("pro Frage zufällig: gewichtet nach dem Katalog-Mix (ADR-055)", () => {
     const rng = createSeededRng("mix");
     const counts = new Map<Difficulty, number>();
     for (let i = 0; i < 4_000; i++) {
@@ -293,6 +298,7 @@ describe("drawQuestions (docs/04 Schritt 5)", () => {
         seen: new Map(),
         usedQuestionIds: [],
         difficultyMix: DEFAULT_DIFFICULTY_MIX,
+        difficulty: rule({ order: "random" }),
         rng,
       });
       if (first) counts.set(first.difficulty, (counts.get(first.difficulty) ?? 0) + 1);
@@ -308,6 +314,7 @@ describe("drawQuestions (docs/04 Schritt 5)", () => {
       seen: new Map(),
       usedQuestionIds: [],
       difficultyMix: { "1": 1, "2": 0, "3": 0, "4": 0, "5": 0 },
+      difficulty: rule({ order: "random" }),
       rng,
     });
     expect(onlyEasy[0]?.difficulty).toBe(1);
@@ -348,5 +355,91 @@ describe("Pool und gesehene Fragen", () => {
     expect(seen.get("q1")).toBe(2);
     expect(seen.get("q4")).toBe(0);
     expect(seen.get("q2")).toBe(1);
+  });
+});
+
+describe("Schwierigkeit je Zug (ADR-055)", () => {
+  const catalog = makeCatalog({ categories: 4, perCategory: 100, topics: 4 });
+  const category = catalog.categories[0]?.id ?? "";
+  const draw = (difficulty: DifficultyRule, count: number, seed: string | number, pool = catalog.pool) =>
+    drawQuestions({
+      categoryId: category,
+      count,
+      pool,
+      seen: new Map(),
+      usedQuestionIds: [],
+      difficultyMix: DEFAULT_DIFFICULTY_MIX,
+      difficulty,
+      rng: createSeededRng(seed),
+    }).map((entry) => entry.difficulty);
+
+  it("pro Frage aufsteigend: gleichmäßig über den Bereich, nur Stufen darin", () => {
+    expect(draw(rule({ min: 1, max: 3 }), 6, 1)).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(draw(rule(), 3, 2)).toEqual([1, 3, 5]);
+    expect(draw(rule({ min: 2, max: 2 }), 4, 3)).toEqual([2, 2, 2, 2]);
+  });
+
+  it("pro Frage zufällig: nur Stufen im Bereich, Reihenfolge nicht sortiert", () => {
+    let unsorted = 0;
+    for (let seed = 0; seed < 60; seed++) {
+      const levels = draw(rule({ min: 2, max: 4, order: "random" }), 4, seed);
+      expect(levels.every((level) => level >= 2 && level <= 4)).toBe(true);
+      if (levels.some((level, index) => index > 0 && level < (levels[index - 1] ?? 0))) unsorted++;
+    }
+    expect(unsorted).toBeGreaterThan(10);
+  });
+
+  it("pro Kategorie aufsteigend: alle Fragen eines Zuges eine Stufe, von Zug zu Zug schwerer", () => {
+    const perTurn = [1, 2, 3, 4, 5, 6].map((turnNumber) => {
+      const levels = draw(rule({ min: 1, max: 3, basis: "category", turnNumber, turns: 6 }), 3, turnNumber);
+      expect(new Set(levels).size).toBe(1);
+      return levels[0];
+    });
+    expect(perTurn).toEqual([1, 1, 2, 2, 3, 3]);
+  });
+
+  it("pro Kategorie zufällig: je Zug eine Stufe aus dem Bereich, über viele Züge verschiedene", () => {
+    const seenLevels = new Set<number>();
+    for (let seed = 0; seed < 40; seed++) {
+      const levels = draw(rule({ min: 3, max: 5, basis: "category", order: "random" }), 3, seed);
+      expect(new Set(levels).size).toBe(1);
+      seenLevels.add(levels[0] ?? 0);
+    }
+    expect([...seenLevels].sort()).toEqual([3, 4, 5]);
+  });
+
+  it("fehlt eine Stufe, kommt die nächstgelegene; außerhalb des Bereichs nie", () => {
+    const withoutHardest = new Map(
+      [...catalog.pool].map(([id, questions]) => [id, questions.filter((question) => question.difficulty !== 5)]),
+    );
+    expect(draw(rule(), 3, 4, withoutHardest)).toEqual([1, 3, 4]);
+    expect(draw(rule({ min: 5, max: 5 }), 3, 5, withoutHardest)).toEqual([]);
+  });
+
+  it("Angebot zählt nur Fragen im Bereich: ohne Fragen darin keine Option", () => {
+    const wide = makeCatalog({ categories: 6, perCategory: 50, topics: 4 });
+    const [first, second] = wide.categories;
+    const pool = new Map(wide.pool);
+    // Kategorie 1 hat nur noch leichte Fragen.
+    pool.set(
+      first?.id ?? "",
+      (catalog.pool.get(first?.id ?? "") ?? []).filter((question) => question.difficulty === 1),
+    );
+    for (let seed = 0; seed < 20; seed++) {
+      const offer = offerCategories({
+        categories: wide.categories,
+        pool,
+        seen: new Map(),
+        turn: {
+          questionsPerTurn: 3,
+          playedCategoryIds: [second?.id ?? ""],
+          usedQuestionIds: [],
+          difficulty: { min: 4, max: 5 },
+        },
+        rng: createSeededRng(seed),
+      });
+      expect(offer).toHaveLength(3);
+      expect(offer?.map((option) => option.id)).not.toContain(first?.id);
+    }
   });
 });
