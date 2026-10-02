@@ -4,6 +4,7 @@
  * Operation im Treiber weiterläuft und eine Pool-Verbindung bis `SOCKET_TIMEOUT_MS` (30 s) belegt.
  * Geprüft über Fake-Collections, die die übergebenen Optionen mitschreiben.
  */
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import type { GuestDoc, LobbyDoc, QuestionDoc } from "@quizmaster/shared/documents";
 import type { Collection } from "mongodb";
 import { describe, expect, it } from "vitest";
@@ -62,7 +63,7 @@ function lobbyDoc(): LobbyDoc {
     active: true,
     phase: "lobby",
     rev: 1,
-    settings: { rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
     createdByGuestId: GUEST_ID,
     hostPlayerId: "p1",
     players: [

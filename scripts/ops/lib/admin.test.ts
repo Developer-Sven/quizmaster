@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { appConfigPatchSchema } from "@quizmaster/db";
 import { createTestDatabase, type TestDatabase } from "@quizmaster/db/testing";
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import { defaultAppConfig } from "@quizmaster/shared/documents";
 import { ipKey } from "@quizmaster/shared/ip";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -239,7 +240,7 @@ describe("Gast finden (Lobby-Snapshot, Meldung) – Test-DB", () => {
       active,
       phase: "lobby" as const,
       rev: 1,
-      settings: { rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
+      settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
       createdByGuestId: host,
       hostPlayerId: "p0",
       players,
@@ -338,7 +339,7 @@ describe("admin:game purge – handgebaute Spiele (Test-DB)", () => {
     startedAt: now,
     endedAt: now,
     expiresAt: new Date(now.getTime() + 86_400_000),
-    settings: { rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
     outcome: "win" as const,
     players: [
       ...humans.map(([playerId, guestId], index) => ({
@@ -417,7 +418,7 @@ describe("admin:game purge – handgebaute Spiele (Test-DB)", () => {
       active,
       phase: "game_over" as const,
       rev: 9,
-      settings: { rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
+      settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
       createdByGuestId: a,
       hostPlayerId: "pa",
       players: [],

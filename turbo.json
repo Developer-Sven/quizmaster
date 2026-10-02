@@ -46,6 +46,7 @@
       "outputs": [".next/**", "!.next/cache/**", "dist/**", "public/sw.js", "public/flags/**"]
     },
     "typecheck": {
+      "dependsOn": ["^typecheck"],
       "outputs": []
     },
     "dev": {

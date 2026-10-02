@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import type { GameDoc, LobbyDoc } from "@quizmaster/shared/documents";
 import { ClientSession, MongoOperationTimeoutError } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -64,7 +65,7 @@ function game(id: string): GameDoc {
     startedAt,
     endedAt,
     expiresAt: gameExpiresAt(endedAt),
-    settings: { rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
     outcome: "win",
     players: [
       { playerId: "p1", guestId: mia, name: "Mia", color: "blue", isBot: false, place: 1, score: 2, status: "active" },
@@ -107,7 +108,7 @@ function lobby(rev: number): LobbyDoc {
     active: true,
     phase: "game_over",
     rev,
-    settings: { rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 1, questionsPerCategory: 2, maxPlayers: 8 },
     createdByGuestId: mia,
     hostPlayerId: "p1",
     players: players(),

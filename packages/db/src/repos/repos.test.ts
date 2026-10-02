@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import type { LobbyDoc } from "@quizmaster/shared/documents";
 import { RECENT_QUESTION_IDS_MAX } from "@quizmaster/shared/documents";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -28,7 +29,7 @@ function lobby(overrides: Partial<LobbyDoc> = {}): LobbyDoc {
     active: true,
     phase: "lobby",
     rev: 1,
-    settings: { rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
+    settings: { ...DEFAULT_LOBBY_SETTINGS, rounds: 3, questionsPerCategory: 3, maxPlayers: 8 },
     createdByGuestId: guestId,
     hostPlayerId: "p1",
     players: [
