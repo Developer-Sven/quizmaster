@@ -327,6 +327,24 @@ export const de = {
 
   pwa: {
     install: "Als App installieren",
+    /** Anleitung, wo der Browser nicht selbst installiert (ADR-054) */
+    installTitle: "App installieren",
+    installAfter: "Danach startest du quizmaster vom Startbildschirm – wie jede App, ohne Adressleiste.",
+    installSteps: {
+      iosShareSafari: "Tippe auf „Teilen“ – unten in der Leiste, im neuen Safari erst auf „…“.",
+      iosShareChrome: "Tippe oben in der Adresszeile auf „Teilen“.",
+      iosShareFirefox: "Öffne das Menü und tippe auf „Teilen“.",
+      iosShareOther: "Tippe auf „Teilen“ – in der Adresszeile oder im Menü des Browsers.",
+      iosAdd: "Wähle „Zum Home-Bildschirm“ – eventuell weiter unten in der Liste.",
+      iosConfirm: "Tippe oben rechts auf „Hinzufügen“.",
+      androidMenu: "Öffne das Menü des Browsers (⋮ oben rechts).",
+      androidMenuFirefox: "Öffne das Menü des Browsers (⋮).",
+      androidMenuSamsung: "Öffne das Menü des Browsers (≡ unten rechts).",
+      androidAdd: "Tippe auf „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
+      androidAddFirefox: "Tippe auf „Installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
+      androidAddSamsung: "Tippe auf „Seite hinzufügen zu“ und dann auf „Startbildschirm“.",
+      androidConfirm: "Bestätige mit „Installieren“ bzw. „Hinzufügen“.",
+    },
     updateAvailable: "Neue Version verfügbar",
     update: "Aktualisieren",
     offline: "Du bist offline.",

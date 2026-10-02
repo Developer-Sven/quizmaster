@@ -69,6 +69,8 @@ describe("Web-App-Manifest (docs/10)", () => {
           label: "Frage mit Timer",
         },
       ],
+      // Android erkennt so eine schon installierte App (ADR-054).
+      related_applications: [{ platform: "webapp", url: "/manifest.webmanifest" }],
       shortcuts: [
         { name: "Lobby erstellen", url: "/?action=create" },
         { name: "Lobby beitreten", url: "/?action=join" },

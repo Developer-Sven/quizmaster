@@ -133,3 +133,24 @@ test("Regeln in der Lobby: Sheet statt Seitenwechsel, die Lobby bleibt verbunden
   await expect(guest.page.getByTestId("lobby-screen")).toBeVisible();
   await expect(host.page.getByTestId("lobby-players").getByText("Ben", { exact: true })).toBeVisible();
 });
+
+test("Startseite am Handy: „Als App installieren“ ist immer da, auf dem iPhone mit Anleitung (ADR-054)", async ({
+  players,
+}, testInfo) => {
+  const mia = await players.create("Mia");
+  await mia.openStart();
+  const row = mia.page.getByTestId("install-row");
+  await expect(row).toBeVisible();
+  const method = await row.getAttribute("data-method");
+  // iPhone (jeder Browser): Installieren nur über „Teilen“ → Anleitung; Android: Dialog oder Menü-Anleitung.
+  if (testInfo.project.name.startsWith("iphone")) expect(method).toBe("ios");
+  else expect(["prompt", "android"]).toContain(method);
+  if (method === "prompt") return;
+  await mia.page.getByTestId("install-app").click();
+  const sheet = mia.page.getByRole("dialog", { name: "App installieren" });
+  const steps = sheet.getByTestId("install-steps").getByRole("listitem");
+  await expect(steps).toHaveCount(3);
+  await expect(steps.first()).toContainText(method === "ios" ? "„Teilen“" : "Menü");
+  await sheet.getByTestId("install-sheet-close").click();
+  await expect(sheet).toBeHidden();
+});

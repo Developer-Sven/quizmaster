@@ -43,6 +43,9 @@ export default function manifest(): MetadataRoute.Manifest {
         label: de.pwa.manifest.screenshotQuestion,
       },
     ],
+    // Android/Chrome: Die Seite erkennt eine schon installierte App (`navigator.getInstalledRelatedApps`) und bietet
+    // dann kein Installieren an (ADR-054). Die URL wird gegen die Manifest-Adresse aufgelöst.
+    related_applications: [{ platform: "webapp", url: "/manifest.webmanifest" }],
     shortcuts: [
       { name: de.pwa.manifest.shortcutCreate, url: "/?action=create" },
       { name: de.pwa.manifest.shortcutJoin, url: "/?action=join" },

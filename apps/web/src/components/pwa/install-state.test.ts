@@ -1,8 +1,11 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installSteps } from "./install-guide";
 import { InstallRow } from "./install-row";
 import {
+  detectInstallBrowser,
+  detectInstallPlatform,
   EARLY_INSTALL_CAPTURE_SCRIPT,
   type InstallFacts,
   installMethod,
@@ -16,12 +19,27 @@ import {
 const UA = {
   androidChrome:
     "Mozilla/5.0 (Linux; Android 15; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+  androidFirefox: "Mozilla/5.0 (Android 15; Mobile; rv:142.0) Gecko/142.0 Firefox/142.0",
+  androidSamsung:
+    "Mozilla/5.0 (Linux; Android 15; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/28.0 Chrome/130.0.0.0 Mobile Safari/537.36",
+  iphoneSafari:
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+  iphoneChrome:
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0.7339.122 Mobile/15E148 Safari/604.1",
+  iphoneFirefox:
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/142.0 Mobile/15E148 Safari/605.1.15",
+  macSafari:
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+  desktopChrome:
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
 } as const;
 
 const facts = (overrides: Partial<InstallFacts> = {}): InstallFacts => ({
   standalone: false,
   installed: false,
   canPrompt: false,
+  platform: "other",
+  relatedInstalled: false,
   ...overrides,
 });
 
@@ -37,7 +55,51 @@ describe("installMethod (ADR-040)", () => {
   });
 });
 
+describe("installMethod auf dem Handy (ADR-054)", () => {
+  it("jedes Handy bekommt die Zeile: direkt, wo möglich – sonst die Anleitung für diesen Browser", () => {
+    expect(installMethod(facts({ platform: "ios" }))).toBe("ios");
+    expect(installMethod(facts({ platform: "android" }))).toBe("android");
+    expect(installMethod(facts({ platform: "android", canPrompt: true }))).toBe("prompt");
+    // Desktop ohne Installationsdialog: keine Zeile.
+    expect(installMethod(facts({ platform: "other" }))).toBeNull();
+  });
+
+  it("keine Zeile, wenn die App schon installiert ist oder als App läuft", () => {
+    expect(installMethod(facts({ platform: "android", relatedInstalled: true }))).toBeNull();
+    expect(installMethod(facts({ platform: "ios", standalone: true }))).toBeNull();
+    expect(installMethod(facts({ platform: "ios", installed: true }))).toBeNull();
+  });
+
+  it("Anleitung je Browser: Teilen auf iPhone/iPad, Menü auf Android", () => {
+    const texts = (method: "ios" | "android", browser: Parameters<typeof installSteps>[1]) =>
+      installSteps(method, browser).map((step) => step.text);
+    expect(texts("ios", "safari")[0]).toContain("„Teilen“");
+    expect(texts("ios", "chrome")[0]).toContain("Adresszeile");
+    expect(texts("ios", "firefox")[0]).toContain("Menü");
+    expect(texts("ios", "safari")).toContain("Wähle „Zum Home-Bildschirm“ – eventuell weiter unten in der Liste.");
+    expect(texts("android", "chrome")[0]).toContain("Menü");
+    expect(texts("android", "firefox")[1]).toContain("Installieren");
+    expect(installSteps("ios", "safari").map((step) => step.icon)).toEqual(["share", "add", null]);
+    expect(installSteps("android", "chrome").map((step) => step.icon)).toEqual(["menu", "add", null]);
+  });
+});
+
 describe("Plattform-Erkennung", () => {
+  it("erkennt iPhone/iPad (auch iPadOS mit Mac-Kennung und Touch), Android und den Browser", () => {
+    expect(detectInstallPlatform(UA.iphoneSafari, 5)).toBe("ios");
+    expect(detectInstallPlatform(UA.iphoneChrome, 5)).toBe("ios");
+    expect(detectInstallPlatform(UA.macSafari, 5)).toBe("ios");
+    expect(detectInstallPlatform(UA.macSafari, 0)).toBe("other");
+    expect(detectInstallPlatform(UA.androidFirefox, 5)).toBe("android");
+    expect(detectInstallPlatform(UA.desktopChrome, 0)).toBe("other");
+    expect(detectInstallBrowser(UA.iphoneSafari)).toBe("safari");
+    expect(detectInstallBrowser(UA.iphoneChrome)).toBe("chrome");
+    expect(detectInstallBrowser(UA.iphoneFirefox)).toBe("firefox");
+    expect(detectInstallBrowser(UA.androidChrome)).toBe("chrome");
+    expect(detectInstallBrowser(UA.androidFirefox)).toBe("firefox");
+    expect(detectInstallBrowser(UA.androidSamsung)).toBe("samsung");
+  });
+
   it("erkennt den Standalone-Modus über Display-Mode oder navigator.standalone (iOS)", () => {
     const none = () => false;
     expect(isStandaloneDisplay(none, undefined)).toBe(false);
@@ -97,6 +159,22 @@ describe("Install-Zustand im Browser", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     resetInstallStateForTests();
+  });
+
+  it("erkennt Plattform und Browser beim Start (ADR-054)", () => {
+    vi.stubGlobal("window", new FakeWindow(UA.iphoneFirefox, 5));
+    const stop = startInstallCapture(window as unknown as FakeWindow);
+    expect(installStateForTests()).toMatchObject({ ready: true, platform: "ios", browser: "firefox" });
+    stop();
+  });
+
+  it("Android: schon installierte App (getInstalledRelatedApps) blendet die Zeile aus (ADR-054)", async () => {
+    const installedApp = new FakeWindow(UA.androidChrome, 5);
+    Object.assign(installedApp.navigator, { getInstalledRelatedApps: async () => [{ platform: "webapp" }] });
+    vi.stubGlobal("window", installedApp);
+    const stop = startInstallCapture(installedApp);
+    await vi.waitFor(() => expect(installStateForTests().relatedInstalled).toBe(true));
+    stop();
   });
 
   it("übernimmt ein schon vor der Hydration abgefangenes Event (Inline-Skript im Root-Layout)", async () => {

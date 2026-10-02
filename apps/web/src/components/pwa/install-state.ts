@@ -1,8 +1,10 @@
 /**
- * Installieren (docs/10, ADR-040): Die Zeile „App installieren“ gibt es nur, wo der Browser direkt installieren
- * kann – Chromium (Android, Desktop) liefert dafür `beforeinstallprompt`, ein Tipp öffnet sofort den
- * Installationsdialog. Safari auf iPhone/iPad erlaubt Webseiten kein Installieren (nur „Teilen“ → „Zum
- * Home-Bildschirm“), dort erscheint keine Zeile. Schon installiert (Standalone) → keine Zeile.
+ * Installieren (docs/10, ADR-040, ADR-054): Die Zeile „App installieren“ steht auf jedem Handy, solange die App nicht
+ * installiert ist. Wo der Browser selbst installieren kann – Chromium (Android, Desktop) liefert dafür
+ * `beforeinstallprompt` –, öffnet ein Tipp sofort den Installationsdialog („prompt“). iPhone/iPad erlauben Webseiten
+ * in keinem Browser das Installieren (nur „Teilen“ → „Zum Home-Bildschirm“) → Anleitung („ios“); Android ohne Dialog
+ * (Firefox, Chrome vor dem Event) → Anleitung über das Browser-Menü („android“). Am Desktop nur mit Dialog. Schon
+ * installiert (Standalone bzw. auf Android über `getInstalledRelatedApps` erkannt) → keine Zeile.
  *
  * Das Event kommt einmal je Seitenaufruf und oft vor der Hydration: Ein kleines Inline-Skript im Root-Layout
  * ({@link EARLY_INSTALL_CAPTURE_SCRIPT}) fängt es sofort ab und legt es auf `window.__qmInstallPrompt`;
@@ -10,7 +12,9 @@
  */
 import { useSyncExternalStore } from "react";
 
-export type InstallMethod = "prompt";
+export type InstallMethod = "prompt" | "ios" | "android";
+export type InstallPlatform = "ios" | "android" | "other";
+export type InstallBrowser = "safari" | "chrome" | "firefox" | "edge" | "samsung" | "other";
 
 export interface InstallFacts {
   /** läuft schon als installierte App (Display-Mode bzw. `navigator.standalone` auf iOS) */
@@ -19,12 +23,36 @@ export interface InstallFacts {
   installed: boolean;
   /** abgefangenes `beforeinstallprompt` liegt bereit (Chromium) */
   canPrompt: boolean;
+  platform: InstallPlatform;
+  /** Android: die App ist schon installiert (`navigator.getInstalledRelatedApps`, Manifest `related_applications`) */
+  relatedInstalled: boolean;
 }
 
-/** Zeile anbieten, wenn der Browser direkt installieren kann und die App noch nicht installiert ist. */
+/** Wie installiert wird – `null`: keine Zeile (installiert bzw. Desktop ohne Installationsdialog). */
 export function installMethod(facts: InstallFacts): InstallMethod | null {
   if (facts.standalone || facts.installed) return null;
-  return facts.canPrompt ? "prompt" : null;
+  if (facts.canPrompt) return "prompt";
+  if (facts.platform === "ios") return "ios";
+  if (facts.platform === "android" && !facts.relatedInstalled) return "android";
+  return null;
+}
+
+/** iPhone/iPad (iPadOS meldet sich als Mac – mit Touch), Android oder anderes. */
+export function detectInstallPlatform(userAgent: string, maxTouchPoints: number): InstallPlatform {
+  if (/iPhone|iPad|iPod/.test(userAgent)) return "ios";
+  if (/Macintosh/.test(userAgent) && maxTouchPoints > 1) return "ios";
+  if (/Android/.test(userAgent)) return "android";
+  return "other";
+}
+
+/** Browser für die passende Anleitung (auf iOS kennzeichnen sich Chrome, Firefox und Edge eigens). */
+export function detectInstallBrowser(userAgent: string): InstallBrowser {
+  if (/SamsungBrowser\//.test(userAgent)) return "samsung";
+  if (/EdgiOS\/|EdgA\/|Edg\//.test(userAgent)) return "edge";
+  if (/FxiOS\/|Firefox\//.test(userAgent)) return "firefox";
+  if (/CriOS\/|Chrome\//.test(userAgent)) return "chrome";
+  if (/Safari\//.test(userAgent)) return "safari";
+  return "other";
 }
 
 export { EARLY_INSTALL_CAPTURE_SCRIPT } from "./early-install-capture";
@@ -57,6 +85,7 @@ function errorName(error: unknown): string {
 interface InstallState extends InstallFacts {
   /** Umgebung im Browser ausgewertet (auf dem Server und vor der Hydration: nein → nichts anbieten) */
   ready: boolean;
+  browser: InstallBrowser;
 }
 
 const INITIAL_STATE: InstallState = Object.freeze({
@@ -64,6 +93,9 @@ const INITIAL_STATE: InstallState = Object.freeze({
   standalone: false,
   installed: false,
   canPrompt: false,
+  platform: "other",
+  relatedInstalled: false,
+  browser: "other",
 });
 
 let state: InstallState = INITIAL_STATE;
@@ -82,10 +114,29 @@ function standaloneNow(): boolean {
   return isStandaloneDisplay((query) => window.matchMedia(query).matches, standalone);
 }
 
+/**
+ * Android: Ist die App schon installiert, bietet die Seite kein Installieren an (ADR-054).
+ * `navigator.getInstalledRelatedApps` gibt es nur in Chromium (nicht in den DOM-Typen).
+ */
+async function detectRelatedInstalled(): Promise<void> {
+  const { navigator } = window;
+  if (!("getInstalledRelatedApps" in navigator) || typeof navigator.getInstalledRelatedApps !== "function") return;
+  try {
+    const apps: unknown = await navigator.getInstalledRelatedApps();
+    if (Array.isArray(apps) && apps.length > 0) update({ relatedInstalled: true });
+  } catch (error) {
+    // Ohne Antwort bleibt die Zeile (Anleitung) – Installieren ist dann höchstens überflüssig, nie kaputt.
+    console.warn("Installierte App nicht prüfbar:", errorName(error));
+  }
+}
+
 /** Wertet die Browser-Umgebung einmal aus (idempotent, nur im Browser). */
 function ensureEnvironment(): void {
   if (state.ready || typeof window === "undefined") return;
-  update({ ready: true, standalone: standaloneNow() });
+  const { userAgent, maxTouchPoints } = window.navigator;
+  const platform = detectInstallPlatform(userAgent, maxTouchPoints);
+  update({ ready: true, standalone: standaloneNow(), platform, browser: detectInstallBrowser(userAgent) });
+  if (platform === "android") void detectRelatedInstalled();
 }
 
 function subscribe(listener: () => void): () => void {
@@ -104,9 +155,11 @@ function getServerSnapshot(): InstallState {
   return INITIAL_STATE;
 }
 
-/** Aktuelle Installationshilfe für die Zeile auf der Startseite (`null` = Zeile ausblenden). */
-export function useInstallMethod(): InstallMethod | null {
-  return installMethod(useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot));
+/** Installationsweg und Browser für die Zeile auf der Startseite (`null` = Zeile ausblenden). */
+export function useInstallOffer(): { method: InstallMethod; browser: InstallBrowser } | null {
+  const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const method = installMethod(current);
+  return method === null ? null : { method, browser: current.browser };
 }
 
 /** Die Teile von `window`, an denen die Installation beobachtet wird (Tests nutzen eine Attrappe). */
@@ -193,6 +246,6 @@ export function resetInstallStateForTests(): void {
 }
 
 /** Nur für Tests: aktueller Zustand. */
-export function installStateForTests(): InstallFacts & { ready: boolean } {
+export function installStateForTests(): InstallState {
   return state;
 }
