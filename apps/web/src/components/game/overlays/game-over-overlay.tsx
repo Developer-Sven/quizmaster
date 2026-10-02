@@ -54,6 +54,8 @@ export interface GameOverOverlayProps {
   selfId: string | null;
   /** Serverzeit des Phasenbeginns – Anker der Choreografie */
   phaseStartedAt: number;
+  /** „Regeln“ als Sheet (ADR-052) – nie ein Seitenwechsel, die Lobby folgt gleich */
+  onShowRules: () => void;
   /** Vorschau: Tafel anfangs aufgeklappt */
   defaultBoardOpen?: boolean;
 }
@@ -62,8 +64,8 @@ export interface GameOverOverlayProps {
  * Spielende (Phase `game_over`, docs/09 §6 + §7.9): 0–480 ms Scrim, die Ergebnis-Headline blendet ein
  * (0,96 → 1). 2 Personen: „7 : 5“, beide Avatare 88 px fahren von außen ein, die Krone poppt danach über der
  * Sieger:in (0 → 1,15 → 1, 320 ms). 3–8: Podest-Säulen wachsen gestaffelt (Platz 3 → 2 → 1, je 160 ms), dann
- * erscheint die Rangliste. Darunter die Tafel, eingeklappt („Spielverlauf“), und der Link „Regeln“ (neuer Tab –
- * im laufenden Spiel gibt es ihn nicht). Kein Konfetti, kein Lichteffekt.
+ * erscheint die Rangliste. Darunter die Tafel, eingeklappt („Spielverlauf“), und „Regeln“ (als Sheet, ADR-052 –
+ * im laufenden Spiel gibt es sie nicht). Kein Konfetti, kein Lichteffekt.
  * Ton `win`/`lose`/`turn` als Cue der Bühne. Wer später einsteigt, sieht den Endzustand ohne Wiederholung.
  *
  * Die Headline ist die Überschrift des Ergebnisses und übernimmt beim Erscheinen den Fokus, wenn er frei ist –
@@ -78,6 +80,7 @@ export function GameOverOverlay({
   questionsPerTurn,
   selfId,
   phaseStartedAt,
+  onShowRules,
   defaultBoardOpen = false,
 }: GameOverOverlayProps) {
   const reduce = useReducedMotion() ?? false;
@@ -192,8 +195,8 @@ export function GameOverOverlay({
           </div>
         ) : null}
 
-        {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach der Frist entfernt (keine Revanche mehr). */}
-        <AppFooter newTab />
+        {/* Sheet statt Seite: Wer die Lobby-Seite verlässt, wird nach der Frist entfernt (ADR-052). */}
+        <AppFooter onShowRules={onShowRules} />
       </div>
     </OverlayFrame>
   );

@@ -353,7 +353,6 @@ export const de = {
       "Wer das Spiel verlässt oder zu lange getrennt ist, gilt als aufgegeben und landet hinter allen, die zu Ende spielen.",
     ] as const,
     /** Nur für Screenreader, hinter „Regeln“: Der Link öffnet einen neuen Tab (Lobby, Spielende) */
-    opensNewTab: "(öffnet in neuem Tab)",
   },
 
   /** Texte nur für Screenreader und Bedienhilfen */

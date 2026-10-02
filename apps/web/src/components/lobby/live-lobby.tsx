@@ -136,6 +136,7 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
       categories={categories}
       onCopyCode={() => void actions.copyCode(code)}
       onShare={() => void actions.shareInvite(displayCode, inviteUrl || inviteLink(window.location.origin, code))}
+      onShowRules={gameActions.openRules}
       onAddBot={() => void addBot()}
     />
   );

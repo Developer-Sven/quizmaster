@@ -13,17 +13,22 @@ describe("Link „Regeln“ (docs/09 §6)", () => {
     expect(html).not.toContain("target=");
   });
 
-  it("öffnet in Lobby und Spielende einen neuen Tab – mit noopener und Hinweis für Screenreader", () => {
-    const html = renderHtml(RulesLink, { newTab: true });
-    expect(html).toContain('target="_blank"');
-    expect(html).toContain('rel="noopener noreferrer"');
-    expect(html).toContain('Regeln<span class="sr-only"> (öffnet in neuem Tab)</span></a>');
+  it("öffnet in Lobby und Spielende das Regeln-Sheet statt einer Seite – kein Link, kein neuer Tab (ADR-052)", () => {
+    const html = renderHtml(RulesLink, { onOpen: () => undefined });
+    expect(html).toMatch(
+      /^<button type="button" aria-haspopup="dialog" data-testid="rules-link" class="[^"]*">Regeln<\/button>$/,
+    );
+    expect(html).toContain("text-caption text-text-3 underline");
+    expect(html).toContain("min-h-12 min-w-12");
+    expect(html).not.toMatch(/href=|target=/);
   });
 
   it("steht in einer Fußzeile – Safe-Area-Abstand nur als unterster Block einer Seite", () => {
     expect(renderHtml(AppFooter, {})).toMatch(/^<footer class="flex justify-center"><a href="\/regeln"/);
     expect(renderHtml(AppFooter, { safeArea: true })).toMatch(/^<footer class="flex justify-center pb-safe">/);
-    expect(renderHtml(AppFooter, { newTab: true })).toContain('target="_blank"');
+    expect(renderHtml(AppFooter, { onShowRules: () => undefined })).toMatch(
+      /^<footer class="flex justify-center"><button type="button" aria-haspopup="dialog"/,
+    );
   });
 
   it("bietet weder Impressum noch Datenschutz an (ADR-030)", () => {

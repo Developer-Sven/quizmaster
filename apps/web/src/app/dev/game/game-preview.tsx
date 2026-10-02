@@ -87,6 +87,7 @@ function PreviewLobby({ scene }: { scene: Extract<PreviewScene, { kind: "lobby" 
       onChangeSettings={noop}
       onCopyCode={noop}
       onShare={noop}
+      onShowRules={noop}
       onAddBot={noop}
       defaultSettingsOpen={scene.settingsOpen}
       defaultQrOpen={scene.qrOpen}
@@ -124,6 +125,7 @@ function PreviewGame({ scene }: { scene: Extract<PreviewScene, { kind: "game" }>
           onLeave: noop,
           onContinue: noop,
           onEndGame: noop,
+          onShowRules: noop,
         }}
       />
       <ReviewSheet

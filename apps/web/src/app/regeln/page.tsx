@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AppHeader, HeaderTitle } from "../../components/app/app-header";
 import { AppShell } from "../../components/app/app-shell";
+import { RulesList } from "../../components/app/rules-list";
 import { ButtonLink } from "../../components/ui/button";
 import { de } from "../../i18n/de";
 
@@ -25,11 +26,7 @@ export default function RulesPage() {
         </ButtonLink>
       }
     >
-      <ol data-testid="rules-list" className="list-decimal space-y-4 pl-6 text-body text-text marker:text-text-2">
-        {de.rules.points.map((point) => (
-          <li key={point}>{point}</li>
-        ))}
-      </ol>
+      <RulesList />
     </AppShell>
   );
 }

@@ -139,6 +139,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
         onLeave: () => void leave("leave"),
         onContinue: (phase) => void continueGame(phase),
         onEndGame: () => void endGame(),
+        onShowRules: gameActions.openRules,
       }}
     />
   );

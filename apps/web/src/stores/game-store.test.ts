@@ -8,6 +8,7 @@ import {
   selectConnectionOverlayVisible,
   selectCurrentToast,
   selectPhase,
+  selectRulesOpen,
   useGameStore,
 } from "./game-store";
 
@@ -263,6 +264,23 @@ describe("Hinweise und Kategorien", () => {
     expect(state().toasts.filter((toast) => toast.text === "Code kopiert.")).toHaveLength(1);
     gameActions.applyNotice("SERVER_RESTART");
     expect(state().toasts.at(-1)?.text).toBe("Neustart – gleich geht es weiter.");
+  });
+
+  it("Regeln-Sheet (ADR-052): bleibt vom Spielende in die Lobby offen, schließt beim Spielstart und beim Verlassen", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "game_over", phaseEndsAt: 7_000 }));
+    gameActions.openRules();
+    expect(selectRulesOpen(state())).toBe(true);
+    gameActions.applyPublicState(testLobby({ rev: 2, phase: "lobby", phaseEndsAt: null }));
+    expect(selectRulesOpen(state())).toBe(true);
+    gameActions.applyPublicState(testLobby({ rev: 3, phase: "intro", phaseEndsAt: 9_000 }));
+    expect(selectRulesOpen(state())).toBe(false);
+    gameActions.applyPublicState(testLobby({ rev: 4, phase: "lobby", phaseEndsAt: null }));
+    gameActions.openRules();
+    gameActions.closeRules();
+    expect(selectRulesOpen(state())).toBe(false);
+    gameActions.openRules();
+    gameActions.exitLobby({ kind: "kicked", reason: "host" });
+    expect(selectRulesOpen(state())).toBe(false);
   });
 
   it("Host beendet das Spiel (ADR-051): Hinweis für alle anderen, nicht für den Host selbst", () => {

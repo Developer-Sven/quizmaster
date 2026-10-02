@@ -166,6 +166,7 @@ describe("Spielende: Ergebnis als Überschrift, Duell-Stand mit Namen (1.3.1, 2.
     questionsPerTurn: 3,
     selfId: "p1",
     phaseStartedAt: NOW - 3_000,
+    onShowRules: () => undefined,
   });
 
   it("zeigt die Ergebnis-Headline als Überschrift, die den Fokus übernehmen kann", () => {
@@ -175,6 +176,11 @@ describe("Spielende: Ergebnis als Überschrift, Duell-Stand mit Namen (1.3.1, 2.
 
   it("sagt den Duell-Stand mit Namen an", () => {
     expect(html).toContain("Mia: 7 Punkte, Ben: 5 Punkte");
+  });
+
+  it("öffnet die Regeln als Sheet – nie per Seitenwechsel oder neuem Tab (ADR-052)", () => {
+    expect(html).toMatch(/<button type="button" aria-haspopup="dialog" data-testid="rules-link"/);
+    expect(html).not.toContain('href="/regeln"');
   });
 });
 

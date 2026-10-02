@@ -19,6 +19,7 @@ import { create } from "zustand";
 import { de } from "../i18n/de";
 import {
   type CategoryCatalog,
+  isRunningPhase,
   lobbyNotices,
   lobbyRosterChanges,
   mergeCategories,
@@ -110,6 +111,11 @@ export interface GameStoreState {
   updateRequired: boolean;
   /** Letztes Spielende dieser Lobby für die Karte „Letztes Spiel“ (ADR-038) */
   lastGame: LastGameSnapshot | null;
+  /**
+   * Regeln-Sheet offen (Lobby und Spielende, ADR-052) – liegt hier statt in der Ansicht, damit es den Wechsel
+   * Spielende → Lobby übersteht; schließt beim Spielstart und beim Verlassen der Lobby.
+   */
+  rulesOpen: boolean;
 }
 
 const INITIAL_CONNECTION: ConnectionState = {
@@ -143,6 +149,7 @@ function initialState(): GameStoreState {
     maintenance: false,
     updateRequired: false,
     lastGame: null,
+    rulesOpen: false,
   };
 }
 
@@ -165,6 +172,7 @@ function lobbyReset(): Partial<GameStoreState> {
     toasts: [],
     announcement: null,
     lastGame: null,
+    rulesOpen: false,
   };
 }
 
@@ -258,6 +266,7 @@ export const gameActions = {
       pendingPick,
       categories: next.turn ? mergeCategories(state.categories, next.turn.options) : state.categories,
       timingMode: inferTimingMode(next) ?? state.timingMode,
+      rulesOpen: state.rulesOpen && !isRunningPhase(next.phase),
     });
     return true;
   },
@@ -313,7 +322,17 @@ export const gameActions = {
       pendingPick: null,
       toasts: [],
       announcement: null,
+      rulesOpen: false,
     });
+  },
+
+  /** Regeln-Sheet öffnen (Lobby, Spielende – ADR-052). */
+  openRules(): void {
+    useGameStore.setState({ rulesOpen: true });
+  },
+
+  closeRules(): void {
+    useGameStore.setState({ rulesOpen: false });
   },
 
   /** Vor `lobby:resume`: der nächste Zustand gilt unabhängig von `rev`. */
@@ -466,6 +485,7 @@ export const selectPendingAnswer = (state: GameStoreState) => state.pendingAnswe
 export const selectPendingPick = (state: GameStoreState) => state.pendingPick;
 export const selectCurrentToast = (state: GameStoreState) => state.toasts[0] ?? null;
 export const selectAnnouncement = (state: GameStoreState) => state.announcement;
+export const selectRulesOpen = (state: GameStoreState) => state.rulesOpen;
 /** Kam für die aktuelle Lobby schon ein Zustand an? Bleibt nach dem Ende (`exit`) gesetzt, bis die Lobby wechselt. */
 export const selectSawState = (state: GameStoreState) => state.lastRev !== null;
 export const selectMaintenance = (state: GameStoreState) => state.maintenance;

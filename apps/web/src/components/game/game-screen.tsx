@@ -53,6 +53,8 @@ export interface GameHandlers {
   onContinue: (phase: ContinuePhase) => void;
   /** Host: Spiel für alle beenden (ADR-051), nach Bestätigung */
   onEndGame: () => void;
+  /** „Regeln“ am Spielende als Sheet (ADR-052) */
+  onShowRules: () => void;
 }
 
 export interface GameBusy {
@@ -212,6 +214,7 @@ function GameScreenContent({
           questionsPerTurn={lobby.settings.questionsPerCategory}
           selfId={selfId}
           phaseStartedAt={lobby.phaseStartedAt}
+          onShowRules={handlers.onShowRules}
         />
       </div>
       <GameOverActions onLeave={() => setLeaveOpen(true)} inFlow={compact} />

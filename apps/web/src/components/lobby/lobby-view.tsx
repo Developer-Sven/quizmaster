@@ -53,6 +53,8 @@ export interface LobbyViewProps {
   categories?: CategoryCatalog;
   onCopyCode: () => void;
   onShare: () => void;
+  /** „Regeln“ als Sheet (ADR-052) – nie ein Seitenwechsel aus der Lobby */
+  onShowRules: () => void;
   onAddBot?: () => void;
   /** Vorschau: Einstellungen-Sheet anfangs offen */
   defaultSettingsOpen?: boolean;
@@ -65,7 +67,7 @@ const NO_CATEGORIES: CategoryCatalog = {};
 /**
  * Lobby (Phase `lobby`, docs/09 §6): Kopfzeile mit Verlassen (Dialog) und Einstellungen (nur Host),
  * Code + Kopieren/Teilen + QR, Spielerliste, Zusammenfassung „3 Runden · 3 Fragen je Kat.“ /
- * „27 Fragen · ca. 9 Min.“, darunter der Link „Regeln“ (neuer Tab); Aktionsleiste: Host „Spiel starten“ (ab 2
+ * „27 Fragen · ca. 9 Min.“, darunter „Regeln“ (als Sheet, ADR-052); Aktionsleiste: Host „Spiel starten“ (ab 2
  * Verbundenen), sonst „Warte auf Mia …“. Nach einem Spiel unter der Spielerliste die Karte „Letztes Spiel“
  * (ADR-038).
  */
@@ -91,6 +93,7 @@ export function LobbyView({
   categories = NO_CATEGORIES,
   onCopyCode,
   onShare,
+  onShowRules,
   onAddBot,
   defaultSettingsOpen = false,
   defaultQrOpen = false,
@@ -186,8 +189,8 @@ export function LobbyView({
             <p>{formatGameEstimate(rounds, Math.max(playing.length, 1), questionsPerCategory, settings)}</p>
             {extras.length > 0 ? <p data-testid="lobby-summary-extras">{extras.join(" · ")}</p> : null}
           </div>
-          {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach 30 s Trennung entfernt. */}
-          <AppFooter newTab />
+          {/* Sheet statt Seite: Wer die Lobby-Seite verlässt, wird nach 30 s Trennung entfernt (ADR-052). */}
+          <AppFooter onShowRules={onShowRules} />
         </div>
       </AppShell>
       <SettingsSheet

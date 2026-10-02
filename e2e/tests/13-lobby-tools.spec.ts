@@ -1,6 +1,7 @@
 /**
- * Lobby-Werkzeuge (ADR-041–043, ADR-045): Startseite mit drei Wegen, Namen in der Lobby ändern, schnelles
- * Einstellen ohne „Zu viele Versuche“ und „Weiter“ per Host nach Frage, Kategorie und Zwischenstand.
+ * Lobby-Werkzeuge (ADR-041–043, ADR-045, ADR-052): Startseite mit drei Wegen, Namen in der Lobby ändern, schnelles
+ * Einstellen ohne „Zu viele Versuche“, „Weiter“ per Host nach Frage, Kategorie und Zwischenstand und die Regeln
+ * als Sheet, ohne die Lobby zu verlassen.
  */
 
 import { expect, test } from "./support/fixtures.ts";
@@ -112,4 +113,23 @@ test("„Weiter“ per Host: Auflösung und Zwischenstand warten, nur der Host s
   await expect(guest.page.getByTestId("game-continue-waiting")).toHaveText("Warte auf Mia …");
   await host.page.getByTestId("game-continue").click();
   for (const player of all) await waitForOverlay(player, "game-over");
+});
+
+test("Regeln in der Lobby: Sheet statt Seitenwechsel, die Lobby bleibt verbunden (ADR-052)", async ({ players }) => {
+  const host = await players.create("Mia");
+  const guest = await players.create("Ben");
+  const code = await host.createLobby();
+  await guest.joinByCode(code);
+  const lobbyUrl = guest.page.url();
+  await guest.page.getByTestId("rules-link").click();
+  const sheet = guest.page.getByRole("dialog", { name: "Regeln" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByTestId("rules-list").getByRole("listitem").first()).toBeVisible();
+  expect(guest.page.url()).toBe(lobbyUrl);
+  expect(guest.page.context().pages()).toHaveLength(1);
+  await sheet.getByTestId("rules-sheet-close").click();
+  await expect(sheet).toBeHidden();
+  // Noch in der Lobby und verbunden: der Host sieht Ben weiter, Ben die Lobby.
+  await expect(guest.page.getByTestId("lobby-screen")).toBeVisible();
+  await expect(host.page.getByTestId("lobby-players").getByText("Ben", { exact: true })).toBeVisible();
 });

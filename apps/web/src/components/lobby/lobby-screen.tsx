@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { LiveToasts } from "@/components/app/live-toasts";
+import { RulesSheet } from "@/components/app/rules-sheet";
 import { MaintenanceNoticeContext } from "@/components/app/status-banners";
 import { LiveGame } from "@/components/game/live-game";
 import { ConnectionOverlay } from "@/components/game/overlays/connection-overlay";
@@ -20,6 +21,7 @@ import {
   selectCategoriesMissing,
   selectExit,
   selectPhase,
+  selectRulesOpen,
   selectSawState,
   useGameStore,
 } from "@/stores/game-store";
@@ -138,6 +140,7 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
       {content}
       <ConnectionOverlay />
       <LiveToasts />
+      <LiveRulesSheet />
       <LobbyAnnouncer />
       {/* Über dem Verbindungs-Overlay: Turnstile beim Wiederverbinden (nur sichtbar bei Bestätigung/Fehler). */}
       <TurnstileSlot
@@ -148,4 +151,10 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
       />
     </MaintenanceNoticeContext>
   );
+}
+
+/** Regeln-Sheet für Lobby und Spielende (ADR-052): hier eingehängt, damit es den Wechsel Spielende → Lobby übersteht. */
+function LiveRulesSheet() {
+  const open = useGameStore(selectRulesOpen);
+  return <RulesSheet open={open} onClose={gameActions.closeRules} />;
 }
