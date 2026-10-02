@@ -162,6 +162,39 @@ export const de = {
     advanceHintOther: "„Host“: Es geht erst weiter, wenn der Host auf „Auflösen“ bzw. „Weiter“ tippt.",
   },
 
+  /** Vorschläge für die Einstellungen (ADR-053) */
+  suggestions: {
+    /** Abschnitt „Vorschläge“ im Einstellungen-Sheet des Hosts */
+    toggleTitle: "Vorschläge",
+    allow: "Alle dürfen Änderungen vorschlagen",
+    deny: "Nur du änderst die Einstellungen",
+    /** Sheet der anderen, solange Vorschläge erlaubt sind */
+    intro: (host: string) => `Deine Änderungen gehen als Vorschlag an ${host}.`,
+    pendingIntro: (host: string) => `Dein Vorschlag liegt bei ${host}. Neu senden ersetzt ihn.`,
+    send: "Vorschlag senden",
+    replace: "Vorschlag ersetzen",
+    sent: "Vorschlag gesendet.",
+    notPossible: "Vorschlag nicht möglich. Sieh dir den aktuellen Stand an.",
+    /** Eigener offener Vorschlag in der Lobby */
+    waiting: (host: string) => `Dein Vorschlag liegt bei ${host}.`,
+    withdraw: "Zurückziehen",
+    /** Lobby des Hosts: Liste offener Vorschläge */
+    title: "Vorschläge",
+    from: (name: string) => `Von ${name}`,
+    /** Prüfen-Sheet des Hosts */
+    reviewTitle: (name: string) => `Vorschlag von ${name}`,
+    reviewIntro: (name: string) => `Orange ist, was ${name} ändern möchte. Du kannst noch anpassen.`,
+    accept: "Übernehmen",
+    decline: "Ablehnen",
+    accepted: "Vorschlag übernommen.",
+    declined: "Vorschlag abgelehnt.",
+    stale: "Der Vorschlag ist nicht mehr offen.",
+    /** Unter einem geänderten Wert */
+    currently: (value: string) => `Aktuell: ${value}`,
+    hostPlaysValue: "spielt mit",
+    hostPresentsValue: "zeigt nur an",
+  },
+
   game: {
     /** HUD-Fortschritt, z. B. „Runde 2/3 · Zug 3/4“ */
     progress: (round: number, rounds: number, turn: number, turns: number) =>
@@ -331,6 +364,11 @@ export const de = {
     playerResigned: (name: string) => `${name} hat aufgegeben.`,
     serverRestart: "Neustart – gleich geht es weiter.",
     gameEnded: "Der Host hat das Spiel beendet.",
+    /** Vorschläge (ADR-053) */
+    suggestionReceived: (name: string) => `${name} hat einen Vorschlag gemacht.`,
+    suggestionAccepted: (host: string) => `${host} hat deinen Vorschlag übernommen.`,
+    suggestionDeclined: (host: string) => `${host} hat deinen Vorschlag abgelehnt.`,
+    suggestionsOff: "Vorschläge sind jetzt aus.",
   },
 
   pages: {

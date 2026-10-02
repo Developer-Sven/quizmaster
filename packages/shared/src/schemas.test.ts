@@ -122,6 +122,7 @@ function questionState(): PublicLobbyState {
       hostPlays: true,
       categoryIds: null,
       answerSec: 20,
+      allowSuggestions: true,
     },
     players: players.map((player) => ({ ...player })),
     order: ["p1", "p2"],
@@ -145,6 +146,7 @@ function questionState(): PublicLobbyState {
     },
     board: [{ round: 1, pickerId: "p1", categoryId: "rund-um-die-welt", results: { p1: [true], p2: [null] } }],
     results: null,
+    suggestions: [],
   };
 }
 

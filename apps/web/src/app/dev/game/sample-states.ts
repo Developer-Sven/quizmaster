@@ -163,6 +163,7 @@ function base(ctx: PreviewContext, patch: Partial<PublicLobbyState>): PublicLobb
     question: null,
     board: [],
     results: null,
+    suggestions: [],
     ...patch,
   };
 }

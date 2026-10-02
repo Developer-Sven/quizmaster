@@ -18,6 +18,7 @@ import type {
   PlayerStatus,
   PublicLobbyState,
   PublicQuestion,
+  SettingsSuggestion,
 } from "@quizmaster/shared";
 
 /** Arten der Engine-Timer (Effect `scheduleTimer`, Command `TIMEOUT`). */
@@ -218,6 +219,11 @@ export interface LobbyState {
   players: EnginePlayer[];
   /** Gäste, die der Host entfernt hat – dürfen dieser Lobby nicht erneut beitreten. */
   bannedGuestIds: string[];
+  /**
+   * Vorschläge für die Einstellungen (ADR-053): nur in der Lobby, je Person höchstens einer (nie vom Host), nicht
+   * im Snapshot – nach einem Neustart sind sie weg. `normalize` räumt sie nach jedem Command auf.
+   */
+  suggestions: SettingsSuggestion[];
   /** Zuletzt vergebenes Token (Timer, Anfragen, Phasen). */
   seq: number;
   timers: PendingTimer[];

@@ -1,8 +1,10 @@
 "use client";
 
+import type { SettingsChanges } from "@quizmaster/shared";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
+import { de } from "@/i18n/de";
 import { loadCategoryCatalog } from "@/lib/client/categories";
 import { errorText } from "@/lib/client/errors";
 import { inviteLink } from "@/lib/client/paths";
@@ -104,6 +106,44 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
     return errorText(result.code);
   };
 
+  // Vorschläge (ADR-053). INVALID_OPTION heißt hier: Stand hat sich geändert (Vorschläge aus, Vorschlag schon
+  // entschieden oder zurückgezogen, „Personen maximal“ zu klein) – Hinweis und Server-Stand neu holen.
+  const suggest = async (changes: SettingsChanges): Promise<boolean> => {
+    const result = await actions.client().emit("lobby:suggest-settings", changes);
+    if (result.ok) {
+      gameActions.showToast("info", de.suggestions.sent);
+      return true;
+    }
+    if (result.code === "INVALID_OPTION") {
+      gameActions.showToast("error", de.suggestions.notPossible);
+      actions.client().resync();
+    } else actions.fail(result.code);
+    return false;
+  };
+
+  const withdrawSuggestion = async () => {
+    const result = await actions.client().emit("lobby:withdraw-suggestion", {});
+    if (!result.ok) actions.fail(result.code);
+  };
+
+  const decideSuggestion = async (id: string, changes: SettingsChanges | null): Promise<boolean> => {
+    // Offene Tipps des Hosts zuerst – der Vorschlag gilt über seinem neuesten Stand (ADR-042).
+    await settingsSync.flush();
+    const result =
+      changes === null
+        ? await actions.client().emit("lobby:decline-suggestion", { id })
+        : await actions.client().emit("lobby:accept-suggestion", { id, changes });
+    if (result.ok) {
+      gameActions.showToast("info", changes === null ? de.suggestions.declined : de.suggestions.accepted);
+      return true;
+    }
+    if (result.code === "INVALID_OPTION") {
+      gameActions.showToast("error", de.suggestions.stale);
+      actions.client().resync();
+    } else actions.fail(result.code);
+    return false;
+  };
+
   const addBot = async () => {
     const result = await actions.client().emit("dev:add-bot", {});
     if (!result.ok) actions.fail(result.code);
@@ -133,6 +173,10 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
       onSettingsClosed={() => void settingsSync.flush()}
       onRename={rename}
       onTransferHost={(playerId) => void transferHost(playerId)}
+      onSuggest={suggest}
+      onWithdrawSuggestion={() => void withdrawSuggestion()}
+      onAcceptSuggestion={(id, changes) => decideSuggestion(id, changes)}
+      onDeclineSuggestion={(id) => decideSuggestion(id, null)}
       categories={categories}
       onCopyCode={() => void actions.copyCode(code)}
       onShare={() => void actions.shareInvite(displayCode, inviteUrl || inviteLink(window.location.origin, code))}

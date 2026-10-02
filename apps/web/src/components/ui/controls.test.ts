@@ -182,6 +182,8 @@ describe("Stepper", () => {
     expect(html).not.toContain('aria-label="Runden erhöhen" title="Runden erhöhen" aria-disabled="true"');
     expect(html).toMatch(/<output[^>]*>1<\/output>/);
     expect(html).toMatch(/<fieldset aria-labelledby="[^"]+"/);
+    expect(html).not.toContain("aria-describedby");
+    expect(html).not.toContain("text-primary");
   });
 
   it("deaktiviert plus an der Obergrenze", () => {
@@ -236,5 +238,19 @@ describe("ListRow", () => {
   it("rendert Link und statische Zeile", () => {
     expect(renderHtml(ListRow, { href: "/regeln" }, "Regeln")).toMatch(/^<a[^>]*href="\/regeln"/);
     expect(renderHtml(ListRow, {}, "Regeln")).toMatch(/^<div/);
+  });
+});
+
+describe("Stepper mit geändertem Wert (Vorschläge, ADR-053)", () => {
+  it("zeigt „Aktuell: …“ unter dem Label, verknüpft es per aria-describedby und färbt den Wert orange", () => {
+    const html = renderToStaticMarkup(
+      h(Stepper, { label: "Runden", value: 5, min: 1, max: 10, onChange: () => undefined, changedNote: "Aktuell: 3" }),
+    );
+    const describedBy = /<fieldset[^>]*aria-describedby="([^"]+)"/.exec(html)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(html).toContain(
+      `id="${describedBy}" class="text-caption text-text-2" data-testid="stepper-note">Aktuell: 3</span>`,
+    );
+    expect(html).toMatch(/<output[^>]*text-primary[^>]*>5<\/output>/);
   });
 });

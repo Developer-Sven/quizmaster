@@ -166,6 +166,19 @@ export class Player {
     await expect(sheet).toBeHidden();
   }
 
+  /** Host: Vorschläge der anderen an- oder ausschalten (ADR-053). */
+  async setSuggestions(allowed: boolean): Promise<void> {
+    await this.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
+    const sheet = this.page.getByRole("dialog", { name: "Einstellungen" });
+    const row = sheet.getByRole("button", {
+      name: allowed ? "Alle dürfen Änderungen vorschlagen" : "Nur du änderst die Einstellungen",
+    });
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+    await sheet.getByRole("button", { name: "Fertig" }).click();
+    await expect(sheet).toBeHidden();
+  }
+
   async addBot(): Promise<void> {
     await this.page.getByRole("button", { name: "Bot hinzufügen" }).click();
   }

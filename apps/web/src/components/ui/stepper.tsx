@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import { de } from "../../i18n/de";
+import { cx } from "../../lib/ui/cx";
 import { MinusIcon, PlusIcon } from "../../lib/ui/icons";
 import { IconButton } from "./icon-button";
 
@@ -14,6 +15,11 @@ interface StepperBaseProps {
   format?: (value: number) => string;
   /** Ganzer Stepper nicht bedienbar (z. B. Gäste): beide Tasten deaktiviert, Wert bleibt lesbar */
   disabled?: boolean;
+  /**
+   * Wert weicht vom aktuellen Stand ab (Vorschläge, ADR-053): Hinweis wie „Aktuell: 3“ unter dem Label
+   * (`aria-describedby`), der Wert erscheint orange.
+   */
+  changedNote?: string;
 }
 
 /** Zahlenbereich [min, max] mit Schrittweite – oder feste Stufen (`options`, aufsteigend). */
@@ -39,8 +45,9 @@ export function stepOption(options: readonly number[], value: number, direction:
  * (IconButtons 44). An den Grenzen ist die jeweilige Taste deaktiviert, bleibt aber fokussierbar.
  */
 export function Stepper(props: StepperProps) {
-  const { label, value, onChange, format, disabled = false } = props;
+  const { label, value, onChange, format, disabled = false, changedNote } = props;
   const labelId = useId();
+  const noteId = useId();
   const lower =
     props.options === undefined
       ? value > props.min
@@ -54,10 +61,25 @@ export function Stepper(props: StepperProps) {
         : null
       : stepOption(props.options, value, 1);
   return (
-    <fieldset aria-labelledby={labelId} className="flex min-h-14 min-w-0 items-center gap-2">
-      <span id={labelId} className="min-w-0 flex-1 text-body text-text">
-        {label}
-      </span>
+    <fieldset
+      aria-labelledby={labelId}
+      aria-describedby={changedNote === undefined ? undefined : noteId}
+      className="flex min-h-14 min-w-0 items-center gap-2"
+    >
+      {changedNote === undefined ? (
+        <span id={labelId} className="min-w-0 flex-1 text-body text-text">
+          {label}
+        </span>
+      ) : (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span id={labelId} className="text-body text-text">
+            {label}
+          </span>
+          <span id={noteId} className="text-caption text-text-2" data-testid="stepper-note">
+            {changedNote}
+          </span>
+        </span>
+      )}
       <IconButton
         icon={MinusIcon}
         label={de.settings.decrease(label)}
@@ -67,7 +89,13 @@ export function Stepper(props: StepperProps) {
         }}
       />
       {/* Gleiche Breite für Zahlen und „5 s“/„Host“: Die Tasten untereinanderliegender Stepper fluchten. */}
-      <output aria-live="polite" className="w-12 text-center text-label text-text tabular-nums">
+      <output
+        aria-live="polite"
+        className={cx(
+          "w-12 text-center text-label tabular-nums",
+          changedNote === undefined ? "text-text" : "text-primary",
+        )}
+      >
         {format === undefined ? value : format(value)}
       </output>
       <IconButton

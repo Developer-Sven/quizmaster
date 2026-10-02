@@ -12,6 +12,7 @@ import {
   PLAYER_COLORS,
   PLAYER_STATUSES,
   RATING_VALUES,
+  SUGGESTION_STATUSES,
 } from "./constants.ts";
 import {
   answerIndexSchema,
@@ -23,9 +24,10 @@ import {
   mediaSchema,
   playerIdSchema,
   questionInstanceIdSchema,
+  suggestionIdSchema,
   timestampSchema,
 } from "./primitives.ts";
-import { GAME_RULES, lobbySettingsSchema, SETTINGS_BOUNDS } from "./settings.ts";
+import { GAME_RULES, lobbySettingsSchema, SETTINGS_BOUNDS, settingsChangesSchema } from "./settings.ts";
 import * as z from "./zod.ts";
 
 const MAX_PLAYERS = GAME_RULES.maxPlayersPerLobby;
@@ -139,6 +141,22 @@ export const gameResultsSchema = z.strictObject({
   outcome: z.enum(GAME_OUTCOMES),
 });
 
+/**
+ * Vorschlag einer Person für die Einstellungen (ADR-053): nur in der Lobby, je Person höchstens einer. Bleibt nach
+ * der Entscheidung des Hosts als „übernommen“/„abgelehnt“ stehen, bis die Person neu vorschlägt, geht oder das
+ * Spiel beginnt – so erfährt sie das Ergebnis.
+ */
+export const settingsSuggestionSchema = z.strictObject({
+  id: suggestionIdSchema,
+  playerId: playerIdSchema,
+  /** nur Felder, die beim Einreichen vom damaligen Stand abwichen */
+  changes: settingsChangesSchema,
+  status: z.enum(SUGGESTION_STATUSES),
+  /** Serverzeit des Einreichens */
+  at: timestampSchema,
+});
+export type SettingsSuggestion = z.output<typeof settingsSuggestionSchema>;
+
 /** Vollständiger öffentlicher Snapshot einer Lobby (Event `lobby:state`, `rev` steigt). */
 export const publicLobbyStateSchema = z.strictObject({
   rev: z.int().min(0),
@@ -159,6 +177,8 @@ export const publicLobbyStateSchema = z.strictObject({
   /** Bisherige Züge (nur aufgelöste Fragen). */
   board: z.array(boardRowSchema).max(MAX_TURNS),
   results: gameResultsSchema.nullable(),
+  /** Vorschläge für die Einstellungen (ADR-053) – außerhalb der Lobby leer. */
+  suggestions: z.array(settingsSuggestionSchema).max(MAX_PLAYERS),
 });
 export type PublicLobbyState = z.output<typeof publicLobbyStateSchema>;
 

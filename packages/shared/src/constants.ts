@@ -48,6 +48,10 @@ export function pickPlayerColor(taken: Iterable<PlayerColor>): PlayerColor | nul
 export const PLAYER_STATUSES = ["active", "resigned", "spectator"] as const;
 export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
 
+/** Status eines Einstellungs-Vorschlags (ADR-053): offen, übernommen, abgelehnt. */
+export const SUGGESTION_STATUSES = ["pending", "accepted", "declined"] as const;
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+
 /** Codes des Server-Events `notice` (docs/05 §Server → Client). */
 /** `GAME_ENDED`: der Host hat das Spiel vorzeitig beendet (ADR-051). */
 export const NOTICE_CODES = ["SERVER_RESTART", "MAINTENANCE", "HOST_CHANGED", "PLAYER_LEFT", "GAME_ENDED"] as const;

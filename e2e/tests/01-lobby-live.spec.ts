@@ -32,8 +32,9 @@ test("Host erstellt Lobby, Gast tritt per Code bei, beide sehen sich live, Host 
   }
   await expect(guest.waitingNote).toHaveText("Warte auf Mia …");
   await expect(guest.startButton).toHaveCount(0);
-  // Gäste sehen die Einstellungen, ändern aber nichts (ADR-050).
+  // Gäste sehen die Einstellungen, ändern aber nichts, wenn der Host Vorschläge ausschaltet (ADR-050, ADR-053).
   await expect(guest.page.getByRole("button", { name: "Einstellungen", exact: true })).toHaveCount(0);
+  await host.setSuggestions(false);
   await guest.page.getByRole("button", { name: "Einstellungen ansehen" }).click();
   const view = guest.page.getByRole("dialog", { name: "Einstellungen" });
   await expect(view.getByText("Nur Mia kann die Einstellungen ändern.")).toBeVisible();

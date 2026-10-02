@@ -22,6 +22,10 @@ const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E> } = {
   "lobby:kick": { playerId: "p_1a2B3c" },
   "lobby:rename": { name: "Mia" },
   "lobby:transfer-host": { playerId: "p_1a2B3c" },
+  "lobby:suggest-settings": { rounds: 5 },
+  "lobby:withdraw-suggestion": {},
+  "lobby:accept-suggestion": { id: "s_1a2B3c", changes: { rounds: 4 } },
+  "lobby:decline-suggestion": { id: "s_1a2B3c" },
   "lobby:start": {},
   "game:pick": { categoryId: "rund-um-die-welt" },
   "game:answer": { questionId: "q7", choice: 2 },
@@ -49,6 +53,10 @@ describe("Registry Client → Server (docs/05)", () => {
         "lobby:kick",
         "lobby:rename",
         "lobby:transfer-host",
+        "lobby:suggest-settings",
+        "lobby:withdraw-suggestion",
+        "lobby:accept-suggestion",
+        "lobby:decline-suggestion",
         "lobby:start",
         "game:pick",
         "game:answer",
@@ -76,6 +84,13 @@ describe("Registry Client → Server (docs/05)", () => {
     });
     expect(CLIENT_EVENTS["lobby:create"].allowed).toContain("verlässt");
     expect(CLIENT_EVENTS["lobby:transfer-host"]).toMatchObject({ hostOnly: true, requiresMembership: true });
+    // Vorschläge (ADR-053): alle schlagen vor, nur der Host entscheidet – alles nur in der Lobby.
+    expect(CLIENT_EVENTS["lobby:suggest-settings"]).toMatchObject({ hostOnly: false, phases: ["lobby"] });
+    expect(CLIENT_EVENTS["lobby:withdraw-suggestion"]).toMatchObject({ hostOnly: false, phases: ["lobby"] });
+    expect(CLIENT_EVENTS["lobby:accept-suggestion"]).toMatchObject({ hostOnly: true, phases: ["lobby"] });
+    expect(CLIENT_EVENTS["lobby:decline-suggestion"]).toMatchObject({ hostOnly: true, phases: ["lobby"] });
+    expect(CLIENT_EVENTS["lobby:suggest-settings"].payload.safeParse({ allowSuggestions: false }).success).toBe(false);
+    expect(CLIENT_EVENTS["lobby:accept-suggestion"].payload.safeParse({ id: "s_1" }).success).toBe(true);
     expect(CLIENT_EVENTS["game:end"]).toMatchObject({
       hostOnly: true,
       phases: ["intro", "category_pick", "question", "reveal", "turn_summary", "round_board"],

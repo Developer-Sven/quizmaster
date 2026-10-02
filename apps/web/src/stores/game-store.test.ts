@@ -266,6 +266,25 @@ describe("Hinweise und Kategorien", () => {
     expect(state().toasts.at(-1)?.text).toBe("Neustart – gleich geht es weiter.");
   });
 
+  it("Vorschläge (ADR-053): Toast beim Host für neue Vorschläge, bei der Person für die Entscheidung", () => {
+    const mia = testPlayer("p1", { isHost: true, name: "Mia" });
+    const ben = testPlayer("p2", { name: "Ben" });
+    const open = { id: "s1", playerId: "p2", changes: { rounds: 5 }, status: "pending" as const, at: 1 };
+    // Sicht des Hosts
+    gameActions.applyPublicState(testLobby({ rev: 1, players: [mia, ben] }));
+    gameActions.applyPrivateState(testSelf("p1", { isHost: true }));
+    gameActions.applyPublicState(testLobby({ rev: 2, players: [mia, ben], suggestions: [open] }));
+    expect(state().toasts.at(-1)?.text).toBe("Ben hat einen Vorschlag gemacht.");
+    // Sicht von Ben
+    gameActions.resetLobby();
+    gameActions.applyPublicState(testLobby({ rev: 1, players: [mia, ben], suggestions: [open] }));
+    gameActions.applyPrivateState(testSelf("p2", { isHost: false }));
+    gameActions.applyPublicState(
+      testLobby({ rev: 2, players: [mia, ben], suggestions: [{ ...open, status: "accepted" }] }),
+    );
+    expect(state().toasts.at(-1)?.text).toBe("Mia hat deinen Vorschlag übernommen.");
+  });
+
   it("Regeln-Sheet (ADR-052): bleibt vom Spielende in die Lobby offen, schließt beim Spielstart und beim Verlassen", () => {
     gameActions.applyPublicState(testLobby({ rev: 1, phase: "game_over", phaseEndsAt: 7_000 }));
     gameActions.openRules();

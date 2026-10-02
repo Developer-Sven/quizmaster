@@ -18,8 +18,10 @@ import { normalize, onTimerFired } from "./lifecycle.ts";
 import {
   createLobbyState,
   isTimingMode,
+  onAcceptSuggestion,
   onAddBot,
   onContinue,
+  onDeclineSuggestion,
   onDisconnect,
   onEndGame,
   onJoin,
@@ -29,8 +31,10 @@ import {
   onRematch,
   onRename,
   onStart,
+  onSuggestSettings,
   onTransferHost,
   onUpdateSettings,
+  onWithdrawSuggestion,
 } from "./lobby.ts";
 import { toPrivateState, toPublicState } from "./projection.ts";
 import { findTimerByToken, removeTimers } from "./timers.ts";
@@ -144,6 +148,14 @@ function dispatch(state: LobbyState, command: Command, tx: Tx, timer: PendingTim
       return onTransferHost(state, command, tx);
     case "END_GAME":
       return onEndGame(state, command, tx);
+    case "SUGGEST_SETTINGS":
+      return onSuggestSettings(state, command, tx);
+    case "WITHDRAW_SUGGESTION":
+      return onWithdrawSuggestion(state, command);
+    case "ACCEPT_SUGGESTION":
+      return onAcceptSuggestion(state, command, tx);
+    case "DECLINE_SUGGESTION":
+      return onDeclineSuggestion(state, command);
     case "KICK":
       return onKick(state, command, tx);
     case "START":

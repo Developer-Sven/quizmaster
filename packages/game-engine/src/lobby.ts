@@ -9,19 +9,26 @@ import {
   GAME_RULES,
   GAME_TIMING_MODES,
   guestIdSchema,
+  type LobbySettings,
   lobbyCodeSchema,
   MANUAL_ADVANCE,
   makeUniqueName,
   nameKey,
   pickPlayerColor,
   playerIdSchema,
+  type SettingsSuggestion,
+  type SuggestionStatus,
+  settingsChangesBetween,
+  settingsChangesSchema,
   updateSettingsPayloadSchema,
   validateNameFormat,
 } from "@quizmaster/shared";
 import type {
+  AcceptSuggestionCommand,
   AddBotCommand,
   ContinueCommand,
   CreateLobbyInput,
+  DeclineSuggestionCommand,
   DisconnectCommand,
   EndGameCommand,
   JoinCommand,
@@ -31,8 +38,10 @@ import type {
   RematchCommand,
   RenameCommand,
   StartCommand,
+  SuggestSettingsCommand,
   TransferHostCommand,
   UpdateSettingsCommand,
+  WithdrawSuggestionCommand,
 } from "./commands.ts";
 import { reject, requestPersist, type Tx } from "./context.ts";
 import {
@@ -120,6 +129,7 @@ export function createLobbyState(input: CreateLobbyInput, tx: Tx): LobbyState {
     settings: { ...DEFAULT_LOBBY_SETTINGS },
     players: [host],
     bannedGuestIds: [],
+    suggestions: [],
     seq: 0,
     timers: [],
     game: null,
@@ -267,6 +277,89 @@ export function onTransferHost(state: LobbyState, command: TransferHostCommand, 
   tx.effects.push({ type: "notice", code: "HOST_CHANGED" });
   requestPersist(tx, "host");
   return { ...state, hostPlayerId: target.playerId };
+}
+
+/** Länge der Vorschlags-IDs (ADR-053). */
+const SUGGESTION_ID_LENGTH = 12;
+
+/** Offener Vorschlag zur ID – sonst Ablehnung (ersetzt, zurückgezogen oder schon entschieden). */
+function requirePendingSuggestion(state: LobbyState, suggestionId: string): SettingsSuggestion {
+  const suggestion = state.suggestions.find((entry) => entry.id === suggestionId);
+  if (suggestion?.status !== "pending") return reject("INVALID_OPTION", "Vorschlag ist nicht mehr offen");
+  return suggestion;
+}
+
+/** Einstellungen mit den Änderungen `changes` (validiert); „Personen maximal“ nie unter der Personenzahl. */
+function settingsWithChanges(state: LobbyState, changes: unknown): LobbySettings {
+  const parsed = settingsChangesSchema.safeParse(changes);
+  if (!parsed.success) return reject("VALIDATION_FAILED", "Ungültige Einstellungen im Vorschlag");
+  const settings = applySettingsUpdate(state.settings, parsed.data);
+  if (settings.maxPlayers < members(state).length) {
+    reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
+  }
+  return settings;
+}
+
+function resolveSuggestion(
+  state: LobbyState,
+  suggestionId: string,
+  status: Exclude<SuggestionStatus, "pending">,
+): SettingsSuggestion[] {
+  return state.suggestions.map((entry) => (entry.id === suggestionId ? { ...entry, status } : entry));
+}
+
+/**
+ * Vorschlag für die Einstellungen (ADR-053): alle außer dem Host, nur in der Lobby und solange Vorschläge erlaubt
+ * sind. Gespeichert werden nur Felder, die vom aktuellen Stand abweichen; ein neuer Vorschlag ersetzt den bisherigen
+ * der Person (neue ID, auch nach einer Entscheidung).
+ */
+export function onSuggestSettings(state: LobbyState, command: SuggestSettingsCommand, tx: Tx): LobbyState {
+  const player = requireMember(state, command.guestId);
+  if (state.phase !== "lobby") reject("INVALID_PHASE", "Vorschläge nur vor Spielbeginn");
+  if (player.playerId === state.hostPlayerId) reject("INVALID_OPTION", "Der Host ändert die Einstellungen direkt");
+  if (!state.settings.allowSuggestions) reject("INVALID_OPTION", "Vorschläge sind ausgeschaltet");
+  const changes = settingsChangesBetween(state.settings, settingsWithChanges(state, command.changes));
+  if (changes === null) return reject("INVALID_OPTION", "Der Vorschlag ändert nichts");
+  const suggestion: SettingsSuggestion = {
+    id: uniqueRandomId(tx.rng, new Set(state.suggestions.map((entry) => entry.id)), SUGGESTION_ID_LENGTH),
+    playerId: player.playerId,
+    changes,
+    status: "pending",
+    at: tx.now,
+  };
+  return {
+    ...state,
+    suggestions: [...state.suggestions.filter((entry) => entry.playerId !== player.playerId), suggestion],
+  };
+}
+
+/** Eigenen Vorschlag zurückziehen (ADR-053) – ohne Vorschlag ändert sich nichts. */
+export function onWithdrawSuggestion(state: LobbyState, command: WithdrawSuggestionCommand): LobbyState {
+  const player = requireMember(state, command.guestId);
+  if (state.phase !== "lobby") reject("INVALID_PHASE", "Vorschläge nur vor Spielbeginn");
+  if (!state.suggestions.some((entry) => entry.playerId === player.playerId)) return state;
+  return { ...state, suggestions: state.suggestions.filter((entry) => entry.playerId !== player.playerId) };
+}
+
+/**
+ * Host übernimmt einen offenen Vorschlag (ADR-053): ohne `changes` wie vorgeschlagen, sonst in seiner Fassung (er
+ * kann vorher noch anpassen). Der Vorschlag bleibt als „übernommen“ stehen, damit die Person es erfährt.
+ */
+export function onAcceptSuggestion(state: LobbyState, command: AcceptSuggestionCommand, tx: Tx): LobbyState {
+  requireHost(state, command.guestId);
+  if (state.phase !== "lobby") reject("INVALID_PHASE", "Vorschläge nur vor Spielbeginn");
+  const suggestion = requirePendingSuggestion(state, command.suggestionId);
+  const settings = settingsWithChanges(state, command.changes ?? suggestion.changes);
+  requestPersist(tx, "settings");
+  return { ...state, settings, suggestions: resolveSuggestion(state, suggestion.id, "accepted") };
+}
+
+/** Host lehnt einen offenen Vorschlag ab (ADR-053); die Einstellungen bleiben, wie sie sind. */
+export function onDeclineSuggestion(state: LobbyState, command: DeclineSuggestionCommand): LobbyState {
+  requireHost(state, command.guestId);
+  if (state.phase !== "lobby") reject("INVALID_PHASE", "Vorschläge nur vor Spielbeginn");
+  const suggestion = requirePendingSuggestion(state, command.suggestionId);
+  return { ...state, suggestions: resolveSuggestion(state, suggestion.id, "declined") };
 }
 
 export function onKick(state: LobbyState, command: KickCommand, tx: Tx): LobbyState {

@@ -18,6 +18,9 @@ export const PUBLIC_ID_REGEX = /^[A-Za-z0-9_-]{1,32}$/;
 /** Öffentliche Spieler-ID – zufällig, NICHT die geheime guestId. */
 export const playerIdSchema = z.string().regex(PUBLIC_ID_REGEX);
 
+/** ID eines Einstellungs-Vorschlags (ADR-053). */
+export const suggestionIdSchema = z.string().regex(PUBLIC_ID_REGEX);
+
 /**
  * Instanz-ID einer Frage in diesem Spiel (vom Server vergeben, undurchsichtig) – nicht die DB-ID.
  * Der Server bildet sie für `question:rate`/`question:report` selbst auf die DB-ID ab.

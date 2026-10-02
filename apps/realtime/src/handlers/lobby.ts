@@ -42,6 +42,16 @@ import {
 const NOT_A_MEMBER = new Set(["LOBBY_NOT_FOUND", "KICKED", "RESIGNED"]);
 
 /** Fehlversuch für die IP-Regeln von join/resume: nur ein unbekannter bzw. fremder Code (Code-Raten). */
+
+/** Kategorie-Auswahl (ADR-048): nur spielbare Kategorien des Katalogs – sonst INVALID_OPTION. */
+function assertPlayableCategories(rt: HandlerRuntime, categoryIds: readonly string[] | null | undefined): void {
+  if (!categoryIds) return;
+  const playable = new Set(rt.questions.playableCategories().map((option) => option.id));
+  if (categoryIds.some((id) => !playable.has(id))) {
+    throw new ProtocolError("INVALID_OPTION", "Unbekannte oder nicht spielbare Kategorie");
+  }
+}
+
 export function countsAsCodeGuess(code: ErrorCode): boolean {
   return code === "LOBBY_NOT_FOUND";
 }
@@ -149,13 +159,7 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
 
   registerEvent("lobby:update-settings", (payload, ctx) => {
     const rt = runtime();
-    // Kategorie-Auswahl (ADR-048): nur spielbare Kategorien des Katalogs.
-    if (payload.categoryIds) {
-      const playable = new Set(rt.questions.playableCategories().map((option) => option.id));
-      if (payload.categoryIds.some((id) => !playable.has(id))) {
-        throw new ProtocolError("INVALID_OPTION", "Unbekannte oder nicht spielbare Kategorie");
-      }
-    }
+    assertPlayableCategories(rt, payload.categoryIds);
     const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
     return runCommand(ctx, actor, { type: "UPDATE_SETTINGS", guestId: ctx.guestId, update: payload }, null);
   });
@@ -175,6 +179,36 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
       { type: "TRANSFER_HOST", guestId: ctx.guestId, targetPlayerId: payload.playerId },
       null,
     );
+  });
+
+  // Vorschläge für die Einstellungen (ADR-053); Kategorien wie beim Host nur aus dem Katalog.
+  registerEvent("lobby:suggest-settings", (payload, ctx) => {
+    const rt = runtime();
+    assertPlayableCategories(rt, payload.categoryIds);
+    const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
+    return runCommand(ctx, actor, { type: "SUGGEST_SETTINGS", guestId: ctx.guestId, changes: payload }, null);
+  });
+
+  registerEvent("lobby:withdraw-suggestion", (_payload, ctx) => {
+    const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
+    return runCommand(ctx, actor, { type: "WITHDRAW_SUGGESTION", guestId: ctx.guestId }, null);
+  });
+
+  registerEvent("lobby:accept-suggestion", (payload, ctx) => {
+    const rt = runtime();
+    assertPlayableCategories(rt, payload.changes?.categoryIds);
+    const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
+    return runCommand(
+      ctx,
+      actor,
+      { type: "ACCEPT_SUGGESTION", guestId: ctx.guestId, suggestionId: payload.id, changes: payload.changes },
+      null,
+    );
+  });
+
+  registerEvent("lobby:decline-suggestion", (payload, ctx) => {
+    const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
+    return runCommand(ctx, actor, { type: "DECLINE_SUGGESTION", guestId: ctx.guestId, suggestionId: payload.id }, null);
   });
 
   registerEvent("lobby:kick", (payload, ctx) => {

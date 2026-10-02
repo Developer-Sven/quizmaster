@@ -14,7 +14,15 @@ import { requestPersist, type Tx } from "./context.ts";
 import { finishGame, onPhaseTimeout, onRequestTimeout } from "./flow.ts";
 import { removeFromLobby } from "./lobby.ts";
 import { reschedulePhaseEnd } from "./phases.ts";
-import { activePlayers, connectedHumans, currentQuestion, currentTurn, findPlayer, humanMembers } from "./state.ts";
+import {
+  activePlayers,
+  connectedHumans,
+  currentQuestion,
+  currentTurn,
+  findPlayer,
+  humanMembers,
+  members,
+} from "./state.ts";
 import { addTimer, findTimer, removeTimers, syncTimer } from "./timers.ts";
 import { type CloseReason, type EnginePlayer, isRunningPhase, type LobbyState, type PendingTimer } from "./types.ts";
 
@@ -163,6 +171,20 @@ function syncIdleTimer(state: LobbyState): LobbyState {
   return syncTimer(state, "idle_close", null, desiredAt);
 }
 
+/**
+ * Vorschläge (ADR-053) gibt es nur in der Lobby, solange sie erlaubt sind, und nur von Mitgliedern außer dem Host:
+ * Spielstart, Abschalten, Gehen und Host-Wechsel räumen sie auf.
+ */
+function pruneSuggestions(state: LobbyState): LobbyState {
+  if (state.suggestions.length === 0) return state;
+  const memberIds = new Set(members(state).map((player) => player.playerId));
+  const kept =
+    state.phase === "lobby" && state.settings.allowSuggestions
+      ? state.suggestions.filter((entry) => entry.playerId !== state.hostPlayerId && memberIds.has(entry.playerId))
+      : [];
+  return kept.length === state.suggestions.length ? state : { ...state, suggestions: kept };
+}
+
 /** Stellt nach jedem Command die Invarianten her (siehe Moduldoku). */
 export function normalize(state: LobbyState, tx: Tx): LobbyState {
   if (state.closed !== null) return state;
@@ -173,6 +195,7 @@ export function normalize(state: LobbyState, tx: Tx): LobbyState {
   }
   next = ensureEarlyReveal(next, tx);
   next = ensureHost(next, tx);
+  next = pruneSuggestions(next);
   next = syncReconnectTimers(next, tx);
   next = syncHostTimer(next, tx);
   next = syncEmptyTimer(next, tx);

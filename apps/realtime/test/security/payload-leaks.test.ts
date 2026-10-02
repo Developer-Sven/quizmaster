@@ -14,7 +14,7 @@ import {
   SERVER_EVENT_NAMES,
 } from "@quizmaster/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { actorOf, autoPlay, connectGuest, lastSelf, waitForGameDoc, waitForPhase } from "../game/support.ts";
+import { actorOf, autoPlay, connectGuest, lastSelf, lastState, waitForGameDoc, waitForPhase } from "../game/support.ts";
 import { eventually, type TestClient, type TestServer } from "../helpers/index.ts";
 import { recordAcks, type ServerDatum, serverData, startSecurityServer } from "./support.ts";
 
@@ -59,6 +59,19 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
       (await host.act.emit("lobby:update-settings", { rounds: 1, questionsPerCategory: 1, afterRoundSec: 0 })).ok,
     ).toBe(true);
     expect((await guest.act.emit("lobby:rename", { name: "Benni" })).ok).toBe(true);
+    // Vorschläge (ADR-053): vorschlagen, zurückziehen, erneut vorschlagen; der Host lehnt ab bzw. übernimmt.
+    expect((await guest.act.emit("lobby:suggest-settings", { rounds: 2 })).ok).toBe(true);
+    expect((await guest.act.emit("lobby:withdraw-suggestion", {})).ok).toBe(true);
+    expect((await guest.act.emit("lobby:suggest-settings", { rounds: 2 })).ok).toBe(true);
+    await eventually(() => lastState(host.client)?.suggestions[0]?.status === "pending");
+    const declinedId = lastState(host.client)?.suggestions[0]?.id ?? "";
+    expect((await host.act.emit("lobby:decline-suggestion", { id: declinedId })).ok).toBe(true);
+    expect((await guest.act.emit("lobby:suggest-settings", { questionsPerCategory: 2 })).ok).toBe(true);
+    await eventually(() => lastState(host.client)?.suggestions[0]?.status === "pending");
+    const acceptedId = lastState(host.client)?.suggestions[0]?.id ?? "";
+    expect(
+      (await host.act.emit("lobby:accept-suggestion", { id: acceptedId, changes: { questionsPerCategory: 1 } })).ok,
+    ).toBe(true);
     // Host kurz übertragen und zurück (ADR-047) – so kommt auch lobby:transfer-host vor.
     const guestPlayerId = lastSelf(guest.client)?.playerId ?? "";
     const hostPlayerId = lastSelf(host.client)?.playerId ?? "";

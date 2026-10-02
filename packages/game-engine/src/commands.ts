@@ -13,6 +13,7 @@ import {
   type ContinuePhase,
   type GameTimingMode,
   reviewItemSchema,
+  type SettingsChanges,
   type SettingsUpdate,
 } from "@quizmaster/shared";
 import { type QuestionDoc, questionDocSchema } from "@quizmaster/shared/documents";
@@ -82,6 +83,35 @@ export interface TransferHostCommand {
   type: "TRANSFER_HOST";
   guestId: string;
   targetPlayerId: string;
+}
+
+/** `lobby:suggest-settings` – Mitglied außer dem Host, Phase `lobby`, Vorschläge erlaubt (ADR-053). */
+export interface SuggestSettingsCommand {
+  type: "SUGGEST_SETTINGS";
+  guestId: string;
+  changes: SettingsChanges;
+}
+
+/** `lobby:withdraw-suggestion` – eigenen Vorschlag zurückziehen (ADR-053). */
+export interface WithdrawSuggestionCommand {
+  type: "WITHDRAW_SUGGESTION";
+  guestId: string;
+}
+
+/** `lobby:accept-suggestion` – Host übernimmt einen offenen Vorschlag, ggf. in eigener Fassung (ADR-053). */
+export interface AcceptSuggestionCommand {
+  type: "ACCEPT_SUGGESTION";
+  guestId: string;
+  suggestionId: string;
+  /** Fassung des Hosts; ohne: wie vorgeschlagen */
+  changes?: SettingsChanges;
+}
+
+/** `lobby:decline-suggestion` – Host lehnt einen offenen Vorschlag ab (ADR-053). */
+export interface DeclineSuggestionCommand {
+  type: "DECLINE_SUGGESTION";
+  guestId: string;
+  suggestionId: string;
 }
 
 /** `game:end` – Host beendet das laufende Spiel für alle mit dem aktuellen Stand (ADR-051). */
@@ -192,6 +222,10 @@ export type Command =
   | RenameCommand
   | ContinueCommand
   | TransferHostCommand
+  | SuggestSettingsCommand
+  | WithdrawSuggestionCommand
+  | AcceptSuggestionCommand
+  | DeclineSuggestionCommand
   | EndGameCommand
   | KickCommand
   | StartCommand

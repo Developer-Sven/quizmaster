@@ -1,7 +1,14 @@
 "use client";
 
-import { formatGameEstimate, type LobbySettings, type PublicLobbyState, type SettingsUpdate } from "@quizmaster/shared";
-import { type ReactNode, useState } from "react";
+import {
+  formatGameEstimate,
+  type LobbySettings,
+  type PublicLobbyState,
+  type SettingsChanges,
+  type SettingsSuggestion,
+  type SettingsUpdate,
+} from "@quizmaster/shared";
+import { type ReactNode, useId, useState } from "react";
 import { ActionBarNote } from "@/components/app/action-bar";
 import { AppFooter } from "@/components/app/app-footer";
 import { AppHeader, HeaderTitle } from "@/components/app/app-header";
@@ -9,8 +16,10 @@ import { AppShell } from "@/components/app/app-shell";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
+import { ListRow } from "@/components/ui/list-row";
 import { de } from "@/i18n/de";
 import { type CategoryCatalog, connectedCount, hostPlayer } from "@/lib/client/game-view";
+import { ownPendingSuggestion, pendingSuggestions } from "@/lib/client/suggestions";
 import { ChevronLeftIcon, PlayIcon, PlusIcon, Settings2Icon } from "@/lib/ui/icons";
 import { usePresenterZoom } from "@/lib/ui/presenter";
 import { InvitePanel } from "./invite-panel";
@@ -18,6 +27,8 @@ import { PlayerList } from "./player-list";
 import { RenameSheet } from "./rename-sheet";
 import { settingsExtras } from "./settings-extras";
 import { SettingsSheet } from "./settings-sheet";
+import { suggestionSummary } from "./settings-text";
+import { ReviewSheet, SuggestSheet } from "./suggestion-sheets";
 
 export interface LobbyViewProps {
   lobby: PublicLobbyState;
@@ -49,6 +60,14 @@ export interface LobbyViewProps {
   onRename?: (name: string) => Promise<string | null>;
   /** Host übertragen (ADR-047) – nur der Host bekommt den Handler */
   onTransferHost?: (playerId: string) => void;
+  /** Vorschlag senden (alle außer dem Host, ADR-053); `true` bei Erfolg */
+  onSuggest?: (changes: SettingsChanges) => Promise<boolean>;
+  /** Eigenen offenen Vorschlag zurückziehen (ADR-053) */
+  onWithdrawSuggestion?: () => void;
+  /** Host: Vorschlag in seiner Fassung übernehmen (ADR-053); `true` bei Erfolg */
+  onAcceptSuggestion?: (id: string, changes: SettingsChanges) => Promise<boolean>;
+  /** Host: Vorschlag ablehnen (ADR-053); `true` bei Erfolg */
+  onDeclineSuggestion?: (id: string) => Promise<boolean>;
   /** Kategorien für Auswahl und Zusammenfassung (ADR-048) */
   categories?: CategoryCatalog;
   onCopyCode: () => void;
@@ -69,7 +88,8 @@ const NO_CATEGORIES: CategoryCatalog = {};
  * Code + Kopieren/Teilen + QR, Spielerliste, Zusammenfassung „3 Runden · 3 Fragen je Kat.“ /
  * „27 Fragen · ca. 9 Min.“, darunter „Regeln“ (als Sheet, ADR-052); Aktionsleiste: Host „Spiel starten“ (ab 2
  * Verbundenen), sonst „Warte auf Mia …“. Nach einem Spiel unter der Spielerliste die Karte „Letztes Spiel“
- * (ADR-038).
+ * (ADR-038). Vorschläge (ADR-053): Der Host sieht offene Vorschläge unter der Spielerliste und prüft sie im Sheet;
+ * alle anderen stellen im Einstellungen-Sheet einen Vorschlag zusammen und sehen ihren offenen Vorschlag.
  */
 export function LobbyView({
   lobby,
@@ -90,6 +110,10 @@ export function LobbyView({
   onSettingsClosed,
   onRename,
   onTransferHost,
+  onSuggest,
+  onWithdrawSuggestion,
+  onAcceptSuggestion,
+  onDeclineSuggestion,
   categories = NO_CATEGORIES,
   onCopyCode,
   onShare,
@@ -101,6 +125,12 @@ export function LobbyView({
   const [settingsOpen, setSettingsOpen] = useState(defaultSettingsOpen);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  // Vorschläge (ADR-053): jedes Öffnen beginnt einen frischen Entwurf (Schlüssel); der geprüfte Vorschlag bleibt
+  // gespeichert, damit das Sheet auch nach der Entscheidung sauber zufährt.
+  const [suggestKey, setSuggestKey] = useState(0);
+  const [review, setReview] = useState<{ suggestion: SettingsSuggestion; key: number } | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const suggestionsHeadingId = useId();
   const settings = shownSettings ?? lobby.settings;
   const { rounds, questionsPerCategory, maxPlayers } = settings;
   const players = lobby.players;
@@ -112,6 +142,19 @@ export function LobbyView({
   const extras = settingsExtras(settings, categories, presenterId === null ? null : (host?.name ?? ""));
   // Der anzeigende Host zeigt schon die Lobby groß (Code und QR-Code für alle im Raum).
   usePresenterZoom(isHost && presenterId !== null);
+  const pending = isHost ? pendingSuggestions(lobby) : [];
+  const ownSuggestion = isHost ? null : ownPendingSuggestion(lobby, selfId);
+  const suggest = !isHost && lobby.settings.allowSuggestions ? onSuggest : undefined;
+  const nameOf = (playerId: string) => players.find((player) => player.id === playerId)?.name ?? "";
+  const openSettings = () => {
+    if (suggest) setSuggestKey((key) => key + 1);
+    setSettingsOpen(true);
+  };
+  const openReview = (suggestion: SettingsSuggestion) => {
+    setReview((current) => ({ suggestion, key: (current?.key ?? 0) + 1 }));
+    setReviewOpen(true);
+  };
+  const reviewPending = review !== null && pending.some((entry) => entry.id === review.suggestion.id);
 
   return (
     <>
@@ -133,7 +176,7 @@ export function LobbyView({
               <IconButton
                 icon={Settings2Icon}
                 label={isHost ? de.lobby.settings : de.lobby.viewSettings}
-                onClick={() => setSettingsOpen(true)}
+                onClick={openSettings}
                 data-testid="lobby-settings"
               />
             }
@@ -176,6 +219,44 @@ export function LobbyView({
             onTransferHost={isHost ? onTransferHost : undefined}
             presenterId={presenterId}
           />
+          {pending.length > 0 && onAcceptSuggestion ? (
+            <section
+              aria-labelledby={suggestionsHeadingId}
+              data-testid="lobby-suggestions"
+              className="flex flex-col gap-1"
+            >
+              <h2 id={suggestionsHeadingId} className="text-label text-text-2">
+                {de.suggestions.title}
+              </h2>
+              <ul className="flex flex-col">
+                {pending.map((entry) => (
+                  <li key={entry.id}>
+                    <ListRow icon={Settings2Icon} onClick={() => openReview(entry)} data-testid="lobby-suggestion">
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{de.suggestions.from(nameOf(entry.playerId))}</span>
+                        <span className="truncate text-caption text-text-2">
+                          {suggestionSummary(entry.changes, settings, categories)}
+                        </span>
+                      </span>
+                    </ListRow>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {ownSuggestion !== null && onWithdrawSuggestion ? (
+            <div data-testid="lobby-own-suggestion" className="flex items-center justify-between gap-3">
+              <p className="min-w-0 text-body text-text-2">{de.suggestions.waiting(host?.name ?? "")}</p>
+              <Button
+                variant="ghost"
+                size="compact"
+                onClick={onWithdrawSuggestion}
+                data-testid="lobby-withdraw-suggestion"
+              >
+                {de.suggestions.withdraw}
+              </Button>
+            </div>
+          ) : null}
           {lastGame}
           {isHost && devBots && onAddBot ? (
             <div className="flex">
@@ -193,19 +274,49 @@ export function LobbyView({
           <AppFooter onShowRules={onShowRules} />
         </div>
       </AppShell>
-      <SettingsSheet
-        open={settingsOpen}
-        settings={settings}
-        playerCount={players.length}
-        categories={categories}
-        readOnly={!isHost}
-        hostName={host?.name ?? ""}
-        onChange={onChangeSettings}
-        onClose={() => {
-          setSettingsOpen(false);
-          if (isHost) onSettingsClosed?.();
-        }}
-      />
+      {suggest ? (
+        <SuggestSheet
+          key={suggestKey}
+          open={settingsOpen}
+          settings={lobby.settings}
+          pending={ownSuggestion}
+          playerCount={players.length}
+          categories={categories}
+          hostName={host?.name ?? ""}
+          onSend={suggest}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : (
+        <SettingsSheet
+          open={settingsOpen}
+          settings={settings}
+          playerCount={players.length}
+          categories={categories}
+          readOnly={!isHost}
+          asGuest={!isHost}
+          hostName={host?.name ?? ""}
+          suggestionsToggle={isHost}
+          onChange={onChangeSettings}
+          onClose={() => {
+            setSettingsOpen(false);
+            if (isHost) onSettingsClosed?.();
+          }}
+        />
+      )}
+      {isHost && review !== null && onAcceptSuggestion && onDeclineSuggestion ? (
+        <ReviewSheet
+          key={review.key}
+          open={reviewOpen && reviewPending}
+          suggestion={review.suggestion}
+          fromName={nameOf(review.suggestion.playerId)}
+          settings={settings}
+          playerCount={players.length}
+          categories={categories}
+          onAccept={onAcceptSuggestion}
+          onDecline={onDeclineSuggestion}
+          onClose={() => setReviewOpen(false)}
+        />
+      ) : null}
       {onRename ? (
         <RenameSheet
           open={renameOpen}

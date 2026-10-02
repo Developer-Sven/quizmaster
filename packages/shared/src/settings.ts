@@ -86,7 +86,7 @@ const categoryIdsSchema = z
 
 /**
  * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Spätere Felder haben
- * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048 bleiben lesbar.
+ * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048/049/053 bleiben lesbar.
  */
 export const lobbySettingsSchema = z.strictObject({
   rounds: bounded(SETTINGS_BOUNDS.rounds),
@@ -100,6 +100,8 @@ export const lobbySettingsSchema = z.strictObject({
   categoryIds: categoryIdsSchema.default(null),
   /** Zeit pro Frage (ADR-049); Standard 20 s wie beim Vorbild */
   answerSec: answerSeconds.default(GAME_RULES_ANSWER_SEC),
+  /** Alle außer dem Host dürfen Änderungen vorschlagen (ADR-053); der Host schaltet es ab */
+  allowSuggestions: z.boolean().default(true),
 });
 export type LobbySettings = z.output<typeof lobbySettingsSchema>;
 
@@ -111,6 +113,7 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = Object.freeze({
   hostPlays: true,
   categoryIds: null,
   answerSec: GAME_RULES_ANSWER_SEC,
+  allowSuggestions: true,
 });
 
 /** Antwortzeit in ms – `null` bei „Host“ (kein Countdown, ADR-049). */
@@ -143,26 +146,58 @@ export function isAdvancePhase(phase: Phase): phase is AdvancePhase {
   return (ADVANCE_PHASES as readonly Phase[]).includes(phase);
 }
 
+/** Felder, die der Host ändert und alle anderen vorschlagen dürfen (ADR-053) – alle außer `allowSuggestions`. */
+const settingsChangeShape = {
+  rounds: bounded(SETTINGS_BOUNDS.rounds).optional(),
+  questionsPerCategory: bounded(SETTINGS_BOUNDS.questionsPerCategory).optional(),
+  maxPlayers: bounded(SETTINGS_BOUNDS.maxPlayers).optional(),
+  afterQuestionSec: advanceSeconds.optional(),
+  afterTurnSec: advanceSeconds.optional(),
+  afterRoundSec: advanceSeconds.optional(),
+  hostPlays: z.boolean().optional(),
+  categoryIds: categoryIdsSchema.optional(),
+  answerSec: answerSeconds.optional(),
+};
+
+/** Einstellungen, die ein Vorschlag ändern kann – in der Reihenfolge des Einstellungen-Sheets (ADR-053). */
+export const SUGGESTABLE_SETTINGS = [
+  "rounds",
+  "questionsPerCategory",
+  "maxPlayers",
+  "categoryIds",
+  "answerSec",
+  "afterQuestionSec",
+  "afterTurnSec",
+  "afterRoundSec",
+  "hostPlays",
+] as const satisfies readonly (keyof typeof settingsChangeShape)[];
+export type SuggestableSetting = (typeof SUGGESTABLE_SETTINGS)[number];
+
 /**
  * Payload von `lobby:update-settings`: nur geänderte Felder, mindestens eines. Ob `maxPlayers` unter
  * die aktuelle Personenzahl fallen darf, entscheidet der Server (fachliche Regel, kein Formatfehler).
  */
 export const updateSettingsPayloadSchema = z
   .strictObject({
-    rounds: bounded(SETTINGS_BOUNDS.rounds).optional(),
-    questionsPerCategory: bounded(SETTINGS_BOUNDS.questionsPerCategory).optional(),
-    maxPlayers: bounded(SETTINGS_BOUNDS.maxPlayers).optional(),
-    afterQuestionSec: advanceSeconds.optional(),
-    afterTurnSec: advanceSeconds.optional(),
-    afterRoundSec: advanceSeconds.optional(),
-    hostPlays: z.boolean().optional(),
-    categoryIds: categoryIdsSchema.optional(),
-    answerSec: answerSeconds.optional(),
+    ...settingsChangeShape,
+    /** Vorschläge der anderen an/aus (ADR-053) – nur der Host */
+    allowSuggestions: z.boolean().optional(),
   })
   .refine((update) => Object.values(update).some((value) => value !== undefined), {
     message: "mindestens eine Einstellung angeben",
   });
 export type SettingsUpdate = z.output<typeof updateSettingsPayloadSchema>;
+
+/**
+ * Vorgeschlagene Änderungen (ADR-053: `lobby:suggest-settings`, `lobby:accept-suggestion`): wie eine Änderung des
+ * Hosts, aber ohne `allowSuggestions`; mindestens ein Feld.
+ */
+export const settingsChangesSchema = z
+  .strictObject(settingsChangeShape)
+  .refine((changes) => Object.values(changes).some((value) => value !== undefined), {
+    message: "mindestens eine Einstellung angeben",
+  });
+export type SettingsChanges = z.output<typeof settingsChangesSchema>;
 
 /** Wendet eine (validierte) Änderung an und liefert neue Einstellungen. */
 export function applySettingsUpdate(current: LobbySettings, update: SettingsUpdate): LobbySettings {
@@ -177,5 +212,26 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
     // `null` heißt „alle“ – nur `undefined` lässt die Auswahl unverändert.
     categoryIds: update.categoryIds === undefined ? current.categoryIds : update.categoryIds,
     answerSec: update.answerSec ?? current.answerSec,
+    allowSuggestions: update.allowSuggestions ?? current.allowSuggestions,
   };
+}
+
+/** Gleicher Einstellungswert; eine Kategorie-Auswahl gilt unabhängig von der Reihenfolge als gleich. */
+export function sameSettingValue(a: LobbySettings[SuggestableSetting], b: LobbySettings[SuggestableSetting]): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((entry) => b.includes(entry));
+  return a === b;
+}
+
+/**
+ * Vorschlagbare Felder, in denen `next` von `current` abweicht (ADR-053) – `null`, wenn keins abweicht. Eine
+ * Kategorie-Auswahl wird kopiert.
+ */
+export function settingsChangesBetween(current: LobbySettings, next: LobbySettings): SettingsChanges | null {
+  const changes: Partial<Record<SuggestableSetting, LobbySettings[SuggestableSetting]>> = {};
+  for (const key of SUGGESTABLE_SETTINGS) {
+    const value = next[key];
+    if (!sameSettingValue(current[key], value)) changes[key] = Array.isArray(value) ? [...value] : value;
+  }
+  // Je Schlüssel stammt der Wert aus `next[key]` – passt also zum Feld gleichen Namens.
+  return Object.keys(changes).length === 0 ? null : (changes as SettingsChanges);
 }

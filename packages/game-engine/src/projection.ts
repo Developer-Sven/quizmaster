@@ -10,6 +10,7 @@ import {
   type PublicLobbyState,
   type PublicPlayer,
   type PublicQuestion,
+  type SettingsChanges,
 } from "@quizmaster/shared";
 import { buildBoard, computeScores } from "./scoring.ts";
 import { activePlayers, currentQuestion, currentTurn, findPlayer, isActive } from "./state.ts";
@@ -109,7 +110,19 @@ export function toPublicState(state: LobbyState): PublicLobbyState {
     question: projectQuestion(state),
     board: buildBoard(game),
     results: results ? { ranking: results.ranking.map((entry) => ({ ...entry })), outcome: results.outcome } : null,
+    suggestions: state.suggestions.map((entry) => ({
+      id: entry.id,
+      playerId: entry.playerId,
+      changes: copyChanges(entry.changes),
+      status: entry.status,
+      at: entry.at,
+    })),
   };
+}
+
+/** Kopie vorgeschlagener Änderungen samt Kategorie-Liste – die Projektion teilt keine Arrays mit dem Zustand. */
+function copyChanges(changes: SettingsChanges): SettingsChanges {
+  return changes.categoryIds ? { ...changes, categoryIds: [...changes.categoryIds] } : { ...changes };
 }
 
 /**

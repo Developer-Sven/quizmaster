@@ -74,6 +74,7 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       hostPlays: true,
       categoryIds: null,
       answerSec: 20,
+      allowSuggestions: true,
     });
     expect(Object.isFrozen(DEFAULT_LOBBY_SETTINGS)).toBe(true);
   });
@@ -180,6 +181,7 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       hostPlays: true,
       categoryIds: null,
       answerSec: 20,
+      allowSuggestions: true,
     });
     expect(advanceDurationMs(DEFAULT_LOBBY_SETTINGS, "reveal")).toBe(5_000);
     expect(advanceDurationMs({ ...DEFAULT_LOBBY_SETTINGS, afterTurnSec: 0 }, "turn_summary")).toBeNull();

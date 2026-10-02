@@ -35,6 +35,7 @@ export function testLobby(patch: Partial<PublicLobbyState> = {}): PublicLobbySta
     question: null,
     board: [],
     results: null,
+    suggestions: [],
     ...patch,
   };
 }

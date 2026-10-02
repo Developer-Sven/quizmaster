@@ -435,6 +435,8 @@ export function fromLobbySnapshot(raw: unknown, ctx: RestoreContext): RestoreRes
       settings: { ...doc.settings },
       players,
       bannedGuestIds: [...doc.bannedGuestIds],
+      // Vorschläge (ADR-053) sind flüchtig: nach einem Neustart gibt es keine.
+      suggestions: [],
       seq: 0,
       timers: [],
       game: game === null ? null : toGameState(game),

@@ -14,6 +14,7 @@ import {
   nameInputSchema,
   playerIdSchema,
   questionInstanceIdSchema,
+  suggestionIdSchema,
   timestampSchema,
 } from "./primitives.ts";
 import {
@@ -23,7 +24,7 @@ import {
   publicLobbyStateSchema,
   reviewListSchema,
 } from "./schemas.ts";
-import { CONTINUE_PHASES, updateSettingsPayloadSchema } from "./settings.ts";
+import { CONTINUE_PHASES, settingsChangesSchema, updateSettingsPayloadSchema } from "./settings.ts";
 import * as z from "./zod.ts";
 
 /** Beschreibung eines Client→Server-Events. */
@@ -116,6 +117,42 @@ export const CLIENT_EVENTS = {
     hostOnly: true,
     devOnly: false,
     phases: null,
+  }),
+  "lobby:suggest-settings": clientEvent({
+    payload: settingsChangesSchema,
+    ack: noData,
+    allowed: "alle außer dem Host, solange Vorschläge erlaubt sind – ersetzt den eigenen Vorschlag (ADR-053)",
+    requiresMembership: true,
+    hostOnly: false,
+    devOnly: false,
+    phases: ["lobby"],
+  }),
+  "lobby:withdraw-suggestion": clientEvent({
+    payload: emptyPayload,
+    ack: noData,
+    allowed: "eigenen Vorschlag zurückziehen (ADR-053)",
+    requiresMembership: true,
+    hostOnly: false,
+    devOnly: false,
+    phases: ["lobby"],
+  }),
+  "lobby:accept-suggestion": clientEvent({
+    payload: z.strictObject({ id: suggestionIdSchema, changes: settingsChangesSchema.optional() }),
+    ack: noData,
+    allowed: "Host: offenen Vorschlag übernehmen – ohne `changes` wie vorgeschlagen, sonst in seiner Fassung (ADR-053)",
+    requiresMembership: true,
+    hostOnly: true,
+    devOnly: false,
+    phases: ["lobby"],
+  }),
+  "lobby:decline-suggestion": clientEvent({
+    payload: z.strictObject({ id: suggestionIdSchema }),
+    ack: noData,
+    allowed: "Host: offenen Vorschlag ablehnen (ADR-053)",
+    requiresMembership: true,
+    hostOnly: true,
+    devOnly: false,
+    phases: ["lobby"],
   }),
   "lobby:kick": clientEvent({
     payload: z.strictObject({ playerId: playerIdSchema }),

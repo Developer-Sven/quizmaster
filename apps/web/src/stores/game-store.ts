@@ -27,6 +27,7 @@ import {
 } from "../lib/client/game-view";
 import { type LastGameSnapshot, loadLastGame, nextLastGame, saveLastGame } from "../lib/client/last-game";
 import { inferTimingMode, reconnectGraceMs } from "../lib/client/phase-clock";
+import { type SuggestionNotice, suggestionNotices } from "../lib/client/suggestions";
 
 /**
  * - `idle`: noch keine Verbindung angefordert
@@ -193,6 +194,20 @@ function withToast(toasts: readonly ToastEntry[], kind: ToastKind, text: string)
   return [...toasts, { id: toastSequence, kind, text }].slice(-MAX_TOASTS);
 }
 
+/** Toast-Text zu einem Vorschlags-Hinweis (ADR-053). */
+function suggestionNoticeText(notice: SuggestionNotice): string {
+  switch (notice.kind) {
+    case "suggestionReceived":
+      return de.notices.suggestionReceived(notice.name);
+    case "suggestionAccepted":
+      return de.notices.suggestionAccepted(notice.host);
+    case "suggestionDeclined":
+      return de.notices.suggestionDeclined(notice.host);
+    case "suggestionsOff":
+      return de.notices.suggestionsOff;
+  }
+}
+
 /** Frist ab `now` für die aktuelle Phase (in der Lobby 30 s, im Spiel 90 s) – ohne Lobby keine. */
 function graceFrom(state: GameStoreState, now: number): number | null {
   if (!state.lobby || state.exit) return null;
@@ -237,6 +252,9 @@ export const gameActions = {
         notice.kind === "hostChanged"
           ? withToast(toasts, "hostChanged", de.notices.hostChanged(notice.name))
           : withToast(toasts, "playerResigned", de.notices.playerResigned(notice.name));
+    }
+    for (const notice of suggestionNotices(state.lobby, next, state.self?.playerId ?? null)) {
+      toasts = withToast(toasts, "info", suggestionNoticeText(notice));
     }
     const roster = lobbyRosterChanges(state.lobby, next, state.self?.playerId ?? null);
     const announcement = nextAnnouncement(state.announcement, [

@@ -7,60 +7,57 @@ import {
   type LobbySettings,
   SETTINGS_BOUNDS,
   type SettingsUpdate,
+  type SuggestableSetting,
+  sameSettingValue,
 } from "@quizmaster/shared";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { de } from "../../i18n/de";
 import type { CategoryCatalog } from "../../lib/client/game-view";
+import { cx } from "../../lib/ui/cx";
 import { Button } from "../ui/button";
 import { CategoryBadge } from "../ui/category-badge";
 import { ListRow } from "../ui/list-row";
 import { Sheet } from "../ui/sheet";
 import { Stepper } from "../ui/stepper";
+import { categorySummary, settingValueText, sortedCategories, toggleCategory } from "./settings-text";
 
 export interface SettingsSheetProps {
   open: boolean;
-  /** Angezeigte Werte: Server-Stand samt noch nicht bestätigter Tipps (`useSettingsSync`, ADR-042) */
+  /**
+   * Angezeigte Werte: Server-Stand samt noch nicht bestätigter Tipps (`useSettingsSync`, ADR-042) bzw. der Entwurf
+   * eines Vorschlags (ADR-053)
+   */
   settings: LobbySettings;
   /** Personen in der Lobby – „Personen maximal“ darf nicht darunter fallen */
   playerCount: number;
   /** Spielbare Kategorien für die Auswahl (ADR-048) */
   categories: CategoryCatalog;
-  /** Alle außer dem Host: alles sehen, nichts ändern (ADR-050) */
+  /** Nichts ändern: alle außer dem Host, wenn Vorschläge aus sind (ADR-050) */
   readOnly?: boolean;
-  /** Name des Hosts für die nur lesbare Ansicht („Nur Mia kann …“, „Mia zeigt nur an“) */
+  /** Sicht aller außer dem Host: Host-Abschnitt in der dritten Person („Mia spielt mit“, ADR-050) */
+  asGuest?: boolean;
+  /** Name des Hosts für die Sicht der anderen („Nur Mia kann …“, „Mia zeigt nur an“) */
   hostName?: string;
+  /** Vergleichsstand bei Vorschlägen (ADR-053): abweichende Werte orange, darunter „Aktuell: …“ */
+  baseline?: LobbySettings;
+  /** Titel statt „Einstellungen“, z. B. „Vorschlag von Ben“ (ADR-053) */
+  title?: string;
+  /** Hinweis oben (`caption`) – Standard bei `readOnly`: „Nur Mia kann die Einstellungen ändern.“ */
+  intro?: ReactNode;
+  /** Aktionen unten statt „Fertig“ bzw. „Schließen“ (ADR-053) */
+  actions?: ReactNode;
+  /** Abschnitt „Vorschläge“ zum An- und Ausschalten (nur Host, ADR-053) */
+  suggestionsToggle?: boolean;
   onChange: (update: SettingsUpdate) => void;
   onClose: () => void;
 }
 
-/** Kategorien alphabetisch (deutsch) für die Auswahl. */
-export function sortedCategories(catalog: CategoryCatalog) {
-  return Object.values(catalog).sort((a, b) => a.name.localeCompare(b.name, "de"));
-}
-
 /**
- * Nächste Auswahl nach einem Tipp auf `id` (ADR-048): Aus „Alle“ wird „nur diese“; weitere Tipps fügen hinzu bzw.
- * nehmen weg; wird die Auswahl leer, gilt wieder „Alle“ (`null`).
- */
-export function toggleCategory(current: readonly string[] | null, id: string): string[] | null {
-  if (current === null) return [id];
-  const next = current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id];
-  return next.length === 0 ? null : next;
-}
-
-/** Wert der Kategorie-Zeile: „Alle“, der Name bei genau einer, sonst „3 ausgewählt“. */
-export function categorySummary(categoryIds: readonly string[] | null, catalog: CategoryCatalog): string {
-  if (categoryIds === null) return de.settings.categoriesAllShort;
-  const [only] = categoryIds;
-  if (categoryIds.length === 1 && only !== undefined) return catalog[only]?.name ?? de.settings.categoriesCount(1);
-  return de.settings.categoriesCount(categoryIds.length);
-}
-
-/**
- * Einstellungen-Sheet (docs/09 §6, nur Host): Runden, Fragen pro Kategorie, Personen maximal, Zusammenfassung;
+ * Einstellungen-Sheet (docs/09 §6): Runden, Fragen pro Kategorie, Personen maximal, Zusammenfassung;
  * „Zeit und Weiter“ – Zeit pro Frage (ADR-049) und Weiter nach Frage, Kategorie und Zwischenstand (ADR-045), je
  * Sekunden oder „Host“; „Kategorien“ (Unteransicht, ADR-048); „Du spielst mit“ / „Du zeigst nur an“ (ADR-046);
- * „Fertig“. Änderungen wirken sofort für alle; gesendet wird gebündelt (ADR-042).
+ * für den Host „Vorschläge“ an/aus (ADR-053). Beim Host wirken Änderungen sofort für alle (gebündelt, ADR-042);
+ * alle anderen sehen es nur lesbar (ADR-050) oder stellen einen Vorschlag zusammen (`baseline`, ADR-053).
  */
 export function SettingsSheet({
   open,
@@ -68,7 +65,13 @@ export function SettingsSheet({
   playerCount,
   categories,
   readOnly = false,
+  asGuest = false,
   hostName = "",
+  baseline,
+  title = de.settings.title,
+  intro,
+  actions,
+  suggestionsToggle = false,
   onChange,
   onClose,
 }: SettingsSheetProps) {
@@ -78,6 +81,13 @@ export function SettingsSheet({
     if (!readOnly) onChange(update);
   };
   const selectable = (update: SettingsUpdate) => (readOnly ? undefined : () => change(update));
+  // Vorschläge (ADR-053): „Aktuell: …“ unter jedem Wert, der vom Vergleichsstand abweicht.
+  const changedNote = (key: SuggestableSetting) =>
+    baseline === undefined || sameSettingValue(baseline[key], settings[key])
+      ? undefined
+      : de.suggestions.currently(settingValueText(baseline, key, categories));
+  const categoriesNote = changedNote("categoryIds");
+  const hostNote = changedNote("hostPlays");
   // Mitspielende für die Schätzung: ohne den Host, wenn er nur anzeigt.
   const players = Math.max(settings.hostPlays ? playerCount : playerCount - 1, 1);
   const close = () => {
@@ -128,26 +138,34 @@ export function SettingsSheet({
       </Sheet>
     );
   }
+  const hint = intro ?? (readOnly ? de.settings.readOnlyHint(hostName) : null);
   return (
     <Sheet
       open={open}
       onClose={close}
-      title={de.settings.title}
+      title={title}
       view="main"
       footer={
-        <Button variant={readOnly ? "secondary" : "primary"} block onClick={close} data-testid="settings-done">
-          {readOnly ? de.actions.close : de.actions.done}
-        </Button>
+        actions ?? (
+          <Button variant={readOnly ? "secondary" : "primary"} block onClick={close} data-testid="settings-done">
+            {readOnly ? de.actions.close : de.actions.done}
+          </Button>
+        )
       }
     >
       <div className="flex flex-col" data-testid="settings-sheet" data-readonly={readOnly || undefined}>
-        {readOnly ? <p className="pb-2 text-caption text-text-2">{de.settings.readOnlyHint(hostName)}</p> : null}
+        {hint ? (
+          <p className="pb-2 text-caption text-text-2" data-testid="settings-intro">
+            {hint}
+          </p>
+        ) : null}
         <Stepper
           label={de.settings.rounds}
           value={settings.rounds}
           min={SETTINGS_BOUNDS.rounds.min}
           max={SETTINGS_BOUNDS.rounds.max}
           disabled={readOnly}
+          changedNote={changedNote("rounds")}
           onChange={(rounds) => change({ rounds })}
         />
         <Stepper
@@ -156,6 +174,7 @@ export function SettingsSheet({
           min={SETTINGS_BOUNDS.questionsPerCategory.min}
           max={SETTINGS_BOUNDS.questionsPerCategory.max}
           disabled={readOnly}
+          changedNote={changedNote("questionsPerCategory")}
           onChange={(questionsPerCategory) => change({ questionsPerCategory })}
         />
         <Stepper
@@ -164,12 +183,18 @@ export function SettingsSheet({
           min={Math.max(SETTINGS_BOUNDS.maxPlayers.min, playerCount)}
           max={SETTINGS_BOUNDS.maxPlayers.max}
           disabled={readOnly}
+          changedNote={changedNote("maxPlayers")}
           onChange={(maxPlayers) => change({ maxPlayers })}
         />
         <ListRow onClick={() => setView("categories")} data-testid="settings-categories-row">
           <span className="flex items-center justify-between gap-3">
-            <span>{de.settings.categories}</span>
-            <span className="truncate text-label text-text-2">{categorySummary(settings.categoryIds, categories)}</span>
+            <span className="flex min-w-0 flex-col">
+              <span>{de.settings.categories}</span>
+              {categoriesNote ? <span className="text-caption text-text-2">{categoriesNote}</span> : null}
+            </span>
+            <span className={cx("truncate text-label", categoriesNote ? "text-primary" : "text-text-2")}>
+              {categorySummary(settings.categoryIds, categories)}
+            </span>
           </span>
         </ListRow>
         <SettingsSummary settings={settings} players={players} />
@@ -181,6 +206,7 @@ export function SettingsSheet({
             options={ANSWER_SECONDS}
             format={de.settings.advanceValue}
             disabled={readOnly}
+            changedNote={changedNote("answerSec")}
             onChange={(answerSec) => change({ answerSec })}
           />
           <Stepper
@@ -189,6 +215,7 @@ export function SettingsSheet({
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
             disabled={readOnly}
+            changedNote={changedNote("afterQuestionSec")}
             onChange={(afterQuestionSec) => change({ afterQuestionSec })}
           />
           <Stepper
@@ -197,6 +224,7 @@ export function SettingsSheet({
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
             disabled={readOnly}
+            changedNote={changedNote("afterTurnSec")}
             onChange={(afterTurnSec) => change({ afterTurnSec })}
           />
           <Stepper
@@ -205,25 +233,44 @@ export function SettingsSheet({
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
             disabled={readOnly}
+            changedNote={changedNote("afterRoundSec")}
             onChange={(afterRoundSec) => change({ afterRoundSec })}
           />
         </div>
         <p className="pt-1 text-caption text-text-2">
-          {readOnly ? de.settings.advanceHintOther : de.settings.advanceHint}
+          {asGuest ? de.settings.advanceHintOther : de.settings.advanceHint}
         </p>
-        <h3 className="pt-4 text-label text-text-2">{readOnly ? de.settings.hostTitleOther : de.settings.hostTitle}</h3>
-        <ul className="flex flex-col pb-2" data-testid="settings-host-mode">
+        <h3 className="pt-4 text-label text-text-2">{asGuest ? de.settings.hostTitleOther : de.settings.hostTitle}</h3>
+        {hostNote ? <p className="text-caption text-text-2">{hostNote}</p> : null}
+        <ul className={cx("flex flex-col", !suggestionsToggle && "pb-2")} data-testid="settings-host-mode">
           <li>
             <ListRow selected={settings.hostPlays} onClick={selectable({ hostPlays: true })}>
-              {readOnly ? de.settings.hostPlaysOther(hostName) : de.settings.hostPlays}
+              {asGuest ? de.settings.hostPlaysOther(hostName) : de.settings.hostPlays}
             </ListRow>
           </li>
           <li>
             <ListRow selected={!settings.hostPlays} onClick={selectable({ hostPlays: false })}>
-              {readOnly ? de.settings.hostPresentsOther(hostName) : de.settings.hostPresents}
+              {asGuest ? de.settings.hostPresentsOther(hostName) : de.settings.hostPresents}
             </ListRow>
           </li>
         </ul>
+        {suggestionsToggle ? (
+          <>
+            <h3 className="pt-4 text-label text-text-2">{de.suggestions.toggleTitle}</h3>
+            <ul className="flex flex-col pb-2" data-testid="settings-suggestions">
+              <li>
+                <ListRow selected={settings.allowSuggestions} onClick={selectable({ allowSuggestions: true })}>
+                  {de.suggestions.allow}
+                </ListRow>
+              </li>
+              <li>
+                <ListRow selected={!settings.allowSuggestions} onClick={selectable({ allowSuggestions: false })}>
+                  {de.suggestions.deny}
+                </ListRow>
+              </li>
+            </ul>
+          </>
+        ) : null}
       </div>
     </Sheet>
   );
