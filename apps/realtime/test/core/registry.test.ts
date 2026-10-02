@@ -51,6 +51,7 @@ const SAMPLE_ACK: { [E in ClientEventName]: ClientEventAckData<E> } = {
   "game:review": [],
   "game:rematch": null,
   "game:continue": null,
+  "game:end": null,
   "question:rate": null,
   "question:report": null,
   "dev:add-bot": null,

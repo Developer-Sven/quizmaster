@@ -166,7 +166,8 @@ export type GameResults = NonNullable<PublicLobbyState["results"]>;
 export type RankingEntry = GameResults["ranking"][number];
 
 /** Warum ein Spiel endete. */
-export const GAME_END_REASONS = ["completed", "not_enough_players", "load_failed"] as const;
+/** `host_ended`: der Host hat das Spiel vorzeitig beendet (ADR-051). */
+export const GAME_END_REASONS = ["completed", "not_enough_players", "load_failed", "host_ended"] as const;
 export type GameEndReason = (typeof GAME_END_REASONS)[number];
 
 /** Laufendes bzw. zuletzt beendetes Spiel. */

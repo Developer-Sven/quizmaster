@@ -770,6 +770,35 @@ describe("Zeit pro Frage (ADR-049)", () => {
   });
 });
 
+describe("Host beendet das Spiel vorzeitig (ADR-051)", () => {
+  it("Ergebnis mit aktuellem Stand für alle, Hinweis, danach wie gewohnt zurück in die Lobby", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    sim.ok({ type: "START", guestId: sim.host });
+    // Erste Frage auflösen (Ben richtig), dann mitten in der nächsten Frage beenden.
+    toPhase(sim, "question");
+    sim.toQuestionStart();
+    sim.answer(ben, sim.correct);
+    toPhase(sim, "reveal");
+    toPhase(sim, "question");
+    sim.toQuestionStart();
+    sim.answer(ben, sim.correct);
+    expect(errorCode(sim.dispatch({ type: "END_GAME", guestId: ben }))).toBe("NOT_HOST");
+    const from = sim.effects.length;
+    sim.ok({ type: "END_GAME", guestId: sim.host });
+    expect(sim.state.phase).toBe("game_over");
+    expect(sim.state.game?.endReason).toBe("host_ended");
+    expect(sim.effects.slice(from)).toContainEqual({ type: "notice", code: "GAME_ENDED" });
+    expect(sim.effects.slice(from).some((effect) => effect.type === "gameFinished")).toBe(true);
+    // Nur aufgelöste Fragen zählen: Bens Antwort auf die offene Frage nicht.
+    const ranking = toPublicState(sim.state).results?.ranking ?? [];
+    expect(ranking.find((entry) => entry.playerId === sim.playerId(ben))?.score).toBe(1);
+    sim.advance(T.gameOverMs);
+    expect(sim.state.phase).toBe("lobby");
+    expect(errorCode(sim.dispatch({ type: "END_GAME", guestId: sim.host }))).toBe("INVALID_PHASE");
+  });
+});
+
 describe("Randfälle", () => {
   it("Kategorie mit weniger als K unbenutzten Fragen: Zug mit weniger Fragen, Tafel passend", () => {
     const sim = lobbyWith(2, 0, { autoRespond: false });

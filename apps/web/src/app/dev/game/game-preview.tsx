@@ -123,6 +123,7 @@ function PreviewGame({ scene }: { scene: Extract<PreviewScene, { kind: "game" }>
           onToggleSound: () => setSoundOn((on) => !on),
           onLeave: noop,
           onContinue: noop,
+          onEndGame: noop,
         }}
       />
       <ReviewSheet

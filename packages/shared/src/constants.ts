@@ -49,7 +49,8 @@ export const PLAYER_STATUSES = ["active", "resigned", "spectator"] as const;
 export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
 
 /** Codes des Server-Events `notice` (docs/05 §Server → Client). */
-export const NOTICE_CODES = ["SERVER_RESTART", "MAINTENANCE", "HOST_CHANGED", "PLAYER_LEFT"] as const;
+/** `GAME_ENDED`: der Host hat das Spiel vorzeitig beendet (ADR-051). */
+export const NOTICE_CODES = ["SERVER_RESTART", "MAINTENANCE", "HOST_CHANGED", "PLAYER_LEFT", "GAME_ENDED"] as const;
 export type NoticeCode = (typeof NOTICE_CODES)[number];
 
 /** Gründe im Server-Event `kicked`. */

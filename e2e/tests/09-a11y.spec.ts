@@ -248,10 +248,11 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     const turn2 = await pickRoles([mia, ben]);
     const watcher2 = turn2.watchers[0];
     if (!watcher2) throw new Error("keine zuschauende Person");
-    await watcher2.page.getByRole("button", { name: "Aufgeben" }).click();
-    const resign = watcher2.page.getByRole("alertdialog", { name: "Spiel verlassen?" });
+    // Aufgeben gibt es nur für Mitspielende ohne Host-Rolle – der Host beendet stattdessen (ADR-051).
+    await ben.page.getByRole("button", { name: "Aufgeben" }).click();
+    const resign = ben.page.getByRole("alertdialog", { name: "Spiel verlassen?" });
     await expect(resign).toBeVisible();
-    await checkScreen(watcher2.page, "aufgeben-dialog", testInfo);
+    await checkScreen(ben.page, "aufgeben-dialog", testInfo);
     await resign.getByRole("button", { name: "Weiterspielen" }).click();
     await expect(resign).toBeHidden();
 

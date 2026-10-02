@@ -181,6 +181,15 @@ export const CLIENT_EVENTS = {
     devOnly: false,
     phases: [...CONTINUE_PHASES],
   }),
+  "game:end": clientEvent({
+    payload: emptyPayload,
+    ack: noData,
+    allowed: "Host, laufendes Spiel – beendet es für alle mit dem aktuellen Stand (ADR-051)",
+    requiresMembership: true,
+    hostOnly: true,
+    devOnly: false,
+    phases: ["intro", "category_pick", "question", "reveal", "turn_summary", "round_board"],
+  }),
   "game:rematch": clientEvent({
     payload: emptyPayload,
     ack: noData,

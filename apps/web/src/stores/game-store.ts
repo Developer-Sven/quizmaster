@@ -295,6 +295,11 @@ export const gameActions = {
       }));
     } else if (code === "MAINTENANCE") {
       useGameStore.setState({ maintenance: true });
+    } else if (code === "GAME_ENDED") {
+      // Der Host weiß es schon – alle anderen erfahren, warum das Ergebnis kommt (ADR-051).
+      useGameStore.setState((state) =>
+        state.self?.isHost ? state : { toasts: withToast(state.toasts, "info", de.notices.gameEnded) },
+      );
     }
   },
 

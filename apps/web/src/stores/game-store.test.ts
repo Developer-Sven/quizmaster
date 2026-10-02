@@ -265,6 +265,18 @@ describe("Hinweise und Kategorien", () => {
     expect(state().toasts.at(-1)?.text).toBe("Neustart – gleich geht es weiter.");
   });
 
+  it("Host beendet das Spiel (ADR-051): Hinweis für alle anderen, nicht für den Host selbst", () => {
+    gameActions.applyPublicState(testLobby({ rev: 1 }));
+    gameActions.applyPrivateState(testSelf("p2", { isHost: false }));
+    gameActions.applyNotice("GAME_ENDED");
+    expect(state().toasts.at(-1)?.text).toBe("Der Host hat das Spiel beendet.");
+    gameActions.resetLobby();
+    gameActions.applyPublicState(testLobby({ rev: 1 }));
+    gameActions.applyPrivateState(testSelf("p1", { isHost: true }));
+    gameActions.applyNotice("GAME_ENDED");
+    expect(state().toasts.some((toast) => toast.text === "Der Host hat das Spiel beendet.")).toBe(false);
+  });
+
   it("sagt Beitritte und Austritte in der Lobby an (nur Screenreader, kein Toast)", () => {
     const mia = testPlayer("p1", { isHost: true, name: "Mia" });
     const ben = testPlayer("p2", { name: "Ben" });

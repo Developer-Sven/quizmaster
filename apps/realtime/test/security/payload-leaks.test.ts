@@ -138,6 +138,10 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
     // game:pick und game:answer (auch abgelehnte) liefern nur Codes bzw. { accepted: true }.
     await guest.act.emit("game:pick", { categoryId: "gibt-es-nicht" });
     await guest.act.emit("game:answer", { questionId: "q-unbekannt", choice: 0 });
+    // Der neue Host beendet die Revanche vorzeitig (ADR-051): notice GAME_ENDED, Ergebnis.
+    const ended = guest.client.waitFor("lobby:state", (state) => state.phase === "game_over", 10_000);
+    expect(await guest.act.emit("game:end", {})).toEqual({ ok: true, data: null });
+    await ended;
 
     // Neustart: notice SERVER_RESTART an alle noch verbundenen Sockets.
     const restart = guest.client.waitFor("notice", (notice) => notice.code === "SERVER_RESTART", 10_000);
@@ -166,7 +170,7 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
         .filter((datum) => datum.kind === "event" && datum.name === "notice")
         .map((datum) => (datum.payload as { code: string }).code),
     );
-    expect([...notices].sort()).toEqual(["HOST_CHANGED", "MAINTENANCE", "PLAYER_LEFT", "SERVER_RESTART"]);
+    expect([...notices].sort()).toEqual(["GAME_ENDED", "HOST_CHANGED", "MAINTENANCE", "PLAYER_LEFT", "SERVER_RESTART"]);
     const acked = new Set(data.filter((datum) => datum.kind === "ack").map((datum) => datum.name as ClientEventName));
     const expected = CLIENT_EVENT_NAMES.filter((event) => event !== "game:answer" && event !== "game:pick");
     for (const event of expected) expect(acked.has(event), `Ack ${event}`).toBe(true);

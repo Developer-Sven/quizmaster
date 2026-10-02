@@ -28,6 +28,7 @@ const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E> } = {
   "game:review": {},
   "game:rematch": {},
   "game:continue": { phase: "reveal" },
+  "game:end": {},
   "question:rate": { questionId: "q7", value: -1 },
   "question:report": { questionId: "q7", reason: "veraltet" },
   "dev:add-bot": {},
@@ -54,6 +55,7 @@ describe("Registry Client → Server (docs/05)", () => {
         "game:review",
         "game:rematch",
         "game:continue",
+        "game:end",
         "question:rate",
         "question:report",
         "dev:add-bot",
@@ -74,6 +76,10 @@ describe("Registry Client → Server (docs/05)", () => {
     });
     expect(CLIENT_EVENTS["lobby:create"].allowed).toContain("verlässt");
     expect(CLIENT_EVENTS["lobby:transfer-host"]).toMatchObject({ hostOnly: true, requiresMembership: true });
+    expect(CLIENT_EVENTS["game:end"]).toMatchObject({
+      hostOnly: true,
+      phases: ["intro", "category_pick", "question", "reveal", "turn_summary", "round_board"],
+    });
     expect(CLIENT_EVENTS["game:continue"]).toMatchObject({
       hostOnly: true,
       phases: ["question", "reveal", "turn_summary", "round_board"],

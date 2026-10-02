@@ -21,6 +21,7 @@ import {
   onAddBot,
   onContinue,
   onDisconnect,
+  onEndGame,
   onJoin,
   onKick,
   onLeave,
@@ -141,6 +142,8 @@ function dispatch(state: LobbyState, command: Command, tx: Tx, timer: PendingTim
       return onContinue(state, command, tx);
     case "TRANSFER_HOST":
       return onTransferHost(state, command, tx);
+    case "END_GAME":
+      return onEndGame(state, command, tx);
     case "KICK":
       return onKick(state, command, tx);
     case "START":

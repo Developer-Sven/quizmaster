@@ -255,6 +255,7 @@ export const RATE_LIMITS: readonly RateLimitRule[] = [
   socketEventRule("event.lobby-start.socket", "lobby:start", 10, 60),
   socketEventRule("event.game-rematch.socket", "game:rematch", 5, 60),
   socketEventRule("event.game-continue.socket", "game:continue", 10, 10),
+  socketEventRule("event.game-end.socket", "game:end", 5, 60),
   socketEventRule("event.dev-add-bot.socket", "dev:add-bot", 10, 60),
   rule({
     id: "event.game-answer.once",

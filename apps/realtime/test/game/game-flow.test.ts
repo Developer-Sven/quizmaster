@@ -398,6 +398,27 @@ describe("Anzeige-Modus und feste Kategorie (ADR-046/048)", () => {
   });
 });
 
+describe("Host beendet das Spiel (ADR-051)", () => {
+  it("game:end: alle sehen das Ergebnis mit Hinweis, danach geht es zurück in die Lobby", async () => {
+    const { code, clients, host } = await lobbyWith(2, { rounds: 3, questionsPerCategory: 3 });
+    const guest = clients[1] as TestClient;
+    const players = clients.map((client) => autoPlay(server, client, code, { answer: "correct" }));
+    const question = host.waitFor("lobby:state", (state) => state.phase === "question", 30_000);
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    await question;
+    expect(await guest.emit("game:end", {})).toMatchObject({ ok: false, error: { code: "NOT_HOST" } });
+    const notice = guest.waitFor("notice", (entry) => entry.code === "GAME_ENDED", 10_000);
+    const over = guest.waitFor("lobby:state", (state) => state.phase === "game_over", 10_000);
+    expect(await host.emit("game:end", {})).toEqual({ ok: true, data: null });
+    await notice;
+    expect((await over).results?.ranking).toHaveLength(2);
+    await waitForPhase(guest, "lobby", 15_000);
+    expect(await host.emit("game:end", {})).toMatchObject({ ok: false, error: { code: "INVALID_PHASE" } });
+    for (const player of players) player.stop();
+    for (const client of clients) client.close();
+  });
+});
+
 describe("Revanche", () => {
   it("setzt Punkte und Tafel zurück, behält die Einstellungen, lost neu aus und speichert ein zweites Spiel", async () => {
     const { code, clients } = await lobbyWith(2, { rounds: 1, questionsPerCategory: 1 });

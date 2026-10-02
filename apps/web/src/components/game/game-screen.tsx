@@ -51,6 +51,8 @@ export interface GameHandlers {
   onLeave: () => void;
   /** Host: „Weiter“ nach Frage, Kategorie oder Zwischenstand (ADR-045) bzw. „Auflösen“ (ADR-049) */
   onContinue: (phase: ContinuePhase) => void;
+  /** Host: Spiel für alle beenden (ADR-051), nach Bestätigung */
+  onEndGame: () => void;
 }
 
 export interface GameBusy {
@@ -58,6 +60,8 @@ export interface GameBusy {
   resign?: boolean;
   /** „Weiter“ gesendet, die Phase hat noch nicht gewechselt */
   continue?: boolean;
+  /** „Spiel beenden“ gesendet */
+  end?: boolean;
 }
 
 export interface GameScreenProps {
@@ -225,10 +229,13 @@ function GameScreenContent({
         progress={progress}
         announcement={announcement}
         canResign={isRunningPhase(phase) && selfPlayer?.status === "active"}
+        canEnd={isRunningPhase(phase) && isSelfHost}
         soundOn={soundOn}
         onToggleSound={handlers.onToggleSound}
         onResign={handlers.onResign}
         resigning={busy.resign}
+        onEnd={handlers.onEndGame}
+        ending={busy.end}
       />
       <main className={cx("relative flex flex-col", compact ? "shrink-0 grow" : "min-h-0 flex-1")}>
         {heading ? <h1 className="sr-only">{heading}</h1> : null}

@@ -43,7 +43,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
   const syncGeneration = useGameStore(selectSyncGeneration);
   const soundOn = useGameStore(selectSoundOn);
   const actions = useLobbyActions(realtimeUrl);
-  const [busy, setBusy] = useState<{ leave?: boolean; resign?: boolean }>({});
+  const [busy, setBusy] = useState<{ leave?: boolean; resign?: boolean; end?: boolean }>({});
   /** Beginn der Phase, für die „Weiter“ gerade gesendet wird (ADR-045) – danach wieder frei */
   const [continuing, setContinuing] = useState<number | null>(null);
   useWakeLock(lobby !== null && isRunningPhase(lobby.phase));
@@ -100,6 +100,14 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
     }
   };
 
+  const endGame = async () => {
+    setBusy((current) => ({ ...current, end: true }));
+    const result = await actions.client().emit("game:end", {});
+    setBusy((current) => ({ ...current, end: false }));
+    // INVALID_PHASE: das Spiel ist schon vorbei – kein Hinweis nötig.
+    if (!result.ok && result.code !== "INVALID_PHASE") actions.fail(result.code);
+  };
+
   const leave = async (kind: "leave" | "resign") => {
     setBusy((current) => ({ ...current, [kind]: true }));
     await actions.client().leaveLobby();
@@ -130,6 +138,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
         },
         onLeave: () => void leave("leave"),
         onContinue: (phase) => void continueGame(phase),
+        onEndGame: () => void endGame(),
       }}
     />
   );

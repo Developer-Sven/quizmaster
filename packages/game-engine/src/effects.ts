@@ -76,7 +76,7 @@ export type Effect =
   /** Shell sendet `toPrivateState(state, playerId)` als `lobby:self` an die Sockets dieser Person. */
   | { type: "sendPrivate"; playerId: string; guestId: string }
   /** Server-Event `notice { code }` an den Lobby-Raum. */
-  | { type: "notice"; code: Extract<NoticeCode, "HOST_CHANGED" | "PLAYER_LEFT"> }
+  | { type: "notice"; code: Extract<NoticeCode, "HOST_CHANGED" | "PLAYER_LEFT" | "GAME_ENDED"> }
   /** `kicked { reason }` an die Sockets der Person senden und sie aus dem Raum entfernen. */
   | { type: "kick"; playerId: string; guestId: string; reason: KickReason }
   /** Timer stellen; bei Fälligkeit `TIMEOUT { token }` dispatchen. */

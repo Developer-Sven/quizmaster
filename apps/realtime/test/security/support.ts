@@ -106,6 +106,7 @@ export const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E
   "game:review": {},
   "game:rematch": {},
   "game:continue": { phase: "reveal" },
+  "game:end": {},
   "question:rate": { questionId: "q1", value: 1 },
   "question:report": { questionId: "q1", reason: "falsch" },
   "dev:add-bot": {},

@@ -23,6 +23,7 @@ import type {
   ContinueCommand,
   CreateLobbyInput,
   DisconnectCommand,
+  EndGameCommand,
   JoinCommand,
   KickCommand,
   LeaveCommand,
@@ -34,7 +35,14 @@ import type {
   UpdateSettingsCommand,
 } from "./commands.ts";
 import { reject, requestPersist, type Tx } from "./context.ts";
-import { isSpectatingHost, onPhaseTimeout, resignPlayer, revealCurrentQuestion, startGame } from "./flow.ts";
+import {
+  finishGame,
+  isSpectatingHost,
+  onPhaseTimeout,
+  resignPlayer,
+  revealCurrentQuestion,
+  startGame,
+} from "./flow.ts";
 import { randomId, uniqueRandomId } from "./rng.ts";
 import {
   connectedMembers,
@@ -236,6 +244,17 @@ export function onContinue(state: LobbyState, command: ContinueCommand, tx: Tx):
   // Schon weitergeschaltet, die Shell lädt die nächste Kategorie (Doppeltipp): kein zweiter Schritt.
   if (state.game.pending !== null) reject("INVALID_PHASE", "Es geht schon weiter");
   return onPhaseTimeout(state, tx);
+}
+
+/**
+ * Host beendet das laufende Spiel für alle (ADR-051): Ergebnis mit dem aktuellen Stand – eine offene, noch nicht
+ * aufgelöste Frage zählt nicht –, Hinweis `GAME_ENDED`, danach wie gewohnt zurück in die Lobby.
+ */
+export function onEndGame(state: LobbyState, command: EndGameCommand, tx: Tx): LobbyState {
+  requireHost(state, command.guestId);
+  if (!isRunningPhase(state.phase) || state.game === null) reject("INVALID_PHASE", "Kein laufendes Spiel");
+  tx.effects.push({ type: "notice", code: "GAME_ENDED" });
+  return finishGame(state, "host_ended", tx);
 }
 
 /** Host gibt die Rolle an eine verbundene menschliche Person ab (ADR-047); alle erfahren es per Hinweis. */

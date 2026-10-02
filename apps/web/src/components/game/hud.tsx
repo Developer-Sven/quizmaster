@@ -13,11 +13,16 @@ export interface HudProps {
   announcement: string | null;
   /** Aufgeben möglich (aktiv im laufenden Spiel) */
   canResign: boolean;
+  /** Host im laufenden Spiel: `x` beendet das Spiel für alle (ADR-051) statt Aufgeben */
+  canEnd?: boolean;
   soundOn: boolean;
   onToggleSound: () => void;
   /** nach Bestätigung im Dialog „Spiel verlassen?“ */
   onResign: () => void;
   resigning?: boolean;
+  /** nach Bestätigung im Dialog „Spiel für alle beenden?“ */
+  onEnd?: () => void;
+  ending?: boolean;
 }
 
 /**
@@ -32,17 +37,28 @@ export function Hud({
   progress,
   announcement,
   canResign,
+  canEnd = false,
   soundOn,
   onToggleSound,
   onResign,
   resigning = false,
+  onEnd,
+  ending = false,
 }: HudProps) {
   const [confirm, setConfirm] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   return (
     <header className="z-hud border-b border-line bg-surface-1 pt-safe">
       <div className="mx-auto flex min-h-14 w-full max-w-column items-center gap-2 px-gutter py-1">
         <div className="flex w-11 shrink-0">
-          {canResign ? (
+          {canEnd ? (
+            <IconButton
+              icon={XIcon}
+              label={de.game.endGame}
+              onClick={() => setConfirmEnd(true)}
+              data-testid="hud-end"
+            />
+          ) : canResign ? (
             <IconButton icon={XIcon} label={de.game.resign} onClick={() => setConfirm(true)} data-testid="hud-resign" />
           ) : null}
         </div>
@@ -78,6 +94,19 @@ export function Hud({
           onResign();
         }}
         onCancel={() => setConfirm(false)}
+      />
+      <Dialog
+        open={confirmEnd && canEnd}
+        title={de.dialogs.endGame.title}
+        description={de.dialogs.endGame.description}
+        confirmLabel={de.dialogs.endGame.confirm}
+        cancelLabel={de.dialogs.endGame.cancel}
+        confirming={ending}
+        onConfirm={() => {
+          setConfirmEnd(false);
+          onEnd?.();
+        }}
+        onCancel={() => setConfirmEnd(false)}
       />
     </header>
   );

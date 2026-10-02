@@ -84,6 +84,12 @@ export interface TransferHostCommand {
   targetPlayerId: string;
 }
 
+/** `game:end` – Host beendet das laufende Spiel für alle mit dem aktuellen Stand (ADR-051). */
+export interface EndGameCommand {
+  type: "END_GAME";
+  guestId: string;
+}
+
 /** `lobby:kick` – Host, nicht sich selbst; entfernt + sperrt die Person für diese Lobby. */
 export interface KickCommand {
   type: "KICK";
@@ -186,6 +192,7 @@ export type Command =
   | RenameCommand
   | ContinueCommand
   | TransferHostCommand
+  | EndGameCommand
   | KickCommand
   | StartCommand
   | RematchCommand

@@ -110,3 +110,25 @@ test("Zeit pro Frage „Host“: kein Countdown, der Host löst mit Stand der An
   await reveal.click();
   for (const player of [host, ben]) await waitForOverlay(player, "answer-reveal");
 });
+
+test("Host beendet das Spiel: Ergebnis für alle, Hinweis, dann zurück in die Lobby (ADR-051)", async ({ players }) => {
+  const host = await players.create("Mia");
+  const ben = await players.create("Ben");
+  const code = await host.createLobby();
+  await ben.joinByCode(code);
+  await host.changeSettings({ Runden: 3, "Fragen pro Kategorie": 3 });
+  await host.startGame();
+  await pickRoles([host, ben]);
+  // Nur der Host beendet; alle anderen können nur aufgeben.
+  await expect(ben.page.getByTestId("hud-end")).toHaveCount(0);
+  await expect(ben.page.getByTestId("hud-resign")).toBeVisible();
+  await host.page.getByRole("button", { name: "Spiel beenden" }).click();
+  const dialog = host.page.getByRole("alertdialog", { name: "Spiel für alle beenden?" });
+  await expect(dialog).toContainText("aktuellen Stand");
+  await dialog.getByRole("button", { name: "Beenden" }).click();
+  for (const player of [host, ben]) await waitForOverlay(player, "game-over");
+  await expect(ben.toast("Der Host hat das Spiel beendet.")).toBeAttached();
+  for (const player of [host, ben]) {
+    await expect(player.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
+  }
+});

@@ -167,6 +167,8 @@ export const de = {
     progress: (round: number, rounds: number, turn: number, turns: number) =>
       `Runde ${round}/${rounds} · Zug ${turn}/${turns}`,
     resign: "Aufgeben",
+    /** Host beendet das Spiel für alle (ADR-051) */
+    endGame: "Spiel beenden",
     soundOn: "Ton an",
     soundOff: "Ton aus",
     versus: "VS",
@@ -232,6 +234,13 @@ export const de = {
       title: "Spiel verlassen?",
       description: "Du giltst dann als aufgegeben.",
       confirm: "Verlassen",
+      cancel: "Weiterspielen",
+    },
+    /** Host beendet das Spiel vorzeitig (ADR-051) */
+    endGame: {
+      title: "Spiel für alle beenden?",
+      description: "Alle sehen das Ergebnis mit dem aktuellen Stand, danach geht es zurück in die Lobby.",
+      confirm: "Beenden",
       cancel: "Weiterspielen",
     },
     leaveLobby: {
@@ -321,6 +330,7 @@ export const de = {
     hostChanged: (name: string) => `${name} ist jetzt Host.`,
     playerResigned: (name: string) => `${name} hat aufgegeben.`,
     serverRestart: "Neustart – gleich geht es weiter.",
+    gameEnded: "Der Host hat das Spiel beendet.",
   },
 
   pages: {
