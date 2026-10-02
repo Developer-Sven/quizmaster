@@ -6,6 +6,7 @@
  * Fehler sind immer `ProtocolError` mit Code aus shared; die Event-Registry des Kerns macht daraus das
  * Fehler-Ack (unerwartete Fehler → `INTERNAL`, nie roh an den Client).
  */
+
 import type { EnginePlayer, LobbyState } from "@quizmaster/game-engine";
 import { findPlayerByGuestId } from "@quizmaster/game-engine";
 import { type ClientEventAckData, type ClientEventName, ProtocolError } from "@quizmaster/shared";
@@ -16,6 +17,7 @@ import type { LobbyRegistry } from "../lobby/lobby-registry.ts";
 import type { AckSent, AppSocket, EventContext, ModuleContext } from "../registry/types.ts";
 import type { AppConfigService } from "../services/app-config.ts";
 import type { FeedbackService } from "../services/feedback.ts";
+import type { QuestionService } from "../services/questions.ts";
 
 /**
  * Höchstalter einer Turnstile-Prüfung (`tsv` im Ticket), solange `appConfig.turnstileOnJoin` aktiv ist
@@ -31,6 +33,8 @@ export interface HandlerRuntime {
   readonly lobbies: LobbyRegistry;
   readonly feedback: FeedbackService;
   readonly appConfig: AppConfigService;
+  /** Spielbare Kategorien (Prüfung der Kategorie-Auswahl, ADR-048). */
+  readonly questions: Pick<QuestionService, "playableCategories">;
 }
 
 export type RuntimeAccess = () => HandlerRuntime;

@@ -46,6 +46,8 @@ export const de = {
     close: "Schließen",
     /** Host schaltet nach Frage, Kategorie oder Zwischenstand weiter (ADR-045) */
     next: "Weiter",
+    /** Host löst eine Frage ohne Countdown auf (ADR-049), mit Stand der Antworten */
+    revealNow: (answered: number, total: number) => `Auflösen (${answered}/${total} Antworten)`,
     /** Eigenen Namen in der Lobby ändern (ADR-041) */
     rename: "Name ändern",
     save: "Speichern",
@@ -98,6 +100,15 @@ export const de = {
       `${questions} ${plural(questions, "Frage", "Fragen")} · ca. ${minutes} Min.`,
     host: "Host",
     offline: "offline",
+    /** Host im Anzeige-Modus (ADR-046) */
+    presenting: "zeigt an",
+    /** IconButton „Host übertragen“ (ADR-047) */
+    makeHost: (name: string) => `${name} zum Host machen`,
+    /** Zusatzzeile der Zusammenfassung, nur bei abweichenden Einstellungen (ADR-046/048/049) */
+    onlyCategory: (name: string) => `Nur ${name}`,
+    categoryCount: (count: number) => `${count} Kategorien`,
+    answerTime: (seconds: number) => (seconds === 0 ? "Auflösen per Host" : `${seconds} s pro Frage`),
+    hostPresents: (name: string) => `${name} zeigt nur an`,
     copyCode: "Code kopieren",
     shareLink: "Link teilen",
     showQrCode: "QR-Code zeigen",
@@ -121,14 +132,26 @@ export const de = {
     maxPlayers: "Personen maximal",
     decrease: (label: string) => `${label} verringern`,
     increase: (label: string) => `${label} erhöhen`,
-    /** Weiter nach Frage, Kategorie und Zwischenstand (ADR-045) */
-    advanceTitle: "Weiter",
+    /** Zeit pro Frage (ADR-049) sowie Weiter nach Frage, Kategorie und Zwischenstand (ADR-045) */
+    advanceTitle: "Zeit und Weiter",
+    answerTime: "Zeit pro Frage",
     afterQuestion: "Nach jeder Frage",
     afterTurn: "Nach jeder Kategorie",
     afterRound: "Nach dem Zwischenstand",
     /** Wert im Stepper: Sekunden bzw. „Host“ (Host tippt „Weiter“) */
     advanceValue: (seconds: number) => (seconds === 0 ? "Host" : `${seconds} s`),
-    advanceHint: "„Host“: Es geht erst weiter, wenn du auf „Weiter“ tippst.",
+    advanceHint: "„Host“: Es geht erst weiter, wenn du auf „Auflösen“ bzw. „Weiter“ tippst.",
+    /** Kategorien begrenzen (ADR-048) */
+    categories: "Kategorien",
+    categoriesTitle: "Kategorien",
+    categoriesAll: "Alle Kategorien",
+    categoriesAllShort: "Alle",
+    categoriesCount: (count: number) => `${count} ausgewählt`,
+    categoriesHint: "Bei einer Kategorie entfällt die Wahl, bei zwei oder drei stehen alle zur Wahl.",
+    /** Anzeige-Modus (ADR-046) */
+    hostTitle: "Du als Host",
+    hostPlays: "Du spielst mit",
+    hostPresents: "Du zeigst nur an (großer Bildschirm)",
   },
 
   game: {
@@ -145,6 +168,9 @@ export const de = {
     /** Unter der Reveal-Kachel, z. B. „3 Fragen · gewählt von Mia“ */
     revealSubtitle: (questions: number, name: string) =>
       `${questions} ${plural(questions, "Frage", "Fragen")} · gewählt von ${name}`,
+    /** Nur eine Kategorie erlaubt (ADR-048) – niemand hat gewählt */
+    revealSubtitleFixed: (questions: number) =>
+      `${questions} ${plural(questions, "Frage", "Fragen")} · feste Kategorie`,
     questionProgress: (index: number, total: number) => `Frage ${index}/${total}`,
     /** Überschrift (nur Screenreader) über Frage und Auflösung, zugleich Beschreibung der Antwortgruppe */
     questionHeading: (index: number, total: number) => `Frage ${index} von ${total}`,
@@ -210,6 +236,13 @@ export const de = {
       title: (name: string) => `${name} entfernen?`,
       description: (name: string) => `${name} kann dieser Lobby nicht wieder beitreten.`,
       confirm: "Entfernen",
+      cancel: "Abbrechen",
+    },
+    /** Host übertragen (ADR-047) */
+    transferHost: {
+      title: (name: string) => `${name} zum Host machen?`,
+      description: (name: string) => `${name} stellt dann ein und startet das Spiel.`,
+      confirm: "Übertragen",
       cancel: "Abbrechen",
     },
   },

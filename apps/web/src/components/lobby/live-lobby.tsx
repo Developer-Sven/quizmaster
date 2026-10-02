@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
+import { loadCategoryCatalog } from "@/lib/client/categories";
 import { errorText } from "@/lib/client/errors";
 import { inviteLink } from "@/lib/client/paths";
 import { writeStoredName } from "@/lib/client/storage";
@@ -44,6 +45,16 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
   useEffect(() => {
     gameActions.restoreLastGame(code);
   }, [code]);
+  // Alle spielbaren Kategorien für Auswahl und Zusammenfassung (ADR-048) – einmal je Seite, gecacht.
+  useEffect(() => {
+    let active = true;
+    void loadCategoryCatalog().then((options) => {
+      if (active && options.length > 0) gameActions.addCategories(options);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const settingsSync = useSettingsSync(
     lobby?.settings ?? null,
     (update) => actions.client().emit("lobby:update-settings", update),
@@ -71,6 +82,11 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
     setLeaving(true);
     await actions.client().leaveLobby();
     router.push("/");
+  };
+
+  const transferHost = async (playerId: string) => {
+    const result = await actions.client().emit("lobby:transfer-host", { playerId });
+    if (!result.ok) actions.fail(result.code);
   };
 
   const kick = async (playerId: string) => {
@@ -116,6 +132,8 @@ export function LiveLobby({ code, displayCode, realtimeUrl, devBots }: LiveLobby
       onChangeSettings={settingsSync.change}
       onSettingsClosed={() => void settingsSync.flush()}
       onRename={rename}
+      onTransferHost={(playerId) => void transferHost(playerId)}
+      categories={categories}
       onCopyCode={() => void actions.copyCode(code)}
       onShare={() => void actions.shareInvite(displayCode, inviteUrl || inviteLink(window.location.origin, code))}
       onAddBot={() => void addBot()}

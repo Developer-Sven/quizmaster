@@ -99,6 +99,7 @@ export const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E
   "lobby:update-settings": { rounds: 3 },
   "lobby:kick": { playerId: "p1" },
   "lobby:rename": { name: "Ben" },
+  "lobby:transfer-host": { playerId: "p1" },
   "lobby:start": {},
   "game:pick": { categoryId: "comics" },
   "game:answer": { questionId: "q1", choice: 1 },

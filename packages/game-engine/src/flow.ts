@@ -5,7 +5,7 @@
  * Regeln: Reihenfolge wird beim Start ausgelost und gilt für alle Runden; jede aktive Person wählt genau
  * einmal pro Runde; Aufgegebene werden übersprungen; weniger als 2 Aktive → sofort `game_over`.
  */
-import { GAME_RULES, questionLeadInMs } from "@quizmaster/shared";
+import { answerWindowMs, GAME_RULES, MANUAL_ANSWER_CAP_MS, questionLeadInMs } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import type { TurnRef } from "./effects.ts";
 import { advancePhaseEnd, clearPhaseTimer, enterPhase } from "./phases.ts";
@@ -31,9 +31,16 @@ import { addTimer, removeTimers } from "./timers.ts";
 import type { GameEndReason, GameState, LobbyState, PickedBy } from "./types.ts";
 
 /** Startet ein Spiel (START, REMATCH): Reihenfolge auslosen, Punkte/Tafel neu, Intro. */
+/** Zeigt der Host nur an (Anzeige-Modus, ADR-046)? Dann spielt diese Person nicht mit. */
+export function isSpectatingHost(state: LobbyState, playerId: string): boolean {
+  return !state.settings.hostPlays && playerId === state.hostPlayerId;
+}
+
 export function startGame(state: LobbyState, tx: Tx): LobbyState {
   const order = shuffle(
-    members(state).map((player) => player.playerId),
+    members(state)
+      .filter((player) => !isSpectatingHost(state, player.playerId))
+      .map((player) => player.playerId),
     tx.rng,
   );
   const game: GameState = {
@@ -48,7 +55,10 @@ export function startGame(state: LobbyState, tx: Tx): LobbyState {
     pending: null,
     results: null,
   };
-  const players = state.players.map((player) => ({ ...player, status: "active" as const }));
+  const players = state.players.map((player) => ({
+    ...player,
+    status: isSpectatingHost(state, player.playerId) ? ("spectator" as const) : ("active" as const),
+  }));
   requestPersist(tx, "game_started");
   return enterPhase({ ...state, players, game, lastGame: null }, "intro", tx, { endsAt: tx.now + tx.timings.introMs });
 }
@@ -97,6 +107,7 @@ function requestOptions(state: LobbyState, round: number, orderIndex: number, tx
     questionsPerTurn: state.settings.questionsPerCategory,
     playedCategoryIds: game.turns.flatMap((entry) => (entry.categoryId === null ? [] : [entry.categoryId])),
     usedQuestionIds: usedQuestionIds(game),
+    categoryIds: state.settings.categoryIds === null ? null : [...state.settings.categoryIds],
   };
   tx.effects.push({ type: "offerCategories", token, turn });
   const requested = updateGame(next, (current) => ({
@@ -147,10 +158,20 @@ export function autoPick(state: LobbyState, tx: Tx): LobbyState {
   return applyPick(state, pickOne(turn.options, tx.rng).id, "timeout", tx);
 }
 
-/** Stellt Frage `index` des aktuellen Zuges: Vorlauf (2.000 bzw. 800 ms), dann Antwortzeit. */
+/**
+ * Antwortzeit (ADR-049): eingestellte Sekunden; „Host“ → Sicherheitsnetz von 10 min (der Host löst vorher auf);
+ * im schnellen Testmodus der feste Wert.
+ */
+function answerMsFor(state: LobbyState, tx: Tx): number {
+  const window = answerWindowMs(state.settings);
+  if (window === null) return MANUAL_ANSWER_CAP_MS;
+  return state.timing === "fast" ? tx.timings.answerMs : window;
+}
+
+/** Stellt Frage `index` des aktuellen Zuges: Vorlauf (3.000 bzw. 1.500 ms), dann Antwortzeit. */
 export function presentQuestion(state: LobbyState, index: number, tx: Tx): LobbyState {
   const startsAt = tx.now + questionLeadInMs(tx.timings, index + 1);
-  const deadline = startsAt + tx.timings.answerMs;
+  const deadline = startsAt + answerMsFor(state, tx);
   const next = updateCurrentTurn(state, (turn) => {
     if (!turn.questions[index]) throw new Error(`Frage ${index} fehlt im Zug`);
     return {
@@ -260,6 +281,11 @@ export function finishGame(state: LobbyState, reason: GameEndReason, tx: Tx): Lo
  * Status „resigned“, Punkte bleiben sichtbar, ihre Züge entfallen. Weniger als 2 Aktive → Spielende.
  */
 export function resignPlayer(state: LobbyState, playerId: string, tx: Tx): LobbyState {
+  // Anzeigender Host (ADR-046): spielt nicht mit – er verlässt nur die Lobby, das Spiel läuft unverändert weiter.
+  if (findPlayer(state, playerId)?.status === "spectator") {
+    requestPersist(tx, "players");
+    return updatePlayer(state, playerId, { left: true, connected: false, disconnectedAt: null });
+  }
   const resigned = updatePlayer(state, playerId, {
     status: "resigned",
     left: true,

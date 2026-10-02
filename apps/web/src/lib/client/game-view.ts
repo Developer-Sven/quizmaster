@@ -130,10 +130,16 @@ export function answerWaitingCount(
 const ANSWER_POSITIONS = [0, 1, 2, 3] as const satisfies readonly AnswerIndex[];
 
 /** Zustände der vier Antworten während der Frage (docs/09 §7.4–5). */
-export function questionAnswerStates(choice: AnswerIndex | null, canAnswer: boolean): AnswerState[] {
+export function questionAnswerStates(
+  choice: AnswerIndex | null,
+  canAnswer: boolean,
+  presenting = false,
+): AnswerState[] {
   return ANSWER_POSITIONS.map((index) => {
     if (choice !== null) return index === choice ? "locked" : "dimmed";
-    return canAnswer ? "idle" : "disabled";
+    if (canAnswer) return "idle";
+    // Anzeige-Modus (ADR-046): voll lesbar statt ausgegraut – nur nicht bedienbar.
+    return presenting ? "view" : "disabled";
   });
 }
 

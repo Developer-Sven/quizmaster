@@ -148,6 +148,7 @@ function StageOverlay({
           category={categoryVisual(categories, question.categoryId)}
           questionCount={question.total}
           pickerName={findPlayer(lobby.players, turn?.pickerId)?.name ?? ""}
+          fixed={turn?.options.length === 1}
           phaseStartedAt={lobby.phaseStartedAt}
           startsAt={question.startsAt}
         />
@@ -159,6 +160,8 @@ function StageOverlay({
           question={question}
           myChoice={myChoiceFor(question, self, pendingAnswer)}
           canAnswer={selfPlayer?.status === "active"}
+          untimed={lobby.settings.answerSec === 0}
+          presenting={selfPlayer?.status === "spectator"}
           waitingCount={answerWaitingCount(lobby, selfId)}
           runId={`${question.id}:${syncGeneration}`}
           onAnswer={(choice) => onAnswer(question.id, choice)}

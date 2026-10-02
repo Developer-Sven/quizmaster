@@ -27,6 +27,8 @@ export interface TurnRef {
   playedCategoryIds: string[];
   /** Im Spiel bereits benutzte Fragen (DB-IDs) – nie doppelt im selben Spiel. */
   usedQuestionIds: string[];
+  /** Auswahl des Hosts (`settings.categoryIds`, ADR-048); `null` = alle spielbaren Kategorien. */
+  categoryIds: string[] | null;
 }
 
 /** Anlass eines Snapshots (Shell speichert entprellt in `lobbies`). */

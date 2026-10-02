@@ -44,8 +44,11 @@ function projectTurn(state: LobbyState): PublicTurn | null {
   if (!TURN_PHASES.has(state.phase)) return null;
   const turn = currentTurn(state.game);
   if (!turn) return null;
-  const [a, b, c] = turn.options;
-  return { pickerId: turn.pickerId, options: [{ ...a }, { ...b }, { ...c }], categoryId: turn.categoryId };
+  return {
+    pickerId: turn.pickerId,
+    options: turn.options.map((option) => ({ ...option })),
+    categoryId: turn.categoryId,
+  };
 }
 
 function projectQuestion(state: LobbyState): PublicQuestion | null {

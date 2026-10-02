@@ -14,7 +14,7 @@ import {
 
 describe("Vollständigkeit (docs/06 Invariante 6)", () => {
   it("jedes Client→Server-Event der Registry hat mindestens ein Limit", () => {
-    expect(CLIENT_EVENT_NAMES).toHaveLength(17);
+    expect(CLIENT_EVENT_NAMES).toHaveLength(18);
     for (const event of CLIENT_EVENT_NAMES) expect(rateLimitsFor(event).length, event).toBeGreaterThan(0);
   });
 
@@ -91,6 +91,7 @@ const EXPECTED: Record<string, Expected> = {
   "event.lobby-leave.socket": ["lobby:leave", "socket", 10, 60, 0, "memory", ACK],
   "event.lobby-update-settings.socket": ["lobby:update-settings", "socket", 40, 10, 0, "memory", ACK],
   "event.lobby-rename.socket": ["lobby:rename", "socket", 5, 60, 0, "memory", ACK],
+  "event.lobby-transfer-host.socket": ["lobby:transfer-host", "socket", 5, 60, 0, "memory", ACK],
   "event.lobby-kick.socket": ["lobby:kick", "socket", 10, 60, 0, "memory", ACK],
   "event.lobby-start.socket": ["lobby:start", "socket", 10, 60, 0, "memory", ACK],
   "event.game-rematch.socket": ["game:rematch", "socket", 5, 60, 0, "memory", ACK],

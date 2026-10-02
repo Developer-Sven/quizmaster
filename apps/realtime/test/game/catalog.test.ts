@@ -304,6 +304,7 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     questionsPerTurn,
     playedCategoryIds: [],
     usedQuestionIds: [],
+    categoryIds: null,
   });
 
   it("Änderungen während eines Reloads werden nach dem Tausch erneut angewendet", async () => {

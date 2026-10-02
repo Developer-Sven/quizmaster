@@ -1,4 +1,4 @@
-import { getTimings, type Phase } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS, getTimings, MANUAL_ANSWER_CAP_MS, type Phase } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import {
   currentQuestion,
@@ -458,14 +458,7 @@ describe("Spielende und Revanche", () => {
     expect(pub.players.every((player) => player.score === 0 && player.status === "active")).toBe(true);
     expect(pub.board).toEqual([]);
     expect(pub.results).toBeNull();
-    expect(pub.settings).toEqual({
-      rounds: 1,
-      questionsPerCategory: 2,
-      maxPlayers: 8,
-      afterQuestionSec: 5,
-      afterTurnSec: 5,
-      afterRoundSec: 7,
-    });
+    expect(pub.settings).toEqual({ ...DEFAULT_LOBBY_SETTINGS, rounds: 1, questionsPerCategory: 2 });
     expect(sim.state.game?.gameId).not.toBe(firstGameId);
     expect([...(pub.order ?? [])].sort()).toEqual(pub.players.map((player) => player.id).sort());
     orders.add(JSON.stringify(pub.order));
@@ -607,6 +600,173 @@ describe("Weiter nach Frage, Kategorie und Zwischenstand (ADR-045)", () => {
     sim.ok({ type: "START", guestId: sim.host });
     toPhase(sim, "reveal");
     expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "reveal" }))).toBe("INVALID_PHASE");
+  });
+});
+
+describe("Anzeige-Modus: Host spielt nicht mit (ADR-046)", () => {
+  it("Host zeigt nur an: nicht in Reihenfolge, Zügen und Ergebnis; danach wieder normales Mitglied", () => {
+    const sim = lobbyWith(3);
+    const hostId = sim.playerId(sim.host);
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { hostPlays: false, rounds: 1, questionsPerCategory: 1 },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    const pub = toPublicState(sim.state);
+    expect(pub.players.find((player) => player.id === hostId)?.status).toBe("spectator");
+    expect(pub.order).toHaveLength(2);
+    expect(pub.order).not.toContain(hostId);
+    toPhase(sim, "category_pick");
+    expect(currentTurn(sim.state.game)?.participantIds).not.toContain(hostId);
+    expect(currentTurn(sim.state.game)?.pickerId).not.toBe(hostId);
+    // Der Host kann nicht antworten.
+    toPhase(sim, "question");
+    sim.toQuestionStart();
+    expect(errorCode(sim.answer(sim.host, 0))).toBe("INVALID_PHASE");
+    toPhase(sim, "game_over");
+    const ranking = toPublicState(sim.state).results?.ranking ?? [];
+    expect(ranking.map((entry) => entry.playerId)).not.toContain(hostId);
+    expect(ranking).toHaveLength(2);
+    sim.runUntil((state) => state.phase === "lobby");
+    expect(toPublicState(sim.state).players.every((player) => player.status === "active")).toBe(true);
+  });
+
+  it("Start braucht 2 verbundene Mitspielende ohne den anzeigenden Host", () => {
+    const sim = lobbyWith(2);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { hostPlays: false } });
+    expect(errorCode(sim.dispatch({ type: "START", guestId: sim.host }))).toBe("NOT_ENOUGH_PLAYERS");
+    sim.join("Lea");
+    sim.ok({ type: "START", guestId: sim.host });
+  });
+
+  it("anzeigender Host geht mitten im Spiel: kein „hat aufgegeben“, das Spiel läuft weiter, neuer Host spielt", () => {
+    const sim = lobbyWith(3);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { hostPlays: false } });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "question");
+    const from = sim.effects.length;
+    sim.ok({ type: "LEAVE", guestId: sim.host });
+    expect(sim.effects.slice(from)).not.toContainEqual({ type: "notice", code: "PLAYER_LEFT" });
+    expect(sim.effects.slice(from)).toContainEqual({ type: "notice", code: "HOST_CHANGED" });
+    expect(sim.state.phase).toBe("question");
+    const host = sim.state.players.find((player) => player.playerId === sim.state.hostPlayerId);
+    expect(host?.status).toBe("active");
+  });
+});
+
+describe("Kategorien begrenzen (ADR-048)", () => {
+  it("eine feste Kategorie: keine Wahl, jeder Zug in dieser Kategorie (pickedBy fixed)", () => {
+    const sim = lobbyWith(2);
+    const fixed = sim.catalog.categories[0]?.id ?? "";
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { categoryIds: [fixed], rounds: 2, questionsPerCategory: 1 },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    const phases = new Set<string>();
+    sim.runUntil((state) => {
+      phases.add(state.phase);
+      return state.phase === "game_over";
+    });
+    expect(phases.has("category_pick")).toBe(false);
+    const turns = sim.state.game?.turns ?? [];
+    expect(turns).toHaveLength(4);
+    for (const turn of turns) {
+      expect(turn.categoryId).toBe(fixed);
+      expect(turn.pickedBy).toBe("fixed");
+      expect(turn.options.map((option) => option.id)).toEqual([fixed]);
+    }
+  });
+
+  it("zwei Kategorien: Wahl zwischen beiden, auch der des letzten Zuges", () => {
+    const sim = lobbyWith(2);
+    const [a = "", b = ""] = sim.catalog.categories.map((category) => category.id);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { categoryIds: [a, b], questionsPerCategory: 1 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    for (let turnIndex = 0; turnIndex < 3; turnIndex++) {
+      sim.runUntil((state) => state.phase === "category_pick" && currentTurn(state.game)?.categoryId === null);
+      const turn = currentTurn(sim.state.game);
+      expect(turn?.options.map((option) => option.id).sort()).toEqual([a, b].sort());
+      sim.ok({ type: "PICK", guestId: pickerGuest(sim), categoryId: turn?.options[0]?.id ?? "" });
+    }
+  });
+});
+
+describe("Weiter während des Ladens (ADR-045)", () => {
+  it("ein zweites „Weiter“, solange die nächste Kategorie noch geladen wird, wird abgelehnt", () => {
+    const sim = lobbyWith(2, 0, { autoRespond: false });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { afterTurnSec: 0, questionsPerCategory: 1 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    for (let i = 0; i < 60 && sim.state.phase !== "turn_summary"; i++) {
+      if (sim.requests.length > 0) sim.respond();
+      else if (sim.state.phase === "category_pick" && currentTurn(sim.state.game)?.categoryId === null) {
+        const turn = currentTurn(sim.state.game);
+        sim.ok({ type: "PICK", guestId: pickerGuest(sim), categoryId: turn?.options[0]?.id ?? "" });
+      } else sim.fireNext();
+    }
+    expect(sim.state.phase).toBe("turn_summary");
+    sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "turn_summary" });
+    // Die Shell sucht noch Kategorien (Phase bleibt Zug-Ergebnis): kein zweiter Schritt.
+    expect(sim.state.game?.pending?.kind).toBe("options");
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "turn_summary" }))).toBe(
+      "INVALID_PHASE",
+    );
+  });
+});
+
+describe("Zeit pro Frage (ADR-049)", () => {
+  it("eingestellte Sekunden bestimmen die Antwortzeit; schneller Testmodus bleibt bei 2 s", () => {
+    const sim = lobbyWith(2);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { answerSec: 45 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "question");
+    const question = currentQuestion(sim.state.game);
+    expect((question?.deadline ?? 0) - (question?.startsAt ?? 0)).toBe(45_000);
+    const fast = lobbyWith(2, 0, { timing: "fast" });
+    fast.ok({ type: "UPDATE_SETTINGS", guestId: fast.host, update: { answerSec: 60 } });
+    fast.ok({ type: "START", guestId: fast.host });
+    toPhase(fast, "question");
+    const fastQuestion = currentQuestion(fast.state.game);
+    expect((fastQuestion?.deadline ?? 0) - (fastQuestion?.startsAt ?? 0)).toBe(getTimings("fast").answerMs);
+  });
+
+  it("„Host“: kein Countdown (Sicherheitsnetz 10 min), der Host löst auf – erst ab Fragebeginn, nur er", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { answerSec: 0 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "question");
+    const question = currentQuestion(sim.state.game);
+    expect((question?.deadline ?? 0) - (question?.startsAt ?? 0)).toBe(MANUAL_ANSWER_CAP_MS);
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "question" }))).toBe("TOO_EARLY");
+    sim.toQuestionStart();
+    expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: ben, phase: "question" }))).toBe("NOT_HOST");
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    sim.ok({ type: "CONTINUE", guestId: sim.host, phase: "question" });
+    expect(sim.state.phase).toBe("reveal");
+    // Wer nicht geantwortet hat, liegt falsch – wie bei abgelaufener Zeit.
+    const outcomes = currentQuestion(sim.state.game)?.outcomes ?? [];
+    expect(outcomes.filter((outcome) => outcome.correct)).toHaveLength(1);
+  });
+
+  it("„Host“: antworten alle, wird wie gewohnt sofort aufgelöst; mit Countdown kein „Auflösen“", () => {
+    const sim = lobbyWith(2);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { answerSec: 0 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    toPhase(sim, "question");
+    sim.toQuestionStart();
+    for (const guest of sim.guests) sim.answer(guest, sim.correct);
+    sim.advance(T.earlyRevealMs);
+    expect(sim.state.phase).toBe("reveal");
+    const timed = lobbyWith(2);
+    timed.ok({ type: "START", guestId: timed.host });
+    toPhase(timed, "question");
+    timed.toQuestionStart();
+    expect(errorCode(timed.dispatch({ type: "CONTINUE", guestId: timed.host, phase: "question" }))).toBe(
+      "INVALID_PHASE",
+    );
   });
 });
 

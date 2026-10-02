@@ -184,7 +184,8 @@ export function autoPlay(
       const key = `${state.phaseStartedAt}:${state.turn.pickerId}`;
       if (state.turn.pickerId !== playerId || pickedTurns.has(key) || options.pick === false) return;
       pickedTurns.add(key);
-      const categoryId = state.turn.options[0].id;
+      const categoryId = state.turn.options[0]?.id;
+      if (categoryId === undefined) return;
       void client.emit("game:pick", { categoryId }).then((ack) => {
         if (ack.ok) picks += 1;
         else rejected.push(`game:pick:${ack.error.code}`);

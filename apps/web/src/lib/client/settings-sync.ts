@@ -27,14 +27,29 @@ export interface SettingsSyncDeps {
 }
 
 type SettingsKey = keyof LobbySettings;
+type SettingsValue = LobbySettings[SettingsKey];
+type SettingsEntries = Partial<Record<SettingsKey, SettingsValue>>;
+
+/** Gleicher Wert – auch für Kategorie-Listen (ADR-048). */
+function sameValue(a: SettingsValue | undefined, b: SettingsValue | undefined): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.length === b.length && a.every((entry, index) => entry === b[index]);
+  return false;
+}
+
+/** Entwurf als Einstellungs-Teilobjekt (die Schlüssel stammen immer aus `LobbySettings`). */
+function asSettings(entries: SettingsEntries): Partial<LobbySettings> {
+  return entries as Partial<LobbySettings>;
+}
 
 /** Einträge des Entwurfs, die vom Server-Stand abweichen. */
 function unconfirmed(draft: Partial<LobbySettings>, server: LobbySettings): Partial<LobbySettings> {
-  const result: Partial<Record<SettingsKey, number>> = {};
-  for (const [key, value] of Object.entries(draft) as [SettingsKey, number | undefined][]) {
-    if (value !== undefined && value !== server[key]) result[key] = value;
+  const result: SettingsEntries = {};
+  for (const [key, value] of Object.entries(draft) as [SettingsKey, SettingsValue | undefined][]) {
+    if (value !== undefined && !sameValue(value, server[key])) result[key] = value;
   }
-  return result;
+  return asSettings(result);
 }
 
 function isEmpty(values: Partial<LobbySettings>): boolean {
@@ -43,7 +58,7 @@ function isEmpty(values: Partial<LobbySettings>): boolean {
 
 function sameEntries(a: Partial<LobbySettings>, b: Partial<LobbySettings>): boolean {
   const keys = Object.keys(a) as SettingsKey[];
-  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+  return keys.length === Object.keys(b).length && keys.every((key) => sameValue(a[key], b[key]));
 }
 
 export class SettingsSync {
@@ -72,11 +87,11 @@ export class SettingsSync {
   /** Ein Tipp: sofort anzeigen, Senden planen. */
   change(update: SettingsUpdate): void {
     if (this.#disposed) return;
-    const next: Partial<Record<SettingsKey, number>> = { ...this.#draft };
-    for (const [key, value] of Object.entries(update) as [SettingsKey, number | undefined][]) {
+    const next: SettingsEntries = { ...this.#draft };
+    for (const [key, value] of Object.entries(update) as [SettingsKey, SettingsValue | undefined][]) {
       if (value !== undefined) next[key] = value;
     }
-    this.#setDraft(next);
+    this.#setDraft(asSettings(next));
     const now = Date.now();
     this.#firstUnsentAt ??= now;
     this.#schedule(Math.min(now + SETTINGS_SYNC_TIMING.idleMs, this.#firstUnsentAt + SETTINGS_SYNC_TIMING.maxWaitMs));
@@ -91,13 +106,13 @@ export class SettingsSync {
     if (this.#sending !== null) return;
     const awaiting = this.#awaiting;
     this.#awaiting = null;
-    const kept: Partial<Record<SettingsKey, number>> = {};
-    for (const [key, value] of Object.entries(this.#draft) as [SettingsKey, number | undefined][]) {
-      if (value === undefined || value === server[key]) continue;
-      if (awaiting !== null && awaiting[key] === value) continue;
+    const kept: SettingsEntries = {};
+    for (const [key, value] of Object.entries(this.#draft) as [SettingsKey, SettingsValue | undefined][]) {
+      if (value === undefined || sameValue(value, server[key])) continue;
+      if (awaiting !== null && sameValue(awaiting[key], value)) continue;
       kept[key] = value;
     }
-    if (!sameEntries(kept, this.#draft)) this.#setDraft(kept);
+    if (!sameEntries(asSettings(kept), this.#draft)) this.#setDraft(asSettings(kept));
   }
 
   /**
@@ -133,11 +148,14 @@ export class SettingsSync {
 
   /** Noch zu sendende Werte: weichen vom Server-Stand ab und sind nicht schon bestätigt gesendet. */
   #pending(): Partial<LobbySettings> {
-    const result: Partial<Record<SettingsKey, number>> = {};
-    for (const [key, value] of Object.entries(unconfirmed(this.#draft, this.#server)) as [SettingsKey, number][]) {
-      if (this.#awaiting?.[key] !== value) result[key] = value;
+    const result: SettingsEntries = {};
+    for (const [key, value] of Object.entries(unconfirmed(this.#draft, this.#server)) as [
+      SettingsKey,
+      SettingsValue,
+    ][]) {
+      if (!sameValue(this.#awaiting?.[key], value)) result[key] = value;
     }
-    return result;
+    return asSettings(result);
   }
 
   /** Senden zum Zeitpunkt `at` planen – nie früher als 350 ms nach dem letzten Senden. */
@@ -182,11 +200,11 @@ export class SettingsSync {
         return;
       }
       // Abgelehnt: gesendete, seither unveränderte Werte verwerfen – der Server-Stand gilt.
-      const kept: Partial<Record<SettingsKey, number>> = {};
-      for (const [key, value] of Object.entries(this.#draft) as [SettingsKey, number | undefined][]) {
-        if (value !== undefined && update[key] !== value) kept[key] = value;
+      const kept: SettingsEntries = {};
+      for (const [key, value] of Object.entries(this.#draft) as [SettingsKey, SettingsValue | undefined][]) {
+        if (value !== undefined && !sameValue(update[key], value)) kept[key] = value;
       }
-      this.#setDraft(kept);
+      this.#setDraft(asSettings(kept));
       this.#deps.onRejected(result.code);
     } else {
       this.#awaiting = { ...this.#awaiting, ...update };

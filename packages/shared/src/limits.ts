@@ -250,6 +250,7 @@ export const RATE_LIMITS: readonly RateLimitRule[] = [
   // Der Client bündelt Stepper-Tipps (höchstens alle 350 ms, ADR-042) – 40 / 10 s erreicht nur ein Skript.
   socketEventRule("event.lobby-update-settings.socket", "lobby:update-settings", 40, 10),
   socketEventRule("event.lobby-rename.socket", "lobby:rename", 5, 60),
+  socketEventRule("event.lobby-transfer-host.socket", "lobby:transfer-host", 5, 60),
   socketEventRule("event.lobby-kick.socket", "lobby:kick", 10, 60),
   socketEventRule("event.lobby-start.socket", "lobby:start", 10, 60),
   socketEventRule("event.game-rematch.socket", "game:rematch", 5, 60),

@@ -89,6 +89,8 @@ export function planBotMoves(state: LobbyState, rng: Rng): BotMove[] {
   const question = currentQuestion(state.game);
   if (state.phase !== "question" || !turn || !question || question.startsAt === null) return [];
   const startsAt = question.startsAt;
+  // Kurze Antwortzeit (ADR-049, z. B. 10 s): Bots antworten spätestens 500 ms vor der Deadline.
+  const latest = question.deadline === null ? Number.POSITIVE_INFINITY : question.deadline - 500;
   return bots
     .filter(
       (bot) =>
@@ -96,7 +98,7 @@ export function planBotMoves(state: LobbyState, rng: Rng): BotMove[] {
         !question.responses.some((entry) => entry.playerId === bot.playerId),
     )
     .map((bot) => ({
-      at: startsAt + botAnswerDelayMs(timings, rng),
+      at: Math.max(startsAt, Math.min(startsAt + botAnswerDelayMs(timings, rng), latest)),
       command: {
         type: "ANSWER",
         guestId: bot.guestId,

@@ -75,6 +75,9 @@ describe("Frage", () => {
   it("loggt ein: gewählte Antwort locked, übrige dimmed; ohne Recht nicht bedienbar", () => {
     expect(questionAnswerStates(null, true)).toEqual(["idle", "idle", "idle", "idle"]);
     expect(questionAnswerStates(2, true)).toEqual(["dimmed", "dimmed", "locked", "dimmed"]);
+    // Anzeige-Modus (ADR-046): voll lesbar, nicht bedienbar – sonst ausgegraut.
+    expect(questionAnswerStates(null, false, true)).toEqual(["view", "view", "view", "view"]);
+    expect(questionAnswerStates(null, false)).toEqual(["disabled", "disabled", "disabled", "disabled"]);
     expect(questionAnswerStates(null, false)).toEqual(["disabled", "disabled", "disabled", "disabled"]);
   });
 

@@ -21,6 +21,7 @@ const VALID_PAYLOADS: { [E in ClientEventName]: ClientEventPayloadInput<E> } = {
   "lobby:update-settings": { rounds: 5 },
   "lobby:kick": { playerId: "p_1a2B3c" },
   "lobby:rename": { name: "Mia" },
+  "lobby:transfer-host": { playerId: "p_1a2B3c" },
   "lobby:start": {},
   "game:pick": { categoryId: "rund-um-die-welt" },
   "game:answer": { questionId: "q7", choice: 2 },
@@ -46,6 +47,7 @@ describe("Registry Client → Server (docs/05)", () => {
         "lobby:update-settings",
         "lobby:kick",
         "lobby:rename",
+        "lobby:transfer-host",
         "lobby:start",
         "game:pick",
         "game:answer",
@@ -71,11 +73,14 @@ describe("Registry Client → Server (docs/05)", () => {
       phases: ["lobby"],
     });
     expect(CLIENT_EVENTS["lobby:create"].allowed).toContain("verlässt");
+    expect(CLIENT_EVENTS["lobby:transfer-host"]).toMatchObject({ hostOnly: true, requiresMembership: true });
     expect(CLIENT_EVENTS["game:continue"]).toMatchObject({
       hostOnly: true,
-      phases: ["reveal", "turn_summary", "round_board"],
+      phases: ["question", "reveal", "turn_summary", "round_board"],
     });
-    expect(CLIENT_EVENTS["game:continue"].payload.safeParse({ phase: "question" }).success).toBe(false);
+    // „Auflösen“ bei „Zeit pro Frage: Host“ (ADR-049) – andere Phasen nicht.
+    expect(CLIENT_EVENTS["game:continue"].payload.safeParse({ phase: "question" }).success).toBe(true);
+    expect(CLIENT_EVENTS["game:continue"].payload.safeParse({ phase: "category_pick" }).success).toBe(false);
     expect(CLIENT_EVENTS["game:answer"]).toMatchObject({ hostOnly: false, phases: ["question"] });
   });
 

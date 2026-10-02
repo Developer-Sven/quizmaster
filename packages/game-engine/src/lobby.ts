@@ -10,6 +10,7 @@ import {
   GAME_TIMING_MODES,
   guestIdSchema,
   lobbyCodeSchema,
+  MANUAL_ADVANCE,
   makeUniqueName,
   nameKey,
   pickPlayerColor,
@@ -29,13 +30,15 @@ import type {
   RematchCommand,
   RenameCommand,
   StartCommand,
+  TransferHostCommand,
   UpdateSettingsCommand,
 } from "./commands.ts";
 import { reject, requestPersist, type Tx } from "./context.ts";
-import { onPhaseTimeout, resignPlayer, startGame } from "./flow.ts";
+import { isSpectatingHost, onPhaseTimeout, resignPlayer, revealCurrentQuestion, startGame } from "./flow.ts";
 import { randomId, uniqueRandomId } from "./rng.ts";
 import {
   connectedMembers,
+  currentQuestion,
   findPlayer,
   findPlayerByGuestId,
   isBanned,
@@ -222,8 +225,29 @@ export function onRename(state: LobbyState, command: RenameCommand, tx: Tx): Lob
 export function onContinue(state: LobbyState, command: ContinueCommand, tx: Tx): LobbyState {
   requireHost(state, command.guestId);
   if (state.game === null || state.phase !== command.phase) reject("INVALID_PHASE", "Diese Phase läuft nicht");
+  // Frage auflösen bei „Zeit pro Frage: Host“ (ADR-049) – erst, wenn die Frage zu sehen ist.
+  if (command.phase === "question") {
+    if (state.settings.answerSec !== MANUAL_ADVANCE) reject("INVALID_PHASE", "Die Frage hat einen Countdown");
+    const question = currentQuestion(state.game);
+    if (question?.startsAt == null || tx.now < question.startsAt) reject("TOO_EARLY", "Frage hat noch nicht begonnen");
+    return revealCurrentQuestion(state, tx);
+  }
   if (state.phaseEndsAt !== null) reject("INVALID_PHASE", "Diese Phase geht automatisch weiter");
+  // Schon weitergeschaltet, die Shell lädt die nächste Kategorie (Doppeltipp): kein zweiter Schritt.
+  if (state.game.pending !== null) reject("INVALID_PHASE", "Es geht schon weiter");
   return onPhaseTimeout(state, tx);
+}
+
+/** Host gibt die Rolle an eine verbundene menschliche Person ab (ADR-047); alle erfahren es per Hinweis. */
+export function onTransferHost(state: LobbyState, command: TransferHostCommand, tx: Tx): LobbyState {
+  const host = requireHost(state, command.guestId);
+  const target = state.players.find((player) => player.playerId === command.targetPlayerId);
+  if (!target || target.left || target.isBot || !target.connected || target.playerId === host.playerId) {
+    return reject("INVALID_OPTION", "Host nur an eine verbundene Person übertragen");
+  }
+  tx.effects.push({ type: "notice", code: "HOST_CHANGED" });
+  requestPersist(tx, "host");
+  return { ...state, hostPlayerId: target.playerId };
 }
 
 export function onKick(state: LobbyState, command: KickCommand, tx: Tx): LobbyState {
@@ -243,8 +267,10 @@ export function onKick(state: LobbyState, command: KickCommand, tx: Tx): LobbySt
 export function onStart(state: LobbyState, command: StartCommand, tx: Tx): LobbyState {
   requireHost(state, command.guestId);
   if (state.phase !== "lobby") reject("INVALID_PHASE", "Start nur in der Lobby");
-  if (connectedMembers(state).length < GAME_RULES.minPlayers) {
-    reject("NOT_ENOUGH_PLAYERS", "Mindestens 2 verbundene Personen nötig");
+  // Mitspielende: ohne den Host, wenn er nur anzeigt (ADR-046).
+  const players = connectedMembers(state).filter((player) => !isSpectatingHost(state, player.playerId));
+  if (players.length < GAME_RULES.minPlayers) {
+    reject("NOT_ENOUGH_PLAYERS", "Mindestens 2 verbundene Mitspielende nötig");
   }
   return startGame(state, tx);
 }

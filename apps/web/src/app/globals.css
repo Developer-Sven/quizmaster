@@ -390,3 +390,28 @@
     color: var(--color-text);
   }
 }
+
+/*
+ * Anzeige-Modus (ADR-046): Der Host zeigt nur an – auf großen Bildschirmen (ab 1024 px Breite) wird alles
+ * gleichmäßig größer, je nach Fensterhöhe (die Spielansicht braucht rund 46 rem Höhe). Handys bleiben unverändert.
+ */
+@media (min-width: 64rem) and (min-height: 56.25rem) {
+  html[data-presenter] {
+    zoom: 1.2;
+  }
+}
+@media (min-width: 64rem) and (min-height: 65.625rem) {
+  html[data-presenter] {
+    zoom: 1.4;
+  }
+}
+@media (min-width: 64rem) and (min-height: 81.25rem) {
+  html[data-presenter] {
+    zoom: 1.7;
+  }
+}
+@media (min-width: 64rem) and (min-height: 100rem) {
+  html[data-presenter] {
+    zoom: 2.1;
+  }
+}

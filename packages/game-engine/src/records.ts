@@ -39,11 +39,10 @@ export function buildGameDoc(state: LobbyState): GameDoc {
   for (const turn of game.turns) {
     const resolved = resolvedQuestions(turn);
     if (turn.categoryId === null || resolved.length === 0) continue;
-    const [a, b, c] = turn.options;
     turns.push({
       round: turn.round,
       pickerId: turn.pickerId,
-      offered: [a.id, b.id, c.id],
+      offered: turn.options.map((option) => option.id),
       categoryId: turn.categoryId,
       pickedBy: turn.pickedBy ?? "timeout",
       questions: resolved.map((question) => ({

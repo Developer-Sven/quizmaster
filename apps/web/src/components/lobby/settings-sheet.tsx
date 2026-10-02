@@ -2,14 +2,18 @@
 
 import {
   ADVANCE_SECONDS,
+  ANSWER_SECONDS,
   formatGameEstimate,
   type LobbySettings,
   SETTINGS_BOUNDS,
   type SettingsUpdate,
 } from "@quizmaster/shared";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { de } from "../../i18n/de";
+import type { CategoryCatalog } from "../../lib/client/game-view";
 import { Button } from "../ui/button";
+import { CategoryBadge } from "../ui/category-badge";
+import { ListRow } from "../ui/list-row";
 import { Sheet } from "../ui/sheet";
 import { Stepper } from "../ui/stepper";
 
@@ -19,24 +23,96 @@ export interface SettingsSheetProps {
   settings: LobbySettings;
   /** Personen in der Lobby – „Personen maximal“ darf nicht darunter fallen */
   playerCount: number;
+  /** Spielbare Kategorien für die Auswahl (ADR-048) */
+  categories: CategoryCatalog;
   onChange: (update: SettingsUpdate) => void;
   onClose: () => void;
 }
 
+/** Kategorien alphabetisch (deutsch) für die Auswahl. */
+export function sortedCategories(catalog: CategoryCatalog) {
+  return Object.values(catalog).sort((a, b) => a.name.localeCompare(b.name, "de"));
+}
+
 /**
- * Einstellungen-Sheet (docs/09 §6, nur Host): Runden 1–10, Fragen pro Kategorie 1–10, Personen maximal 2–8,
- * dazu „Weiter“ nach jeder Frage, Kategorie und dem Zwischenstand – Sekunden oder „Host“ (ADR-045) –,
- * Zusammenfassung, „Fertig“. Änderungen wirken sofort für alle; gesendet wird gebündelt (ADR-042).
+ * Nächste Auswahl nach einem Tipp auf `id` (ADR-048): Aus „Alle“ wird „nur diese“; weitere Tipps fügen hinzu bzw.
+ * nehmen weg; wird die Auswahl leer, gilt wieder „Alle“ (`null`).
  */
-export function SettingsSheet({ open, settings, playerCount, onChange, onClose }: SettingsSheetProps) {
-  const players = Math.max(playerCount, 1);
+export function toggleCategory(current: readonly string[] | null, id: string): string[] | null {
+  if (current === null) return [id];
+  const next = current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id];
+  return next.length === 0 ? null : next;
+}
+
+/** Wert der Kategorie-Zeile: „Alle“, der Name bei genau einer, sonst „3 ausgewählt“. */
+export function categorySummary(categoryIds: readonly string[] | null, catalog: CategoryCatalog): string {
+  if (categoryIds === null) return de.settings.categoriesAllShort;
+  const [only] = categoryIds;
+  if (categoryIds.length === 1 && only !== undefined) return catalog[only]?.name ?? de.settings.categoriesCount(1);
+  return de.settings.categoriesCount(categoryIds.length);
+}
+
+/**
+ * Einstellungen-Sheet (docs/09 §6, nur Host): Runden, Fragen pro Kategorie, Personen maximal, Zusammenfassung;
+ * „Zeit und Weiter“ – Zeit pro Frage (ADR-049) und Weiter nach Frage, Kategorie und Zwischenstand (ADR-045), je
+ * Sekunden oder „Host“; „Kategorien“ (Unteransicht, ADR-048); „Du spielst mit“ / „Du zeigst nur an“ (ADR-046);
+ * „Fertig“. Änderungen wirken sofort für alle; gesendet wird gebündelt (ADR-042).
+ */
+export function SettingsSheet({ open, settings, playerCount, categories, onChange, onClose }: SettingsSheetProps) {
+  const [view, setView] = useState<"main" | "categories">("main");
+  // Mitspielende für die Schätzung: ohne den Host, wenn er nur anzeigt.
+  const players = Math.max(settings.hostPlays ? playerCount : playerCount - 1, 1);
+  const close = () => {
+    setView("main");
+    onClose();
+  };
+  if (view === "categories") {
+    return (
+      <Sheet
+        open={open}
+        onClose={close}
+        title={de.settings.categoriesTitle}
+        view="categories"
+        onBack={() => setView("main")}
+        footer={
+          <Button variant="primary" block onClick={() => setView("main")} data-testid="settings-categories-done">
+            {de.actions.done}
+          </Button>
+        }
+      >
+        <ul className="flex flex-col" data-testid="settings-categories">
+          <li>
+            <ListRow selected={settings.categoryIds === null} onClick={() => onChange({ categoryIds: null })}>
+              {de.settings.categoriesAll}
+            </ListRow>
+          </li>
+          {sortedCategories(categories).map((category) => (
+            <li key={category.id}>
+              <ListRow
+                selected={settings.categoryIds?.includes(category.id) ?? false}
+                onClick={() => onChange({ categoryIds: toggleCategory(settings.categoryIds, category.id) })}
+                data-testid={`settings-category-${category.id}`}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <CategoryBadge category={category} compact />
+                  <span className="truncate">{category.name}</span>
+                </span>
+              </ListRow>
+            </li>
+          ))}
+        </ul>
+        <p className="pt-2 pb-2 text-caption text-text-2">{de.settings.categoriesHint}</p>
+      </Sheet>
+    );
+  }
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       title={de.settings.title}
+      view="main"
       footer={
-        <Button variant="primary" block onClick={onClose} data-testid="settings-done">
+        <Button variant="primary" block onClick={close} data-testid="settings-done">
           {de.actions.done}
         </Button>
       }
@@ -63,9 +139,22 @@ export function SettingsSheet({ open, settings, playerCount, onChange, onClose }
           max={SETTINGS_BOUNDS.maxPlayers.max}
           onChange={(maxPlayers) => onChange({ maxPlayers })}
         />
+        <ListRow onClick={() => setView("categories")} data-testid="settings-categories-row">
+          <span className="flex items-center justify-between gap-3">
+            <span>{de.settings.categories}</span>
+            <span className="truncate text-label text-text-2">{categorySummary(settings.categoryIds, categories)}</span>
+          </span>
+        </ListRow>
         <SettingsSummary settings={settings} players={players} />
         <h3 className="pt-4 text-label text-text-2">{de.settings.advanceTitle}</h3>
         <div className="flex flex-col" data-testid="settings-advance">
+          <Stepper
+            label={de.settings.answerTime}
+            value={settings.answerSec}
+            options={ANSWER_SECONDS}
+            format={de.settings.advanceValue}
+            onChange={(answerSec) => onChange({ answerSec })}
+          />
           <Stepper
             label={de.settings.afterQuestion}
             value={settings.afterQuestionSec}
@@ -88,7 +177,20 @@ export function SettingsSheet({ open, settings, playerCount, onChange, onClose }
             onChange={(afterRoundSec) => onChange({ afterRoundSec })}
           />
         </div>
-        <p className="pt-1 pb-2 text-caption text-text-2">{de.settings.advanceHint}</p>
+        <p className="pt-1 text-caption text-text-2">{de.settings.advanceHint}</p>
+        <h3 className="pt-4 text-label text-text-2">{de.settings.hostTitle}</h3>
+        <ul className="flex flex-col pb-2" data-testid="settings-host-mode">
+          <li>
+            <ListRow selected={settings.hostPlays} onClick={() => onChange({ hostPlays: true })}>
+              {de.settings.hostPlays}
+            </ListRow>
+          </li>
+          <li>
+            <ListRow selected={!settings.hostPlays} onClick={() => onChange({ hostPlays: false })}>
+              {de.settings.hostPresents}
+            </ListRow>
+          </li>
+        </ul>
       </div>
     </Sheet>
   );

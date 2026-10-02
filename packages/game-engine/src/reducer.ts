@@ -28,6 +28,7 @@ import {
   onRematch,
   onRename,
   onStart,
+  onTransferHost,
   onUpdateSettings,
 } from "./lobby.ts";
 import { toPrivateState, toPublicState } from "./projection.ts";
@@ -138,6 +139,8 @@ function dispatch(state: LobbyState, command: Command, tx: Tx, timer: PendingTim
       return onRename(state, command, tx);
     case "CONTINUE":
       return onContinue(state, command, tx);
+    case "TRANSFER_HOST":
+      return onTransferHost(state, command, tx);
     case "KICK":
       return onKick(state, command, tx);
     case "START":

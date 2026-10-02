@@ -73,6 +73,8 @@ export function onAnswer(state: LobbyState, command: AnswerCommand, tx: Tx): Lob
     if (shownBefore) reject("TOO_LATE", "Frage ist bereits aufgelöst");
     return reject(state.phase === "question" ? "INVALID_OPTION" : "INVALID_PHASE", "Keine passende offene Frage");
   }
+  // Anzeigender Host (ADR-046) spielt nicht mit: wie jemand, der an diesem Zug nicht teilnimmt.
+  if (player.status === "spectator") reject("INVALID_PHASE", "Host zeigt nur an");
   if (player.status !== "active") reject("RESIGNED", "Person hat aufgegeben");
   const turn = currentTurn(state.game);
   if (!turn?.participantIds.includes(player.playerId)) reject("INVALID_PHASE", "Person nimmt an diesem Zug nicht teil");
@@ -90,16 +92,19 @@ export function onAnswer(state: LobbyState, command: AnswerCommand, tx: Tx): Lob
 }
 
 /** Prüft die Kategorien aus OPTIONS_READY (genau 3, verschieden, gültig) und liefert Kopien. */
-function parseOptions(options: readonly CategoryOption[]): [CategoryOption, CategoryOption, CategoryOption] {
-  if (!Array.isArray(options) || options.length !== 3) reject("VALIDATION_FAILED", "Genau 3 Kategorien erwartet");
+/** 3 Optionen – bei einer Auswahl des Hosts 1–3 (ADR-048), immer verschieden. */
+function parseOptions(options: readonly CategoryOption[]): CategoryOption[] {
+  if (!Array.isArray(options) || options.length < 1 || options.length > 3) {
+    reject("VALIDATION_FAILED", "1–3 Kategorien erwartet");
+  }
   const parsed = options.map((option) => {
     const result = categoryOptionSchema.safeParse(option);
     if (!result.success) return reject("VALIDATION_FAILED", "Ungültige Kategorie-Option");
     return result.data;
   });
-  if (new Set(parsed.map((option) => option.id)).size !== 3) reject("VALIDATION_FAILED", "Kategorien doppelt");
-  const [a, b, c] = parsed as [CategoryOption, CategoryOption, CategoryOption];
-  return [a, b, c];
+  if (new Set(parsed.map((option) => option.id)).size !== parsed.length)
+    reject("VALIDATION_FAILED", "Kategorien doppelt");
+  return parsed;
 }
 
 export function onOptionsReady(state: LobbyState, command: OptionsReadyCommand, tx: Tx): LobbyState {
@@ -127,6 +132,9 @@ export function onOptionsReady(state: LobbyState, command: OptionsReadyCommand, 
     pending: null,
     turns: [...current.turns, turn],
   }));
+  // Nur eine Kategorie erlaubt (ADR-048): keine Wahl, gleich die Fragen laden.
+  const [only] = options;
+  if (options.length === 1 && only !== undefined) return applyPick(next, only.id, "fixed", tx);
   return enterPhase(next, "category_pick", tx, { endsAt: tx.now + tx.timings.categoryPickMs });
 }
 

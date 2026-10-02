@@ -6,7 +6,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { PlayerRow } from "@/components/ui/player-row";
 import { de } from "@/i18n/de";
-import { PencilIcon } from "@/lib/ui/icons";
+import { CrownIcon, PencilIcon } from "@/lib/ui/icons";
 
 export interface PlayerListProps {
   players: readonly PublicPlayer[];
@@ -17,6 +17,10 @@ export interface PlayerListProps {
   onKick: (playerId: string) => void;
   /** Eigene Zeile: `pencil` öffnet „Name ändern“ (ADR-041); ohne Handler kein Button */
   onRename?: () => void;
+  /** Host: `crown` an verbundenen Personen (keine Bots) → „Zum Host machen?“ (ADR-047); ohne Handler keiner */
+  onTransferHost?: (playerId: string) => void;
+  /** Host zeigt nur an (ADR-046): Hinweis „zeigt an“ an seiner Zeile */
+  presenterId?: string | null;
 }
 
 /**
@@ -24,12 +28,22 @@ export interface PlayerListProps {
  * Verschwindet die Zeile mit dem Fokus (nach „Entfernen“ oder wenn die Person geht), springt der Fokus auf die
  * Überschrift der Liste statt auf `body` (WCAG 2.4.3); die Ansage übernimmt `LobbyAnnouncer`.
  */
-export function PlayerList({ players, maxPlayers, selfId, canKick, onKick, onRename }: PlayerListProps) {
+export function PlayerList({
+  players,
+  maxPlayers,
+  selfId,
+  canKick,
+  onKick,
+  onRename,
+  onTransferHost,
+  presenterId = null,
+}: PlayerListProps) {
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   /** Person, in deren Zeile der Fokus steht (der Kick-Button) – `null`, sobald er die Zeile verlässt */
   const focusedRow = useRef<string | null>(null);
   const [target, setTarget] = useState<PublicPlayer | null>(null);
+  const [heir, setHeir] = useState<PublicPlayer | null>(null);
 
   useEffect(() => {
     const row = focusedRow.current;
@@ -67,6 +81,7 @@ export function PlayerList({ players, maxPlayers, selfId, canKick, onKick, onRen
               color={player.color}
               isHost={player.isHost}
               connected={player.connected}
+              note={player.id === presenterId ? de.lobby.presenting : undefined}
               trailing={
                 player.id === selfId && onRename ? (
                   <IconButton
@@ -74,6 +89,13 @@ export function PlayerList({ players, maxPlayers, selfId, canKick, onKick, onRen
                     label={de.actions.rename}
                     onClick={onRename}
                     data-testid="lobby-rename"
+                  />
+                ) : onTransferHost && player.id !== selfId && player.connected && !player.isBot ? (
+                  <IconButton
+                    icon={CrownIcon}
+                    label={de.lobby.makeHost(player.name)}
+                    onClick={() => setHeir(player)}
+                    data-testid="lobby-make-host"
                   />
                 ) : undefined
               }
@@ -93,6 +115,18 @@ export function PlayerList({ players, maxPlayers, selfId, canKick, onKick, onRen
           setTarget(null);
         }}
         onCancel={() => setTarget(null)}
+      />
+      <Dialog
+        open={heir !== null}
+        title={de.dialogs.transferHost.title(heir?.name ?? "")}
+        description={de.dialogs.transferHost.description(heir?.name ?? "")}
+        confirmLabel={de.dialogs.transferHost.confirm}
+        cancelLabel={de.dialogs.transferHost.cancel}
+        onConfirm={() => {
+          if (heir) onTransferHost?.(heir.id);
+          setHeir(null);
+        }}
+        onCancel={() => setHeir(null)}
       />
     </section>
   );

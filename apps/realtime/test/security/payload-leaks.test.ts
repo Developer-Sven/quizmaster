@@ -59,6 +59,13 @@ describe("Invariante 4 – keine guestId in Server→Client-Daten", () => {
       (await host.act.emit("lobby:update-settings", { rounds: 1, questionsPerCategory: 1, afterRoundSec: 0 })).ok,
     ).toBe(true);
     expect((await guest.act.emit("lobby:rename", { name: "Benni" })).ok).toBe(true);
+    // Host kurz übertragen und zurück (ADR-047) – so kommt auch lobby:transfer-host vor.
+    const guestPlayerId = lastSelf(guest.client)?.playerId ?? "";
+    const hostPlayerId = lastSelf(host.client)?.playerId ?? "";
+    expect((await host.act.emit("lobby:transfer-host", { playerId: guestPlayerId })).ok).toBe(true);
+    await eventually(() => lastSelf(guest.client)?.isHost === true);
+    expect((await guest.act.emit("lobby:transfer-host", { playerId: hostPlayerId })).ok).toBe(true);
+    await eventually(() => lastSelf(host.client)?.isHost === true);
     expect((await host.act.emit("time:sync", { t0: 1 })).ok).toBe(true);
 
     // Kick: kicked { host } an die Person, danach resume → KICKED.

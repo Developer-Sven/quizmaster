@@ -19,7 +19,8 @@ import { Avatar } from "./avatar";
  * - `correct` / `wrong`: Auflösung (Rahmen + Tönung + `circle-check` / `circle-x`)
  * - `disabled`: nicht bedienbar (z. B. Zuschauende)
  */
-export type AnswerState = "idle" | "locked" | "dimmed" | "correct" | "wrong" | "disabled";
+/** `view`: nur anzeigen, voll lesbar, nicht bedienbar – das Gerät des anzeigenden Hosts (ADR-046). */
+export type AnswerState = "idle" | "locked" | "dimmed" | "correct" | "wrong" | "disabled" | "view";
 
 export interface AnswerPicker {
   id: string;
@@ -50,6 +51,7 @@ const stateClasses: Record<AnswerState, string> = {
   correct: "border-success bg-success-tint",
   wrong: "border-danger bg-danger-tint",
   disabled: "border-line-strong bg-surface-2 opacity-40",
+  view: "border-line-strong bg-surface-2",
 };
 
 const letterClasses: Record<AnswerState, string> = {
@@ -59,6 +61,7 @@ const letterClasses: Record<AnswerState, string> = {
   correct: "border-success text-text",
   wrong: "border-danger text-text",
   disabled: "border-line-strong text-text-2",
+  view: "border-line-strong text-text-2",
 };
 
 const stateText: Partial<Record<AnswerState, string>> = {

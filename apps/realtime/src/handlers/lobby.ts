@@ -9,6 +9,7 @@
  * | `lobby:leave` | LEAVE (im Spiel = Aufgeben) | LOBBY_NOT_FOUND, KICKED, RESIGNED |
  * | `lobby:update-settings` | UPDATE_SETTINGS | NOT_HOST, INVALID_PHASE, INVALID_OPTION |
  * | `lobby:rename` | RENAME (ADR-041) | NAME_REJECTED, INVALID_PHASE, LOBBY_NOT_FOUND |
+ * | `lobby:transfer-host` | TRANSFER_HOST (ADR-047) | NOT_HOST, INVALID_OPTION |
  * | `lobby:kick` | KICK (+ Lobby-Sperre) | NOT_HOST, INVALID_OPTION |
  * | `lobby:start` | START | NOT_HOST, INVALID_PHASE, NOT_ENOUGH_PLAYERS |
  *
@@ -147,7 +148,15 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
   });
 
   registerEvent("lobby:update-settings", (payload, ctx) => {
-    const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
+    const rt = runtime();
+    // Kategorie-Auswahl (ADR-048): nur spielbare Kategorien des Katalogs.
+    if (payload.categoryIds) {
+      const playable = new Set(rt.questions.playableCategories().map((option) => option.id));
+      if (payload.categoryIds.some((id) => !playable.has(id))) {
+        throw new ProtocolError("INVALID_OPTION", "Unbekannte oder nicht spielbare Kategorie");
+      }
+    }
+    const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
     return runCommand(ctx, actor, { type: "UPDATE_SETTINGS", guestId: ctx.guestId, update: payload }, null);
   });
 
@@ -156,6 +165,16 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
     const actor = lobbyOfSocket(rt, ctx.socket, ctx.guestId);
     const name = moderateName(payload.name, rt.appConfig.get().blockedTerms);
     return runCommand(ctx, actor, { type: "RENAME", guestId: ctx.guestId, name }, null);
+  });
+
+  registerEvent("lobby:transfer-host", (payload, ctx) => {
+    const actor = lobbyOfSocket(runtime(), ctx.socket, ctx.guestId);
+    return runCommand(
+      ctx,
+      actor,
+      { type: "TRANSFER_HOST", guestId: ctx.guestId, targetPlayerId: payload.playerId },
+      null,
+    );
   });
 
   registerEvent("lobby:kick", (payload, ctx) => {

@@ -3,6 +3,7 @@
  * ist fest wie beim Vorbild (`GAME_RULES`).
  */
 import type { Phase } from "./constants.ts";
+import { categoryIdSchema } from "./primitives.ts";
 import * as z from "./zod.ts";
 
 /** Einstellbare Werte mit Grenzen und Standard. */
@@ -32,6 +33,9 @@ export const GAME_RULES = {
 
 const bounded = (bounds: { readonly min: number; readonly max: number }) => z.int().min(bounds.min).max(bounds.max);
 
+/** Standard-Antwortzeit in Sekunden (`GAME_RULES.answerTimeMs`). */
+const GAME_RULES_ANSWER_SEC = GAME_RULES.answerTimeMs / 1_000;
+
 /**
  * Weiter nach jeder Frage (Auflösung), jeder Kategorie (Zug-Ergebnis) und jedem Zwischenstand (Rundentafel),
  * ADR-045: Sekunden bis es automatisch weitergeht – oder 0 = der Host tippt „Weiter“.
@@ -45,15 +49,44 @@ export const ADVANCE_DEFAULTS = { afterQuestionSec: 5, afterTurnSec: 5, afterRou
 export const ADVANCE_PHASES = ["reveal", "turn_summary", "round_board"] as const satisfies readonly Phase[];
 export type AdvancePhase = (typeof ADVANCE_PHASES)[number];
 
+/** Phasen, die der Host per `game:continue` beendet: die Frage („Auflösen“, ADR-049) und die Weiter-Phasen. */
+export const CONTINUE_PHASES = ["question", ...ADVANCE_PHASES] as const satisfies readonly Phase[];
+export type ContinuePhase = (typeof CONTINUE_PHASES)[number];
+
+/** Zeit pro Frage in Sekunden (ADR-049); 0 = „Host“: kein Countdown, der Host tippt „Auflösen“. */
+export const ANSWER_SECONDS = [0, 10, 15, 20, 30, 45, 60] as const;
+/** Sicherheitsnetz bei „Host“: spätestens dann löst der Server selbst auf (Host weg, Gerät aus). */
+export const MANUAL_ANSWER_CAP_MS = 10 * 60_000;
+
 const advanceSeconds = z
   .int()
   .min(0)
   .max(30)
   .refine((value) => (ADVANCE_SECONDS as readonly number[]).includes(value), { message: "keine erlaubte Stufe" });
 
+const answerSeconds = z
+  .int()
+  .min(0)
+  .max(60)
+  .refine((value) => (ANSWER_SECONDS as readonly number[]).includes(value), { message: "keine erlaubte Stufe" });
+
+/** Höchstzahl ausgewählter Kategorien (Katalog: 19 – mit Luft für neue). */
+export const MAX_SELECTED_CATEGORIES = 50;
+
 /**
- * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Die Weiter-Felder haben
- * Standardwerte: Snapshots und Zustände von vor ADR-045 bleiben lesbar.
+ * Kategorien, aus denen angeboten wird (ADR-048): `null` = alle spielbaren, sonst eine Auswahl (mindestens eine,
+ * ohne Doppelte). Welche es gibt, prüft der Server gegen den Katalog.
+ */
+const categoryIdsSchema = z
+  .array(categoryIdSchema)
+  .min(1)
+  .max(MAX_SELECTED_CATEGORIES)
+  .refine((ids) => new Set(ids).size === ids.length, { message: "Kategorien doppelt" })
+  .nullable();
+
+/**
+ * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Spätere Felder haben
+ * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048 bleiben lesbar.
  */
 export const lobbySettingsSchema = z.strictObject({
   rounds: bounded(SETTINGS_BOUNDS.rounds),
@@ -62,6 +95,11 @@ export const lobbySettingsSchema = z.strictObject({
   afterQuestionSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterQuestionSec),
   afterTurnSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterTurnSec),
   afterRoundSec: advanceSeconds.default(ADVANCE_DEFAULTS.afterRoundSec),
+  /** Spielt der Host mit? `false` = Anzeige-Modus: großer Bildschirm, nur die anderen spielen (ADR-046) */
+  hostPlays: z.boolean().default(true),
+  categoryIds: categoryIdsSchema.default(null),
+  /** Zeit pro Frage (ADR-049); Standard 20 s wie beim Vorbild */
+  answerSec: answerSeconds.default(GAME_RULES_ANSWER_SEC),
 });
 export type LobbySettings = z.output<typeof lobbySettingsSchema>;
 
@@ -70,7 +108,15 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = Object.freeze({
   questionsPerCategory: SETTINGS_BOUNDS.questionsPerCategory.default,
   maxPlayers: SETTINGS_BOUNDS.maxPlayers.default,
   ...ADVANCE_DEFAULTS,
+  hostPlays: true,
+  categoryIds: null,
+  answerSec: GAME_RULES_ANSWER_SEC,
 });
+
+/** Antwortzeit in ms – `null` bei „Host“ (kein Countdown, ADR-049). */
+export function answerWindowMs(settings: Pick<LobbySettings, "answerSec">): number | null {
+  return settings.answerSec === MANUAL_ADVANCE ? null : settings.answerSec * 1_000;
+}
 
 export type AdvanceSettings = Pick<LobbySettings, "afterQuestionSec" | "afterTurnSec" | "afterRoundSec">;
 
@@ -109,6 +155,9 @@ export const updateSettingsPayloadSchema = z
     afterQuestionSec: advanceSeconds.optional(),
     afterTurnSec: advanceSeconds.optional(),
     afterRoundSec: advanceSeconds.optional(),
+    hostPlays: z.boolean().optional(),
+    categoryIds: categoryIdsSchema.optional(),
+    answerSec: answerSeconds.optional(),
   })
   .refine((update) => Object.values(update).some((value) => value !== undefined), {
     message: "mindestens eine Einstellung angeben",
@@ -124,5 +173,9 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
     afterQuestionSec: update.afterQuestionSec ?? current.afterQuestionSec,
     afterTurnSec: update.afterTurnSec ?? current.afterTurnSec,
     afterRoundSec: update.afterRoundSec ?? current.afterRoundSec,
+    hostPlays: update.hostPlays ?? current.hostPlays,
+    // `null` heißt „alle“ – nur `undefined` lässt die Auswahl unverändert.
+    categoryIds: update.categoryIds === undefined ? current.categoryIds : update.categoryIds,
+    answerSec: update.answerSec ?? current.answerSec,
   };
 }

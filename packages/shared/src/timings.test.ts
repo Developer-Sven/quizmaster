@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   ADVANCE_SECONDS,
+  ANSWER_SECONDS,
   advanceDurationMs,
+  answerWindowMs,
   applySettingsUpdate,
   DEFAULT_LOBBY_SETTINGS,
   GAME_RULES,
   lobbySettingsSchema,
+  MANUAL_ANSWER_CAP_MS,
   SETTINGS_BOUNDS,
   updateSettingsPayloadSchema,
 } from "./settings.ts";
@@ -68,6 +71,9 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       afterQuestionSec: 5,
       afterTurnSec: 5,
       afterRoundSec: 7,
+      hostPlays: true,
+      categoryIds: null,
+      answerSec: 20,
     });
     expect(Object.isFrozen(DEFAULT_LOBBY_SETTINGS)).toBe(true);
   });
@@ -107,14 +113,50 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
 
   it("wendet Änderungen an", () => {
     expect(applySettingsUpdate(DEFAULT_LOBBY_SETTINGS, { maxPlayers: 4, afterRoundSec: 0 })).toEqual({
-      rounds: 3,
-      questionsPerCategory: 3,
+      ...DEFAULT_LOBBY_SETTINGS,
       maxPlayers: 4,
-      afterQuestionSec: 5,
-      afterTurnSec: 5,
       afterRoundSec: 0,
     });
     expect(lobbySettingsSchema.safeParse({ rounds: 3, questionsPerCategory: 3 }).success).toBe(false);
+  });
+
+  it("Zeit pro Frage: 10–60 s oder „Host“ (0 = der Host löst auf, ADR-049)", () => {
+    expect(ANSWER_SECONDS).toEqual([0, 10, 15, 20, 30, 45, 60]);
+    expect(DEFAULT_LOBBY_SETTINGS.answerSec).toBe(20);
+    expect(updateSettingsPayloadSchema.parse({ answerSec: 0 })).toEqual({ answerSec: 0 });
+    expect(updateSettingsPayloadSchema.parse({ answerSec: 45 })).toEqual({ answerSec: 45 });
+    for (const bad of [{ answerSec: 5 }, { answerSec: 25 }, { answerSec: 61 }, { answerSec: -1 }]) {
+      expect(updateSettingsPayloadSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(answerWindowMs(DEFAULT_LOBBY_SETTINGS)).toBe(20_000);
+    expect(answerWindowMs({ ...DEFAULT_LOBBY_SETTINGS, answerSec: 45 })).toBe(45_000);
+    expect(answerWindowMs({ ...DEFAULT_LOBBY_SETTINGS, answerSec: 0 })).toBeNull();
+    expect(MANUAL_ANSWER_CAP_MS).toBe(10 * 60_000);
+  });
+
+  it("Anzeige-Modus (ADR-046) und Kategorien begrenzen (ADR-048)", () => {
+    expect(updateSettingsPayloadSchema.parse({ hostPlays: false })).toEqual({ hostPlays: false });
+    expect(updateSettingsPayloadSchema.parse({ categoryIds: ["kunst-kultur"] })).toEqual({
+      categoryIds: ["kunst-kultur"],
+    });
+    // null = alle Kategorien (zurücksetzen).
+    expect(updateSettingsPayloadSchema.parse({ categoryIds: null })).toEqual({ categoryIds: null });
+    for (const bad of [
+      { hostPlays: "nein" },
+      { categoryIds: [] },
+      { categoryIds: ["kunst-kultur", "kunst-kultur"] },
+      { categoryIds: ["Kunst"] },
+      { categoryIds: Array.from({ length: 51 }, (_, index) => `kategorie-${index}`) },
+    ]) {
+      expect(updateSettingsPayloadSchema.safeParse(bad).success, JSON.stringify(bad).slice(0, 60)).toBe(false);
+    }
+    expect(applySettingsUpdate(DEFAULT_LOBBY_SETTINGS, { categoryIds: ["sport"] }).categoryIds).toEqual(["sport"]);
+    expect(
+      applySettingsUpdate({ ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport"] }, { categoryIds: null }).categoryIds,
+    ).toBeNull();
+    expect(
+      applySettingsUpdate({ ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport"] }, { rounds: 2 }).categoryIds,
+    ).toEqual(["sport"]);
   });
 
   it("Weiter nach Frage, Kategorie und Zwischenstand: 0 = Host tippt „Weiter“, sonst feste Sekundenstufen (ADR-045)", () => {
@@ -135,6 +177,9 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
       afterQuestionSec: 5,
       afterTurnSec: 5,
       afterRoundSec: 7,
+      hostPlays: true,
+      categoryIds: null,
+      answerSec: 20,
     });
     expect(advanceDurationMs(DEFAULT_LOBBY_SETTINGS, "reveal")).toBe(5_000);
     expect(advanceDurationMs({ ...DEFAULT_LOBBY_SETTINGS, afterTurnSec: 0 }, "turn_summary")).toBeNull();

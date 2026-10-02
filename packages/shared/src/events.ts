@@ -23,7 +23,7 @@ import {
   publicLobbyStateSchema,
   reviewListSchema,
 } from "./schemas.ts";
-import { ADVANCE_PHASES, updateSettingsPayloadSchema } from "./settings.ts";
+import { CONTINUE_PHASES, updateSettingsPayloadSchema } from "./settings.ts";
 import * as z from "./zod.ts";
 
 /** Beschreibung eines Client→Server-Events. */
@@ -108,6 +108,15 @@ export const CLIENT_EVENTS = {
     devOnly: false,
     phases: ["lobby"],
   }),
+  "lobby:transfer-host": clientEvent({
+    payload: z.strictObject({ playerId: playerIdSchema }),
+    ack: noData,
+    allowed: "Host, an eine verbundene Person (kein Bot, nicht sich selbst) – ADR-047",
+    requiresMembership: true,
+    hostOnly: true,
+    devOnly: false,
+    phases: null,
+  }),
   "lobby:kick": clientEvent({
     payload: z.strictObject({ playerId: playerIdSchema }),
     ack: noData,
@@ -164,13 +173,13 @@ export const CLIENT_EVENTS = {
     phases: ["game_over", "lobby"],
   }),
   "game:continue": clientEvent({
-    payload: z.strictObject({ phase: z.enum(ADVANCE_PHASES) }),
+    payload: z.strictObject({ phase: z.enum(CONTINUE_PHASES) }),
     ack: noData,
-    allowed: "Host, wenn für diese Phase „Host tippt Weiter“ eingestellt ist (ADR-045)",
+    allowed: "Host, wenn für diese Phase „Host“ eingestellt ist: Frage auflösen (ADR-049) bzw. weiter (ADR-045)",
     requiresMembership: true,
     hostOnly: true,
     devOnly: false,
-    phases: [...ADVANCE_PHASES],
+    phases: [...CONTINUE_PHASES],
   }),
   "game:rematch": clientEvent({
     payload: emptyPayload,

@@ -82,7 +82,8 @@ export function rankingEntries(results: GameResults, participants: readonly Publ
         name: player.name,
         color: player.color,
         score: entry.score,
-        status: entry.status,
+        // Im Ergebnis stehen nur Mitspielende – nie der anzeigende Host (ADR-046).
+        status: entry.status === "resigned" ? ("resigned" as const) : ("active" as const),
       },
     ];
   });

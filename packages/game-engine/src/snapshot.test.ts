@@ -147,7 +147,7 @@ describe("fromLobbySnapshot – laufendes Spiel", () => {
     expect(sim.state.phase).toBe("category_pick");
     const turn = currentTurn(sim.state.game);
     const picker = sim.guestOf(turn?.pickerId ?? "");
-    sim.ok({ type: "PICK", guestId: picker, categoryId: turn?.options[1].id ?? "" });
+    sim.ok({ type: "PICK", guestId: picker, categoryId: turn?.options[1]?.id ?? "" });
     expect(sim.state.game?.pending?.kind).toBe("questions");
 
     const now = sim.now + 3_000;
@@ -163,7 +163,7 @@ describe("fromLobbySnapshot – laufendes Spiel", () => {
     // Die wählende Person wählt erneut; die Anfrage nach Fragen geht neu hinaus.
     const picked = reduce(
       reduce(state, { type: "RECONNECT", guestId: picker }, { now, rng: sim.rng }).state,
-      { type: "PICK", guestId: picker, categoryId: turn?.options[2].id ?? "" },
+      { type: "PICK", guestId: picker, categoryId: turn?.options[2]?.id ?? "" },
       { now: now + 100, rng: sim.rng },
     );
     expect(picked.ok && picked.effects.some((effect) => effect.type === "loadQuestions")).toBe(true);
@@ -246,6 +246,25 @@ describe("fromLobbySnapshot – laufendes Spiel", () => {
     const summary = restore(sim.state, sim.now + 500);
     expect(summary.state.phase).toBe("turn_summary");
     expect(summary.state.phaseEndsAt).toBeNull();
+  });
+
+  it("Anzeige-Modus und feste Kategorie überstehen die Wiederaufnahme (ADR-046/048)", () => {
+    const sim = lobbyWith(3, 0, { seed: "resume-presenter" });
+    const fixed = sim.catalog.categories[0]?.id ?? "";
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { hostPlays: false, categoryIds: [fixed], questionsPerCategory: 2 },
+    });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.runUntil((state) => state.phase === "reveal");
+    const { state } = restore(sim.state, sim.now + 500);
+    expect(state.settings).toMatchObject({ hostPlays: false, categoryIds: [fixed] });
+    expect(state.players.find((player) => player.playerId === state.hostPlayerId)?.status).toBe("spectator");
+    expect(state.game?.order).not.toContain(state.hostPlayerId);
+    const turn = currentTurn(state.game);
+    expect(turn?.options.map((option) => option.id)).toEqual([fixed]);
+    expect(turn?.pickedBy).toBe("fixed");
   });
 
   it("lässt Spielende und Ergebnis unverändert (inkl. Beginn der Phase)", () => {

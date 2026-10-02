@@ -146,9 +146,9 @@ const turnSchema = z.strictObject({
   number: z.int().min(1),
   round: z.int().min(1),
   pickerId: playerIdSchema,
-  options: z.tuple([categoryOptionSchema, categoryOptionSchema, categoryOptionSchema]),
+  options: z.array(categoryOptionSchema).min(1).max(3),
   categoryId: categoryIdSchema.nullable(),
-  pickedBy: z.enum(["player", "timeout"]).nullable(),
+  pickedBy: z.enum(["player", "timeout", "fixed"]).nullable(),
   participantIds: z.array(playerIdSchema).max(8),
   questions: z.array(questionSchema).max(10),
   currentIndex: z.int().min(-1),
@@ -270,7 +270,7 @@ function checkConsistency(doc: LobbyDoc, game: ParsedGameSnapshot): void {
 function toGameState(game: ParsedGameSnapshot): GameState {
   const turns: TurnState[] = game.turns.map((turn) => ({
     ...turn,
-    options: [turn.options[0], turn.options[1], turn.options[2]],
+    options: turn.options.map((option) => ({ ...option })),
     questions: turn.questions.map(
       (question): QuestionState => ({
         ...question,

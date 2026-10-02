@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  type AdvancePhase,
   type AnswerIndex,
+  type ContinuePhase,
   isAdvancePhase,
   type PrivatePlayerState,
   type PublicLobbyState,
@@ -21,6 +21,7 @@ import {
 } from "@/lib/client/game-view";
 import { type StageKind, stageAt, stageBoundaries } from "@/lib/client/phase-clock";
 import { cx } from "@/lib/ui/cx";
+import { usePresenterZoom } from "@/lib/ui/presenter";
 import { DURATION_MS } from "@/lib/ui/tokens";
 import type { PendingAnswer, PendingPick } from "@/stores/game-store";
 import { type CategoryArrival, CategoryStrip } from "./category-strip";
@@ -48,8 +49,8 @@ export interface GameHandlers {
   onToggleSound: () => void;
   /** nach Bestätigung „Lobby verlassen?“ (Spielende) */
   onLeave: () => void;
-  /** Host: „Weiter“ nach Frage, Kategorie oder Zwischenstand (ADR-045) */
-  onContinue: (phase: AdvancePhase) => void;
+  /** Host: „Weiter“ nach Frage, Kategorie oder Zwischenstand (ADR-045) bzw. „Auflösen“ (ADR-049) */
+  onContinue: (phase: ContinuePhase) => void;
 }
 
 export interface GameBusy {
@@ -140,9 +141,18 @@ function GameScreenContent({
   const selfPlayer = findPlayer(lobby.players, selfId);
   const phase = lobby.phase;
   const gameOver = phase === "game_over";
-  // Wartet die Phase auf „Weiter“ des Hosts (ADR-045)? Dann unten die Weiter-Leiste.
+  // Anzeige-Modus (ADR-046): Der Host spielt nicht mit – großer Bildschirm.
+  usePresenterZoom(selfPlayer?.status === "spectator");
+  // Wartet die Phase auf den Host? Weiter-Phasen ohne Ende (ADR-045) bzw. Frage ohne Countdown (ADR-049).
   const advancePhase = isAdvancePhase(phase) && lobby.phaseEndsAt === null ? phase : null;
+  const untimedQuestion = phase === "question" && lobby.settings.answerSec === 0 ? lobby.question : null;
   const host = lobby.players.find((player) => player.isHost) ?? null;
+  const isSelfHost = host !== null && host.id === selfId;
+  const questionOpen = useServerMoment(
+    (now) => untimedQuestion !== null && now >= untimedQuestion.startsAt,
+    untimedQuestion ? [untimedQuestion.startsAt] : [],
+  );
+  const activeCount = gameParticipants(lobby).filter((player) => player.status === "active").length;
   // Frisch bei jedem Rendern (auch direkt nach einem neuen Zustand) und neu an den Serverzeitpunkten.
   const kind = useServerMoment((now) => stageAt(lobby, now), stageBoundaries(lobby));
   const shownPoints = useServerMoment((now) => pointsShown(lobby, now), scoreBoundaries(lobby));
@@ -255,17 +265,29 @@ function GameScreenContent({
                 />
               </div>
               <PlayerStrip
-                players={lobby.players}
+                players={gameParticipants(lobby)}
                 selfId={selfId}
                 answeredIds={phase === "question" && question ? question.answeredBy : []}
                 scores={displayedScores(lobby, shownPoints)}
               />
               {advancePhase !== null ? (
                 <AdvanceActions
-                  isHost={host !== null && host.id === selfId}
+                  isHost={isSelfHost}
                   hostName={host?.name ?? ""}
+                  label={de.actions.next}
                   busy={busy.continue === true}
                   onContinue={() => handlers.onContinue(advancePhase)}
+                  inFlow={compact}
+                />
+              ) : null}
+              {untimedQuestion !== null && isSelfHost ? (
+                <AdvanceActions
+                  isHost
+                  hostName={host?.name ?? ""}
+                  label={de.actions.revealNow(untimedQuestion.answeredBy.length, activeCount)}
+                  disabled={!questionOpen}
+                  busy={busy.continue === true}
+                  onContinue={() => handlers.onContinue("question")}
                   inFlow={compact}
                 />
               ) : null}
@@ -290,6 +312,10 @@ function GameScreenContent({
 interface AdvanceActionsProps {
   isHost: boolean;
   hostName: string;
+  /** „Weiter“ bzw. „Auflösen (2/3 Antworten)“ */
+  label: string;
+  /** noch nicht bedienbar (Frage noch im Vorlauf) */
+  disabled?: boolean;
   busy: boolean;
   onContinue: () => void;
   /** niedriger Viewport: Leiste im Dokumentfluss statt unten klebend */
@@ -300,12 +326,19 @@ interface AdvanceActionsProps {
  * Weiter-Leiste (ADR-045), solange Auflösung, Zug-Ergebnis oder Zwischenstand auf den Host warten: Der Host
  * tippt „Weiter“ (die einzige orange Aktion), alle anderen sehen „Warte auf Mia …“.
  */
-function AdvanceActions({ isHost, hostName, busy, onContinue, inFlow }: AdvanceActionsProps) {
+function AdvanceActions({ isHost, hostName, label, disabled = false, busy, onContinue, inFlow }: AdvanceActionsProps) {
   const bar = (
     <ActionBar>
       {isHost ? (
-        <Button variant="primary" block loading={busy} onClick={onContinue} data-testid="game-continue">
-          {de.actions.next}
+        <Button
+          variant="primary"
+          block
+          loading={busy}
+          disabled={disabled}
+          onClick={onContinue}
+          data-testid="game-continue"
+        >
+          {label}
         </Button>
       ) : (
         <ActionBarNote testId="game-continue-waiting">{de.lobby.waitingFor(hostName)}</ActionBarNote>

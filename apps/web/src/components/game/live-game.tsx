@@ -1,6 +1,6 @@
 "use client";
 
-import type { AdvancePhase, AnswerIndex } from "@quizmaster/shared";
+import type { AnswerIndex, ContinuePhase } from "@quizmaster/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
@@ -84,13 +84,17 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
     actions.fail(result.code);
   };
 
-  const continueGame = async (phase: AdvancePhase) => {
+  const continueGame = async (phase: ContinuePhase) => {
     const startedAt = lobby.phaseStartedAt;
     if (continuing === startedAt) return;
     setContinuing(startedAt);
     const result = await actions.client().emit("game:continue", { phase });
-    // INVALID_PHASE: schon weiter (Doppeltipp, zweites Gerät) – kein Hinweis nötig.
-    if (!result.ok && result.code !== "INVALID_PHASE") {
+    // INVALID_PHASE: schon weiter (Doppeltipp, zweites Gerät); TOO_EARLY: Frage noch im Vorlauf – kein Hinweis.
+    if (!result.ok && (result.code === "INVALID_PHASE" || result.code === "TOO_EARLY")) {
+      setContinuing(null);
+      return;
+    }
+    if (!result.ok) {
       setContinuing(null);
       actions.fail(result.code);
     }

@@ -22,6 +22,10 @@ export interface QuestionOverlayProps {
   myChoice: AnswerIndex | null;
   /** darf diese Person antworten? (aktiv im Spiel) */
   canAnswer: boolean;
+  /** „Zeit pro Frage: Host“ (ADR-049): kein Countdown – der Host löst auf */
+  untimed?: boolean;
+  /** Gerät des anzeigenden Hosts (ADR-046): Antworten voll lesbar, nicht bedienbar */
+  presenting?: boolean;
   /** verbundene aktive Personen, die noch antworten müssen (ohne die eigene) */
   waitingCount: number;
   /** Identität des Timer-Laufs, z. B. `${question.id}:${syncGeneration}` – neu → TimerBar mit frischer Restzeit */
@@ -54,6 +58,8 @@ export function QuestionOverlay({
   question,
   myChoice,
   canAnswer,
+  untimed = false,
+  presenting = false,
   waitingCount,
   runId,
   onAnswer,
@@ -63,7 +69,7 @@ export function QuestionOverlay({
   const { now, enteredAt } = useOverlayClock(question.startsAt, [question.deadline]);
   const timer = useTimerRun(question.deadline, runId);
   const expired = now >= question.deadline;
-  const states = questionAnswerStates(myChoice, canAnswer && !expired);
+  const states = questionAnswerStates(myChoice, canAnswer && !expired, presenting);
   const groupRef = useRef<HTMLFieldSetElement>(null);
   const open = canAnswer && myChoice === null && !expired;
   const keyboard = useKeyboardModality();
@@ -119,11 +125,15 @@ export function QuestionOverlay({
         <QuestionCard
           prompt={question.prompt}
           media={question.media}
-          timer={{
-            runId: timer.runId,
-            remainingMs: timer.remainingMs ?? 0,
-            durationMs: question.deadline - question.startsAt,
-          }}
+          timer={
+            untimed
+              ? null
+              : {
+                  runId: timer.runId,
+                  remainingMs: timer.remainingMs ?? 0,
+                  durationMs: question.deadline - question.startsAt,
+                }
+          }
         />
       </m.div>
       <StatusLine live testId="question-waiting">

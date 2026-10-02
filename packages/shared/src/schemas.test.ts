@@ -119,6 +119,9 @@ function questionState(): PublicLobbyState {
       afterQuestionSec: 5,
       afterTurnSec: 5,
       afterRoundSec: 7,
+      hostPlays: true,
+      categoryIds: null,
+      answerSec: 20,
     },
     players: players.map((player) => ({ ...player })),
     order: ["p1", "p2"],
@@ -199,19 +202,32 @@ describe("PublicLobbyState (docs/05 §Zustände)", () => {
     for (const leak of leaks) expect(publicLobbyStateSchema.safeParse(leak).success).toBe(false);
   });
 
-  it("prüft Grenzen: 4 Antworten, 3 Optionen, index ≤ total, höchstens 8 Personen", () => {
+  it("prüft Grenzen: 4 Antworten, 1–3 Optionen (begrenzte Kategorien, ADR-048), index ≤ total, höchstens 8 Personen", () => {
     const state = questionState();
     if (!state.question || !state.turn) throw new Error("Testdaten unvollständig");
     const broken: unknown[] = [
       { ...state, question: { ...state.question, answers: ["a", "b", "c"] } },
       { ...state, question: { ...state.question, index: 4 } },
       { ...state, question: { ...state.question, index: 0 } },
-      { ...state, turn: { ...state.turn, options: state.turn.options.slice(0, 2) } },
+      { ...state, turn: { ...state.turn, options: [] } },
+      { ...state, turn: { ...state.turn, options: [...state.turn.options, state.turn.options[0]] } },
       { ...state, players: Array.from({ length: 9 }, (_, index) => ({ ...players[0], id: `p${index}` })) },
       { ...state, phase: "pause" },
       { ...state, code: "abc234" },
     ];
     for (const entry of broken) expect(publicLobbyStateSchema.safeParse(entry).success).toBe(false);
+  });
+
+  it("Weniger als 3 Optionen bei begrenzten Kategorien und „zeigt an“ als Status (ADR-046/048)", () => {
+    const state = questionState();
+    if (!state.turn) throw new Error("Testdaten unvollständig");
+    const fewer = { ...state, turn: { ...state.turn, options: state.turn.options.slice(0, 1) } };
+    expect(publicLobbyStateSchema.safeParse(fewer).success).toBe(true);
+    const presenter = {
+      ...state,
+      players: state.players.map((player, index) => (index === 0 ? { ...player, status: "spectator" } : player)),
+    };
+    expect(publicLobbyStateSchema.safeParse(presenter).success).toBe(true);
   });
 });
 

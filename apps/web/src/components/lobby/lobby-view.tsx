@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { de } from "@/i18n/de";
-import { connectedCount, hostPlayer } from "@/lib/client/game-view";
+import { type CategoryCatalog, connectedCount, hostPlayer } from "@/lib/client/game-view";
 import { ChevronLeftIcon, PlayIcon, PlusIcon, Settings2Icon } from "@/lib/ui/icons";
+import { usePresenterZoom } from "@/lib/ui/presenter";
 import { InvitePanel } from "./invite-panel";
 import { PlayerList } from "./player-list";
 import { RenameSheet } from "./rename-sheet";
+import { settingsExtras } from "./settings-extras";
 import { SettingsSheet } from "./settings-sheet";
 
 export interface LobbyViewProps {
@@ -45,6 +47,10 @@ export interface LobbyViewProps {
   onSettingsClosed?: () => void;
   /** Eigenen Namen ändern (ADR-041): Fehlermeldung oder `null` bei Erfolg; ohne Handler kein Stift */
   onRename?: (name: string) => Promise<string | null>;
+  /** Host übertragen (ADR-047) – nur der Host bekommt den Handler */
+  onTransferHost?: (playerId: string) => void;
+  /** Kategorien für Auswahl und Zusammenfassung (ADR-048) */
+  categories?: CategoryCatalog;
   onCopyCode: () => void;
   onShare: () => void;
   onAddBot?: () => void;
@@ -53,6 +59,8 @@ export interface LobbyViewProps {
   /** Vorschau: QR-Code anfangs offen */
   defaultQrOpen?: boolean;
 }
+
+const NO_CATEGORIES: CategoryCatalog = {};
 
 /**
  * Lobby (Phase `lobby`, docs/09 §6): Kopfzeile mit Verlassen (Dialog) und Einstellungen (nur Host),
@@ -79,6 +87,8 @@ export function LobbyView({
   onChangeSettings,
   onSettingsClosed,
   onRename,
+  onTransferHost,
+  categories = NO_CATEGORIES,
   onCopyCode,
   onShare,
   onAddBot,
@@ -92,7 +102,13 @@ export function LobbyView({
   const { rounds, questionsPerCategory, maxPlayers } = settings;
   const players = lobby.players;
   const host = hostPlayer(players);
-  const canStart = connectedCount(players) >= 2;
+  // Anzeige-Modus (ADR-046): Der Host spielt nicht mit – gezählt werden nur die Mitspielenden.
+  const presenterId = settings.hostPlays ? null : (host?.id ?? null);
+  const playing = players.filter((player) => player.id !== presenterId);
+  const canStart = connectedCount(playing) >= 2;
+  const extras = settingsExtras(settings, categories, presenterId === null ? null : (host?.name ?? ""));
+  // Der anzeigende Host zeigt schon die Lobby groß (Code und QR-Code für alle im Raum).
+  usePresenterZoom(isHost && presenterId !== null);
 
   return (
     <>
@@ -155,6 +171,8 @@ export function LobbyView({
             canKick={isHost}
             onKick={onKick}
             onRename={onRename ? () => setRenameOpen(true) : undefined}
+            onTransferHost={isHost ? onTransferHost : undefined}
+            presenterId={presenterId}
           />
           {lastGame}
           {isHost && devBots && onAddBot ? (
@@ -166,7 +184,8 @@ export function LobbyView({
           ) : null}
           <div data-testid="lobby-summary" className="flex flex-col gap-1 text-body text-text-2">
             <p>{de.lobby.settingsSummary(rounds, questionsPerCategory)}</p>
-            <p>{formatGameEstimate(rounds, Math.max(players.length, 1), questionsPerCategory, settings)}</p>
+            <p>{formatGameEstimate(rounds, Math.max(playing.length, 1), questionsPerCategory, settings)}</p>
+            {extras.length > 0 ? <p data-testid="lobby-summary-extras">{extras.join(" · ")}</p> : null}
           </div>
           {/* Neuer Tab: Wer die Lobby-Seite verlässt, wird nach 30 s Trennung entfernt. */}
           <AppFooter newTab />
@@ -177,6 +196,7 @@ export function LobbyView({
           open={settingsOpen}
           settings={settings}
           playerCount={players.length}
+          categories={categories}
           onChange={onChangeSettings}
           onClose={() => {
             setSettingsOpen(false);

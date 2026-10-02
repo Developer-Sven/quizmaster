@@ -91,7 +91,8 @@ export const progressSchema = z.strictObject({
 
 export const turnSchema = z.strictObject({
   pickerId: playerIdSchema,
-  options: z.tuple([categoryOptionSchema, categoryOptionSchema, categoryOptionSchema]),
+  /** 3 Optionen – bei begrenzten Kategorien auch 1–2 (ADR-048; genau 1 = feste Kategorie, keine Wahl) */
+  options: z.array(categoryOptionSchema).min(1).max(3),
   /** Gewählte Kategorie – erst nach der Wahl, vorher `null`. */
   categoryId: categoryIdSchema.nullable(),
 });

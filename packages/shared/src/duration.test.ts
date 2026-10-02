@@ -50,6 +50,13 @@ describe("Dauer-Schätzung (docs/01)", () => {
     expect(formatGameEstimate(3, 3, 3, slow)).toBe("27 Fragen · ca. 14 Min.");
   });
 
+  it("rechnet mit der Zeit pro Frage: im Schnitt gut die Hälfte; „Host“ zählt wie 20 s (ADR-049)", () => {
+    expect(estimateDurationSeconds(3, 3, 3, { answerSec: 20 })).toBe(estimateDurationSeconds(3, 3, 3));
+    expect(estimateDurationSeconds(3, 3, 3, { answerSec: 0 })).toBe(estimateDurationSeconds(3, 3, 3));
+    // 60 s: im Schnitt 33 s statt 11 s je Frage → 27 Fragen × 22 s mehr.
+    expect(estimateDurationSeconds(3, 3, 3, { answerSec: 60 })).toBe(estimateDurationSeconds(3, 3, 3) + 27 * 22);
+  });
+
   it("nutzt den Singular bei genau einer Frage", () => {
     expect(formatGameEstimate(1, 1, 1)).toBe("1 Frage · ca. 1 Min.");
   });

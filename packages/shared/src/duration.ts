@@ -7,7 +7,7 @@
  * 3 × 3 × 3 = 611 s → 10,18 → „ca. 10 Min.“.
  */
 
-import { ADVANCE_DEFAULTS, type AdvanceSettings, MANUAL_ADVANCE } from "./settings.ts";
+import { ADVANCE_DEFAULTS, type AdvanceSettings, GAME_RULES, type LobbySettings, MANUAL_ADVANCE } from "./settings.ts";
 
 function assertCount(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 0) {
@@ -29,15 +29,16 @@ function advanceSec(value: number | undefined, fallback: number): number {
 }
 
 /**
- * Geschätzte Spieldauer in Sekunden: `5 + R × (P × (6 + 3 + K × (12 + F) + Z) + T)` mit F/Z/T = Sekunden nach
- * jeder Frage, Kategorie und Runde (ADR-045; Standard 5/5/7 – Spieltempo ADR-044: Intro 5 s, je Zug Wahl ≈ 6 s,
- * Einblendung 3 s, je Frage ≈ 12 s Vorlauf + Antwort). „Host tippt Weiter“ zählt wie der Standard.
+ * Geschätzte Spieldauer in Sekunden: `5 + R × (P × (6 + 3 + K × (1 + A + F) + Z) + T)` mit A = im Schnitt
+ * benötigte Antwortzeit (gut die Hälfte der Zeit pro Frage: 20 s → 11 s, ADR-049) und F/Z/T = Sekunden nach jeder
+ * Frage, Kategorie und Runde (ADR-045; Standard 5/5/7 – Spieltempo ADR-044: Intro 5 s, je Zug Wahl ≈ 6 s,
+ * Einblendung 3 s, 1 s Vorlauf je Frage). „Host“ zählt jeweils wie der Standard.
  */
 export function estimateDurationSeconds(
   rounds: number,
   players: number,
   questionsPerCategory: number,
-  advance: Partial<AdvanceSettings> = {},
+  advance: Partial<AdvanceSettings & Pick<LobbySettings, "answerSec">> = {},
 ): number {
   assertCount("rounds", rounds);
   assertCount("players", players);
@@ -45,7 +46,10 @@ export function estimateDurationSeconds(
   const afterQuestion = advanceSec(advance.afterQuestionSec, ADVANCE_DEFAULTS.afterQuestionSec);
   const afterTurn = advanceSec(advance.afterTurnSec, ADVANCE_DEFAULTS.afterTurnSec);
   const afterRound = advanceSec(advance.afterRoundSec, ADVANCE_DEFAULTS.afterRoundSec);
-  return 5 + rounds * (players * (6 + 3 + questionsPerCategory * (12 + afterQuestion) + afterTurn) + afterRound);
+  const answering = Math.round(advanceSec(advance.answerSec, GAME_RULES.answerTimeMs / 1_000) * 0.55);
+  return (
+    5 + rounds * (players * (6 + 3 + questionsPerCategory * (1 + answering + afterQuestion) + afterTurn) + afterRound)
+  );
 }
 
 /** Sekunden → ganze Minuten nach der Rundungsregel oben (mindestens 1). */
@@ -63,7 +67,7 @@ export function formatGameEstimate(
   rounds: number,
   players: number,
   questionsPerCategory: number,
-  advance: Partial<AdvanceSettings> = {},
+  advance: Partial<AdvanceSettings & Pick<LobbySettings, "answerSec">> = {},
 ): string {
   const count = questionCount(rounds, players, questionsPerCategory);
   const seconds = estimateDurationSeconds(rounds, players, questionsPerCategory, advance);

@@ -16,6 +16,7 @@ import {
   joinLobby,
   lastSelf,
   lastState,
+  runtimeOf,
   sleep,
   startGameServer,
   waitForGameDoc,
@@ -220,7 +221,7 @@ describe("Spielregeln", () => {
     const pickerId = pick.turn?.pickerId ?? "";
     const picker = lastSelf(host)?.playerId === pickerId ? host : guest;
     const waiting = picker === host ? guest : host;
-    expect(await waiting.emit("game:pick", { categoryId: pick.turn?.options[0].id ?? "" })).toMatchObject({
+    expect(await waiting.emit("game:pick", { categoryId: pick.turn?.options[0]?.id ?? "" })).toMatchObject({
       ok: false,
       error: { code: "NOT_YOUR_TURN" },
     });
@@ -231,11 +232,11 @@ describe("Spielregeln", () => {
       error: { code: "INVALID_OPTION" },
     });
     const questionState = picker.waitFor("lobby:state", (state) => state.phase === "question");
-    expect(await picker.emit("game:pick", { categoryId: pick.turn?.options[1].id ?? "" })).toEqual({
+    expect(await picker.emit("game:pick", { categoryId: pick.turn?.options[1]?.id ?? "" })).toEqual({
       ok: true,
       data: null,
     });
-    expect(await picker.emit("game:pick", { categoryId: pick.turn?.options[1].id ?? "" })).toMatchObject({
+    expect(await picker.emit("game:pick", { categoryId: pick.turn?.options[1]?.id ?? "" })).toMatchObject({
       ok: false,
       error: { code: "INVALID_PHASE" },
     });
@@ -322,6 +323,76 @@ describe("Weiter per Host (ADR-045)", () => {
       error: { code: "INVALID_PHASE" },
     });
     await waitForPhase(host, "game_over", 30_000);
+    for (const player of players) player.stop();
+    for (const client of clients) client.close();
+  });
+});
+
+describe("Zeit pro Frage: Host löst auf (ADR-049)", () => {
+  it("ohne Countdown wartet die Frage; erst ab Fragebeginn löst der Host auf, nicht der Gast", async () => {
+    const { clients, host } = await lobbyWith(2, { rounds: 1, questionsPerCategory: 1, answerSec: 0 });
+    const guest = clients[1] as TestClient;
+    const pick = host.waitFor("lobby:state", (state) => state.phase === "category_pick", 30_000);
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    const picking = await pick;
+    const picker = picking.turn?.pickerId === lastSelf(host)?.playerId ? host : guest;
+    const question = host.waitFor("lobby:state", (state) => state.phase === "question", 30_000);
+    expect(await picker.emit("game:pick", { categoryId: picking.turn?.options[0]?.id ?? "" })).toEqual({
+      ok: true,
+      data: null,
+    });
+    const asked = await question;
+    expect(await host.emit("game:continue", { phase: "question" })).toMatchObject({
+      ok: false,
+      error: { code: "TOO_EARLY" },
+    });
+    await sleep(Math.max(0, (asked.question?.startsAt ?? 0) - Date.now()) + 1_000);
+    expect(lastState(host)?.phase).toBe("question");
+    expect(await guest.emit("game:continue", { phase: "question" })).toMatchObject({
+      ok: false,
+      error: { code: "NOT_HOST" },
+    });
+    const reveal = host.waitFor("lobby:state", (state) => state.phase === "reveal", 10_000);
+    expect(await host.emit("game:continue", { phase: "question" })).toEqual({ ok: true, data: null });
+    expect((await reveal).question?.correct).toBeDefined();
+    for (const client of clients) client.close();
+  });
+});
+
+describe("Anzeige-Modus und feste Kategorie (ADR-046/048)", () => {
+  it("Host zeigt nur an: spielt nicht mit, Antworten → INVALID_PHASE, nicht im Ergebnis", async () => {
+    const { code, clients, host } = await lobbyWith(3, { rounds: 1, questionsPerCategory: 1, hostPlays: false });
+    const players = clients.slice(1).map((client) => autoPlay(server, client, code, { answer: "correct" }));
+    const question = host.waitFor("lobby:state", (state) => state.phase === "question", 30_000);
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    const state = await question;
+    const hostId = lastSelf(host)?.playerId ?? "";
+    expect(state.players.find((player) => player.id === hostId)?.status).toBe("spectator");
+    expect(state.order).not.toContain(hostId);
+    await sleep(Math.max(0, (state.question?.startsAt ?? 0) - Date.now()) + 20);
+    expect(await host.emit("game:answer", { questionId: state.question?.id ?? "", choice: 0 })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_PHASE" },
+    });
+    const over = await waitForPhase(host, "game_over", 60_000);
+    expect(over.results?.ranking.map((entry) => entry.playerId)).not.toContain(hostId);
+    for (const player of players) player.stop();
+    for (const client of clients) client.close();
+  });
+
+  it("eine feste Kategorie: kein Wahl-Schritt, jeder Zug in dieser Kategorie", async () => {
+    const fixed = runtimeOf(server).questions.playableCategories()[0]?.id ?? "";
+    const { code, clients, host } = await lobbyWith(2, { rounds: 1, questionsPerCategory: 1, categoryIds: [fixed] });
+    const phases: string[] = [];
+    host.socket.on("lobby:state", (state: PublicLobbyState) => phases.push(state.phase));
+    const players = clients.map((client) => autoPlay(server, client, code, { answer: "correct" }));
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    await waitForPhase(host, "game_over", 60_000);
+    expect(phases).not.toContain("category_pick");
+    const actor = actorOf(server, code);
+    const turns = actor.state.game?.turns ?? actor.state.lastGame?.turns ?? [];
+    expect(turns.length).toBeGreaterThan(0);
+    for (const turn of turns) expect(turn.categoryId).toBe(fixed);
     for (const player of players) player.stop();
     for (const client of clients) client.close();
   });

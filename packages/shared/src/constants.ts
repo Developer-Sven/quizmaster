@@ -41,8 +41,11 @@ export function pickPlayerColor(taken: Iterable<PlayerColor>): PlayerColor | nul
   return PLAYER_COLORS.find((color) => !used.has(color)) ?? null;
 }
 
-/** Status einer Person im Spiel; „resigned“ = aufgegeben (verlassen oder Frist überschritten). */
-export const PLAYER_STATUSES = ["active", "resigned"] as const;
+/**
+ * Status einer Person im Spiel; „resigned“ = aufgegeben (verlassen oder Frist überschritten), „spectator“ = der
+ * Host spielt nicht mit und zeigt nur an (Anzeige-Modus, ADR-046) – nie in Reihenfolge, Zügen oder Ergebnis.
+ */
+export const PLAYER_STATUSES = ["active", "resigned", "spectator"] as const;
 export type PlayerStatus = (typeof PLAYER_STATUSES)[number];
 
 /** Codes des Server-Events `notice` (docs/05 §Server → Client). */

@@ -130,7 +130,8 @@ export interface QuestionState {
 }
 
 /** Wie die Kategorie eines Zuges bestimmt wurde (GameDoc `pickedBy`). */
-export type PickedBy = "player" | "timeout";
+/** Wer die Kategorie bestimmt hat; „fixed“ = nur eine erlaubt, keine Wahl (ADR-048). */
+export type PickedBy = "player" | "timeout" | "fixed";
 
 /** Ein Zug: Kategoriewahl einer Person + die Fragen dieser Kategorie. */
 export interface TurnState {
@@ -139,7 +140,8 @@ export interface TurnState {
   /** Runde (1-basiert). */
   round: number;
   pickerId: string;
-  options: [CategoryOption, CategoryOption, CategoryOption];
+  /** 3 Optionen – bei einer Auswahl des Hosts auch 1–2 (ADR-048) */
+  options: CategoryOption[];
   /** Gewählte Kategorie; `null` bis zur Wahl. */
   categoryId: string | null;
   pickedBy: PickedBy | null;

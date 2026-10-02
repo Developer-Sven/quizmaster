@@ -8,9 +8,9 @@
  * die Engine prüft Formate zusätzlich mit denselben Schemas (Defense in Depth).
  */
 import {
-  type AdvancePhase,
   type AnswerIndex,
   type CategoryOption,
+  type ContinuePhase,
   type GameTimingMode,
   reviewItemSchema,
   type SettingsUpdate,
@@ -73,8 +73,15 @@ export interface RenameCommand {
 export interface ContinueCommand {
   type: "CONTINUE";
   guestId: string;
-  /** Phase, die weitergeschaltet werden soll (Doppeltipp überspringt so nichts). */
-  phase: AdvancePhase;
+  /** Phase, die beendet werden soll: Frage auflösen (ADR-049) oder weiter (Doppeltipp überspringt so nichts). */
+  phase: ContinuePhase;
+}
+
+/** `lobby:transfer-host` – Host gibt die Rolle an eine verbundene Person ab (ADR-047). */
+export interface TransferHostCommand {
+  type: "TRANSFER_HOST";
+  guestId: string;
+  targetPlayerId: string;
 }
 
 /** `lobby:kick` – Host, nicht sich selbst; entfernt + sperrt die Person für diese Lobby. */
@@ -178,6 +185,7 @@ export type Command =
   | UpdateSettingsCommand
   | RenameCommand
   | ContinueCommand
+  | TransferHostCommand
   | KickCommand
   | StartCommand
   | RematchCommand

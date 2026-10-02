@@ -221,6 +221,15 @@ describe("Cues: Töne und Haptik (docs/09 §7, §10)", () => {
     ]);
   });
 
+  it("ohne Countdown („Zeit pro Frage: Host“, ADR-049) tickt nichts", () => {
+    const question = testQuestion({ index: 2, startsAt: 10_000, deadline: 10_000 + 600_000 });
+    const state = { phase: "question" as const, phaseStartedAt: 9_000, question, results: null };
+    expect(stageCues({ ...state, settings: { answerSec: 0 } }, "p1").filter((cue) => cue.sound === "tick")).toEqual([]);
+    expect(
+      stageCues({ ...state, settings: { answerSec: 20 } }, "p1").filter((cue) => cue.sound === "tick"),
+    ).toHaveLength(5);
+  });
+
   it("tickt bei weiteren Fragen ohne `turn` und nie vor `startsAt` (schneller Modus: 2 s Antwortzeit)", () => {
     const fast = testQuestion({ id: "q8", index: 2, startsAt: 1_000, deadline: 3_000 });
     const cues = stageCues(testLobby({ phase: "question", phaseStartedAt: 900, question: fast }), "p1");

@@ -40,9 +40,11 @@ export const gameTurnSchema = z.object({
   round: z.int().min(1),
   pickerId: playerIdSchema,
   /** Angebotene Kategorien. */
-  offered: z.tuple([categoryIdSchema, categoryIdSchema, categoryIdSchema]),
+  /** Angebotene Kategorien: 3 – bei einer Auswahl des Hosts 1–3 (ADR-048) */
+  offered: z.array(categoryIdSchema).min(1).max(3),
   categoryId: categoryIdSchema,
-  pickedBy: z.enum(["player", "timeout"]),
+  /** „fixed“: nur eine Kategorie erlaubt, keine Wahl (ADR-048) */
+  pickedBy: z.enum(["player", "timeout", "fixed"]),
   questions: z.array(
     z.object({
       /** DB-ID der Frage (nicht die Instanz-ID aus dem Spiel). */

@@ -159,6 +159,44 @@ describe("offerCategories (docs/04 Schritt 4)", () => {
   });
 });
 
+describe("offerCategories mit begrenzter Auswahl (ADR-048)", () => {
+  const catalog = makeCatalog({ categories: 6, perCategory: 20 });
+  const [a = "", b = "", c = "", d = ""] = catalog.categories.map((category) => category.id);
+  const offer = (categoryIds: string[] | null, played: string[] = []) =>
+    offerCategories({
+      categories: catalog.categories,
+      pool: catalog.pool,
+      seen: new Map(),
+      turn: { questionsPerTurn: K, playedCategoryIds: played, usedQuestionIds: [], categoryIds },
+      rng: createSeededRng(3),
+    })?.map((option) => option.id);
+
+  it("eine Kategorie: genau diese – auch direkt nach ihrem eigenen Zug", () => {
+    expect(offer([a], [a])).toEqual([a]);
+  });
+
+  it("zwei oder drei: alle, auch die des letzten Zuges", () => {
+    expect(offer([a, b], [a])?.sort()).toEqual([a, b].sort());
+    expect(offer([a, b, c], [b])?.sort()).toEqual([a, b, c].sort());
+  });
+
+  it("vier oder mehr: 3 aus der Auswahl, nie die des letzten Zuges", () => {
+    const ids = offer([a, b, c, d], [a]) ?? [];
+    expect(ids).toHaveLength(3);
+    expect(ids).not.toContain(a);
+    for (const id of ids) expect([b, c, d]).toContain(id);
+  });
+
+  it("nur Kategorien aus der Auswahl; unbekannte IDs zählen nicht, ganz ohne spielbare → null", () => {
+    expect(offer([a, "gibt-es-nicht"])).toEqual([a]);
+    expect(offer(["gibt-es-nicht"])).toBeUndefined();
+  });
+
+  it("ohne Auswahl (null) wie bisher: immer 3", () => {
+    expect(offer(null, [a])).toHaveLength(3);
+  });
+});
+
 describe("drawQuestions (docs/04 Schritt 5)", () => {
   // 4 Themen bei 5 Stufen: Thema und Stufe sind unabhängig (i % 4 vs. i % 5).
   const catalog = makeCatalog({ categories: 2, perCategory: 100, topics: 4 });

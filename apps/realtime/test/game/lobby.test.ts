@@ -382,12 +382,17 @@ describe("Kontingente und Kill-Switches", () => {
       ok: false,
       error: { code: "LOBBY_CREATION_DISABLED" },
     });
-    config.apply({ ...config.get(), lobbyCreationEnabled: true, maxActiveLobbies: runtimeOf(server).lobbies.size });
+    // Eine eigene Lobby bleibt offen – unabhängig davon, ob Lobbys früherer Tests gerade schließen.
+    config.apply({ ...config.get(), lobbyCreationEnabled: true });
+    const keeper = await connectGuest(server);
+    await createLobby(keeper, "Lea");
+    config.apply({ ...config.get(), maxActiveLobbies: 1 });
     expect(await client.emit("lobby:create", { name: "Mia" })).toMatchObject({
       ok: false,
       error: { code: "SERVER_BUSY" },
     });
-    client.close();
+    config.apply({ ...config.get(), maxActiveLobbies: 5_000 });
+    for (const entry of [client, keeper]) entry.close();
   });
 
   it("turnstileOnJoin: create/join nur mit frischem tsv im Ticket, resume/Wiederbeitritt ohne", async () => {
@@ -468,6 +473,52 @@ describe("Namen ändern (ADR-041)", () => {
       error: { code: "INVALID_PHASE" },
     });
     for (const client of [outsider, host, guest]) client.close();
+  });
+});
+
+describe("Host übertragen (ADR-047)", () => {
+  it("lobby:transfer-host: Host gibt ab, alle erfahren es, der neue Host darf einstellen", async () => {
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const guest = await connectGuest(server);
+    await joinLobby(guest, code, "Ben");
+    const benId = lastSelf(guest)?.playerId ?? "";
+    const changed = guest.waitFor("notice", (notice) => notice.code === "HOST_CHANGED");
+    expect(await guest.emit("lobby:transfer-host", { playerId: benId })).toMatchObject({
+      ok: false,
+      error: { code: "NOT_HOST" },
+    });
+    expect(await host.emit("lobby:transfer-host", { playerId: benId })).toEqual({ ok: true, data: null });
+    await changed;
+    await eventually(() => lastSelf(guest)?.isHost === true);
+    expect(await guest.emit("lobby:update-settings", { rounds: 2 })).toEqual({ ok: true, data: null });
+    expect(await host.emit("lobby:update-settings", { rounds: 4 })).toMatchObject({
+      ok: false,
+      error: { code: "NOT_HOST" },
+    });
+    expect(await guest.emit("lobby:transfer-host", { playerId: "p_unbekannt" })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_OPTION" },
+    });
+    for (const client of [host, guest]) client.close();
+  });
+});
+
+describe("Kategorien begrenzen (ADR-048)", () => {
+  it("nur Kategorien aus dem Katalog; null setzt auf alle zurück", async () => {
+    const host = await connectGuest(server);
+    await createLobby(host, "Mia");
+    expect(await host.emit("lobby:update-settings", { categoryIds: ["gibt-es-nicht"] })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_OPTION" },
+    });
+    const playable = runtimeOf(server).questions.playableCategories();
+    const first = playable[0]?.id ?? "";
+    expect(await host.emit("lobby:update-settings", { categoryIds: [first] })).toEqual({ ok: true, data: null });
+    await eventually(() => lastState(host)?.settings.categoryIds?.[0] === first);
+    expect(await host.emit("lobby:update-settings", { categoryIds: null })).toEqual({ ok: true, data: null });
+    await eventually(() => lastState(host)?.settings.categoryIds === null);
+    host.close();
   });
 });
 

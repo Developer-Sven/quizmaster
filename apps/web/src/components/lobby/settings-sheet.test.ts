@@ -5,7 +5,13 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SettingsSummary, settingsSummaryParts } from "./settings-sheet";
+import {
+  categorySummary,
+  SettingsSummary,
+  settingsSummaryParts,
+  sortedCategories,
+  toggleCategory,
+} from "./settings-sheet";
 
 describe("Einstellungen: Zusammenfassungszeile", () => {
   it("besteht aus den Teilen von Einstellungen und Schätzung (docs/09 §6, §11)", () => {
@@ -38,5 +44,27 @@ describe("Einstellungen: Zusammenfassungszeile", () => {
     expect(between).toEqual([separator, separator, separator]);
     expect(html).toContain("text-balance");
     expect(html).toContain('data-testid="settings-summary"');
+  });
+});
+
+describe("Kategorien begrenzen (ADR-048)", () => {
+  const catalog = {
+    sport: { id: "sport", name: "Sport", icon: "trophy", color: "#336699" },
+    "kunst-kultur": { id: "kunst-kultur", name: "Kunst & Kultur", icon: "palette", color: "#996633" },
+    erdkunde: { id: "erdkunde", name: "Erdkunde", icon: "globe", color: "#339966" },
+  };
+
+  it("aus „Alle“ wird „nur diese“, weitere Tipps fügen hinzu bzw. nehmen weg, leer heißt wieder „Alle“", () => {
+    expect(toggleCategory(null, "sport")).toEqual(["sport"]);
+    expect(toggleCategory(["sport"], "erdkunde")).toEqual(["sport", "erdkunde"]);
+    expect(toggleCategory(["sport", "erdkunde"], "sport")).toEqual(["erdkunde"]);
+    expect(toggleCategory(["sport"], "sport")).toBeNull();
+  });
+
+  it("Zeile zeigt „Alle“, den Namen bei genau einer, sonst die Anzahl; Liste alphabetisch", () => {
+    expect(categorySummary(null, catalog)).toBe("Alle");
+    expect(categorySummary(["sport"], catalog)).toBe("Sport");
+    expect(categorySummary(["sport", "erdkunde"], catalog)).toBe("2 ausgewählt");
+    expect(sortedCategories(catalog).map((category) => category.name)).toEqual(["Erdkunde", "Kunst & Kultur", "Sport"]);
   });
 });

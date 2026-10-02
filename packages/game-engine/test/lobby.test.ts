@@ -1,4 +1,4 @@
-import { getTimings, LOBBY_LIFETIME } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS, getTimings, LOBBY_LIFETIME } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import { createLobby, createSeededRng, type Effect, toPrivateState, toPublicState } from "../src/index.ts";
 import { guestUuid } from "./support/fixtures.ts";
@@ -28,14 +28,7 @@ describe("Lobby erstellen", () => {
     expect(pub.players).toEqual([
       expect.objectContaining({ name: "Mia", color: "blue", isHost: true, connected: true, isBot: false, score: 0 }),
     ]);
-    expect(pub.settings).toEqual({
-      rounds: 3,
-      questionsPerCategory: 3,
-      maxPlayers: 8,
-      afterQuestionSec: 5,
-      afterTurnSec: 5,
-      afterRoundSec: 7,
-    });
+    expect(pub.settings).toEqual({ ...DEFAULT_LOBBY_SETTINGS, rounds: 3, questionsPerCategory: 3, maxPlayers: 8 });
     expect(types(result.effects)).toEqual(["broadcast", "sendPrivate", "scheduleTimer", "persist"]);
     expect(result.effects).toContainEqual({ type: "persist", reason: "created" });
     expect(result.effects).toContainEqual(
@@ -150,6 +143,43 @@ describe("Namen ändern (ADR-041)", () => {
   });
 });
 
+describe("Host übertragen (ADR-047)", () => {
+  it("Host gibt die Rolle an eine verbundene Person ab – alle erfahren es", () => {
+    const sim = new Simulation();
+    const ben = sim.join("Ben");
+    const from = sim.effects.length;
+    sim.ok({ type: "TRANSFER_HOST", guestId: sim.host, targetPlayerId: sim.playerId(ben) });
+    expect(sim.state.hostPlayerId).toBe(sim.playerId(ben));
+    expect(sim.effects.slice(from)).toContainEqual({ type: "notice", code: "HOST_CHANGED" });
+    expect(toPublicState(sim.state).players.find((player) => player.isHost)?.name).toBe("Ben");
+    // Jetzt darf Ben einstellen, Mia nicht mehr.
+    expect(
+      errorCode(sim.dispatch({ type: "UPDATE_SETTINGS", guestId: sim.guests[0] ?? "", update: { rounds: 2 } })),
+    ).toBe("NOT_HOST");
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: ben, update: { rounds: 2 } });
+  });
+
+  it("nur der Host; Ziel muss eine verbundene Person sein (nicht man selbst, kein Bot, nicht getrennt)", () => {
+    const sim = new Simulation();
+    const ben = sim.join("Ben");
+    const lea = sim.join("Lea");
+    const bot = sim.addBot();
+    expect(errorCode(sim.dispatch({ type: "TRANSFER_HOST", guestId: ben, targetPlayerId: sim.playerId(lea) }))).toBe(
+      "NOT_HOST",
+    );
+    for (const target of [sim.playerId(sim.host), sim.playerId(bot), "p_unbekannt"]) {
+      expect(errorCode(sim.dispatch({ type: "TRANSFER_HOST", guestId: sim.host, targetPlayerId: target }))).toBe(
+        "INVALID_OPTION",
+      );
+    }
+    sim.ok({ type: "DISCONNECT", guestId: lea });
+    expect(
+      errorCode(sim.dispatch({ type: "TRANSFER_HOST", guestId: sim.host, targetPlayerId: sim.playerId(lea) })),
+    ).toBe("INVALID_OPTION");
+    expect(sim.state.hostPlayerId).toBe(sim.playerId(sim.host));
+  });
+});
+
 describe("Einstellungen", () => {
   it("nur Host, nur Phase lobby, gültige Werte, nicht unter die Personenzahl", () => {
     const sim = lobbyWith(3);
@@ -167,12 +197,10 @@ describe("Einstellungen", () => {
     const from = sim.effects.length;
     sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 2 } });
     expect(toPublicState(sim.state).settings).toEqual({
+      ...DEFAULT_LOBBY_SETTINGS,
       rounds: 1,
       questionsPerCategory: 2,
       maxPlayers: 8,
-      afterQuestionSec: 5,
-      afterTurnSec: 5,
-      afterRoundSec: 7,
     });
     expect(sim.effects.slice(from)).toContainEqual({ type: "persist", reason: "settings" });
     sim.ok({ type: "START", guestId: sim.host });

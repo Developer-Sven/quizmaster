@@ -170,6 +170,16 @@ describe("SettingsSync: Stepper-Tipps gebündelt senden (ADR-042)", () => {
     expect(flushed).toBe(true);
   });
 
+  it("Kategorie-Listen und Wahrheitswerte: gleiche Inhalte gelten als bestätigt (ADR-046/048)", async () => {
+    const { sync, sent, drafts } = setup();
+    sync.change({ categoryIds: ["sport", "musik"], hostPlays: false });
+    await vi.advanceTimersByTimeAsync(SETTINGS_SYNC_TIMING.idleMs);
+    expect(sent).toEqual([{ categoryIds: ["sport", "musik"], hostPlays: false }]);
+    // Neues Array-Objekt mit gleichem Inhalt vom Server: bestätigt, Entwurf leer.
+    sync.serverChanged({ ...BASE, categoryIds: ["sport", "musik"], hostPlays: false });
+    expect(drafts.at(-1)).toEqual({});
+  });
+
   it("nach dispose() wird nichts mehr gesendet", async () => {
     const { sync, sent } = setup();
     sync.change({ rounds: 9 });

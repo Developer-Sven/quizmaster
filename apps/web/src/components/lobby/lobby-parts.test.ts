@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderHtml } from "../ui/ssr-render";
 import { InvitePanel } from "./invite-panel";
 import { LobbyAnnouncer } from "./lobby-announcer";
+import { settingsExtras } from "./settings-extras";
 
 const noop = () => {};
 
@@ -23,5 +24,22 @@ describe("Code-Zeile der Lobby (docs/09 §6)", () => {
 describe("Ansagen der Lobby (WCAG 4.1.3)", () => {
   it("hat eine dauerhafte, unsichtbare Status-Region", () => {
     expect(renderHtml(LobbyAnnouncer, {})).toBe('<p role="status" class="sr-only" data-testid="lobby-announcer"></p>');
+  });
+});
+
+describe("Zusatzzeile der Lobby-Zusammenfassung (ADR-046/048/049)", () => {
+  const catalog = { sport: { id: "sport", name: "Sport", icon: "trophy", color: "#336699" } };
+
+  it("nur Abweichungen vom Standard: feste Kategorie, Zeit pro Frage, anzeigender Host", () => {
+    expect(settingsExtras({ categoryIds: null, answerSec: 20 }, catalog, null)).toEqual([]);
+    expect(settingsExtras({ categoryIds: ["sport"], answerSec: 0 }, catalog, "Mia")).toEqual([
+      "Nur Sport",
+      "Auflösen per Host",
+      "Mia zeigt nur an",
+    ]);
+    expect(settingsExtras({ categoryIds: ["sport", "erdkunde"], answerSec: 45 }, catalog, null)).toEqual([
+      "2 Kategorien",
+      "45 s pro Frage",
+    ]);
   });
 });

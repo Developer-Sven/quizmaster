@@ -16,6 +16,8 @@ export interface PlayerRowProps {
   connected?: boolean;
   /** Name durchgestrichen, Avatar 40 % */
   resigned?: boolean;
+  /** kurzer Hinweis neben dem Namen (`caption`, text-2), z. B. „zeigt an“ (ADR-046) */
+  note?: string;
   /** weitere Statusanzeige oder Aktion rechts */
   trailing?: ReactNode;
   /** Nur für den Host: Person entfernen (`user-round-x`); ohne Handler kein Button */
@@ -32,6 +34,7 @@ export function PlayerRow({
   isHost = false,
   connected = true,
   resigned = false,
+  note,
   trailing,
   onKick,
 }: PlayerRowProps) {
@@ -42,6 +45,7 @@ export function PlayerRow({
         <span className={cx("truncate text-body", resigned ? "text-text-2 line-through" : "text-text")}>{name}</span>
         {connected ? null : <span className="shrink-0 text-caption text-text-2">{de.lobby.offline}</span>}
         {resigned ? <span className="shrink-0 text-caption text-text-2">{de.result.resigned}</span> : null}
+        {note ? <span className="shrink-0 text-caption text-text-2">{note}</span> : null}
       </div>
       {isHost ? (
         <span className="flex shrink-0 items-center gap-1 text-label text-text-2">

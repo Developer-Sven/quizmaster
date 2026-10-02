@@ -23,7 +23,8 @@ export type SettingLabel =
   | "Runden"
   | "Fragen pro Kategorie"
   | "Personen maximal"
-  // Weiter nach … (ADR-045): Sekunden, 0 = „Host“ (der Host tippt „Weiter“)
+  // Zeit pro Frage (ADR-049) und Weiter nach … (ADR-045): Sekunden, 0 = „Host“
+  | "Zeit pro Frage"
   | "Nach jeder Frage"
   | "Nach jeder Kategorie"
   | "Nach dem Zwischenstand";

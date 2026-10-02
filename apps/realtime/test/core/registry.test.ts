@@ -44,6 +44,7 @@ const SAMPLE_ACK: { [E in ClientEventName]: ClientEventAckData<E> } = {
   "lobby:update-settings": null,
   "lobby:kick": null,
   "lobby:rename": null,
+  "lobby:transfer-host": null,
   "lobby:start": null,
   "game:pick": null,
   "game:answer": { accepted: true },

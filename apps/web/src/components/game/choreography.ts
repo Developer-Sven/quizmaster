@@ -340,7 +340,9 @@ export interface StageCue {
 /** Toleranzen: Ticks müssen zur Sekunde passen, Ergebnis-Töne dürfen die Netzlatenz abwarten. */
 export const CUE_LATE_MS = { tick: 250, moment: 1_000 } as const;
 
-type CueState = Pick<PublicLobbyState, "phase" | "phaseStartedAt" | "question" | "results">;
+type CueState = Pick<PublicLobbyState, "phase" | "phaseStartedAt" | "question" | "results"> & {
+  settings?: Pick<PublicLobbyState["settings"], "answerSec">;
+};
 
 /**
  * Töne und Haptik der aktuellen Phase (docs/09 §7, §10): `turn` zur Kategorie-Einblendung (Kategorie gewählt),
@@ -363,7 +365,9 @@ export function stageCues(state: CueState, selfId: string | null): StageCue[] {
           lateMs: CUE_LATE_MS.moment,
         });
       }
-      for (let secondsLeft = CHOREOGRAPHY.question.tickFromMs / 1000; secondsLeft >= 1; secondsLeft--) {
+      // „Zeit pro Frage: Host“ (ADR-049): kein Countdown, also auch kein Ticken.
+      const untimed = state.settings?.answerSec === 0;
+      for (let secondsLeft = untimed ? 0 : CHOREOGRAPHY.question.tickFromMs / 1000; secondsLeft >= 1; secondsLeft--) {
         const at = question.deadline - secondsLeft * 1000;
         if (at < question.startsAt) continue;
         cues.push({
