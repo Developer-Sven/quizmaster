@@ -32,6 +32,8 @@ const PROTOCOL_ERROR_CODES = [
 
 /** Beispielargumente für Funktionen, deren Parameter keine einfachen Texte sind. */
 const SPECIAL_ARGS: Record<string, unknown[]> = {
+  // Kategorien der Reihe nach (ADR-056): Liste von Namen
+  "de.lobby.categorySequence": [["Sport", "Musik"]],
   "de.a11y.pickedBy": [["Mia", "Ben"]],
 };
 
@@ -128,6 +130,8 @@ describe("Texte (docs/09 §11)", () => {
     expect(de.game.questionProgress(1, 3)).toBe("Frage 1/3");
     expect(de.game.waitingForOthers(2)).toBe("Warte auf 2 weitere …");
     expect(de.game.progress(2, 3, 3, 4)).toBe("Runde 2/3 · Zug 3/4");
+    // Ohne Wahl ein Zug je Runde (ADR-056): kein „Zug 1/1“.
+    expect(de.game.progress(2, 3, 1, 1)).toBe("Runde 2/3");
     expect(de.game.revealSubtitle(3, "Mia")).toBe("3 Fragen · gewählt von Mia");
     expect(de.result.playerWins("Mia")).toBe("Mia gewinnt");
     expect(de.result.place(2)).toBe("Platz 2");

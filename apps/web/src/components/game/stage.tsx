@@ -149,6 +149,11 @@ function StageOverlay({
           questionCount={question.total}
           pickerName={findPlayer(lobby.players, turn?.pickerId)?.name ?? ""}
           fixed={turn?.options.length === 1}
+          sequence={
+            lobby.settings.categoryMode === "sequence" && lobby.progress
+              ? { round: lobby.progress.round, rounds: lobby.progress.rounds }
+              : null
+          }
           phaseStartedAt={lobby.phaseStartedAt}
           startsAt={question.startsAt}
         />

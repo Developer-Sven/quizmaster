@@ -55,7 +55,7 @@ export const CONTINUE_PHASES = ["question", ...ADVANCE_PHASES] as const satisfie
 export type ContinuePhase = (typeof CONTINUE_PHASES)[number];
 
 /** Zeit pro Frage in Sekunden (ADR-049); 0 = „Host“: kein Countdown, der Host tippt „Auflösen“. */
-export const ANSWER_SECONDS = [0, 5, 10, 15, 20, 30, 45, 60] as const;
+export const ANSWER_SECONDS = [0, 3, 5, 10, 15, 20, 30, 45, 60] as const;
 /** Sicherheitsnetz bei „Host“: spätestens dann löst der Server selbst auf (Host weg, Gerät aus). */
 export const MANUAL_ANSWER_CAP_MS = 10 * 60_000;
 
@@ -70,6 +70,14 @@ const answerSeconds = z
   .min(0)
   .max(60)
   .refine((value) => (ANSWER_SECONDS as readonly number[]).includes(value), { message: "keine erlaubte Stufe" });
+
+/**
+ * Wie die Kategorie eines Zuges entsteht (ADR-056): `pick` – wer dran ist, wählt aus drei (bei genau einer
+ * ausgewählten Kategorie entfällt die Wahl); `sequence` – keine Wahl, Runde 1 spielt die erste ausgewählte Kategorie,
+ * Runde 2 die zweite … (mindestens zwei, die Runden folgen deren Anzahl).
+ */
+export const CATEGORY_MODES = ["pick", "sequence"] as const;
+export type CategoryMode = (typeof CATEGORY_MODES)[number];
 
 /** Schwierigkeitsstufe 1 (sehr leicht) bis 5 (sehr schwer). */
 const difficultyLevel = z.literal(DIFFICULTIES);
@@ -90,7 +98,7 @@ const categoryIdsSchema = z
 
 /**
  * Vollständige Einstellungen einer Lobby (öffentlicher Zustand und Datenbank). Spätere Felder haben
- * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048/049/053/055 bleiben lesbar.
+ * Standardwerte: Snapshots und Zustände von vor ADR-045/046/048/049/053/055/056 bleiben lesbar.
  */
 export const lobbySettingsSchema = z.strictObject({
   rounds: bounded(SETTINGS_BOUNDS.rounds),
@@ -113,6 +121,8 @@ export const lobbySettingsSchema = z.strictObject({
   difficultyBasis: z.enum(DIFFICULTY_BASES).default("question"),
   /** aufsteigend oder zufällig (ADR-055) */
   difficultyOrder: z.enum(DIFFICULTY_ORDERS).default("ascending"),
+  /** Kategorien wählen oder der Reihe nach spielen (ADR-056) */
+  categoryMode: z.enum(CATEGORY_MODES).default("pick"),
 });
 export type LobbySettings = z.output<typeof lobbySettingsSchema>;
 
@@ -129,6 +139,7 @@ export const DEFAULT_LOBBY_SETTINGS: Readonly<LobbySettings> = Object.freeze({
   difficultyMax: 5,
   difficultyBasis: "question",
   difficultyOrder: "ascending",
+  categoryMode: "pick",
 });
 
 /** Antwortzeit in ms – `null` bei „Host“ (kein Countdown, ADR-049). */
@@ -176,6 +187,7 @@ const settingsChangeShape = {
   difficultyMax: difficultyLevel.optional(),
   difficultyBasis: z.enum(DIFFICULTY_BASES).optional(),
   difficultyOrder: z.enum(DIFFICULTY_ORDERS).optional(),
+  categoryMode: z.enum(CATEGORY_MODES).optional(),
 };
 
 /** Einstellungen, die ein Vorschlag ändern kann – in der Reihenfolge des Einstellungen-Sheets (ADR-053). */
@@ -184,6 +196,7 @@ export const SUGGESTABLE_SETTINGS = [
   "questionsPerCategory",
   "maxPlayers",
   "categoryIds",
+  "categoryMode",
   "difficultyMin",
   "difficultyMax",
   "difficultyBasis",
@@ -222,9 +235,36 @@ export const settingsChangesSchema = z
   });
 export type SettingsChanges = z.output<typeof settingsChangesSchema>;
 
+/**
+ * Kategorien der Reihe nach (ADR-056) gibt es nur mit mindestens zwei ausgewählten Kategorien – sonst wieder Wahl –,
+ * und die Runden folgen dann deren Anzahl (jede Kategorie genau eine Runde; mehr als 10 lehnt der Server ab).
+ */
+function withCategoryMode(settings: LobbySettings): LobbySettings {
+  if (settings.categoryMode !== "sequence") return settings;
+  const count = settings.categoryIds?.length ?? 0;
+  if (count < 2) return { ...settings, categoryMode: "pick" };
+  return { ...settings, rounds: Math.min(count, SETTINGS_BOUNDS.rounds.max) };
+}
+
+/** Wählt jemand die Kategorie? Nicht bei genau einer ausgewählten Kategorie und nicht „der Reihe nach“ (ADR-056). */
+export function hasCategoryPick(settings: {
+  categoryIds?: readonly string[] | null;
+  categoryMode?: CategoryMode;
+}): boolean {
+  return settings.categoryMode !== "sequence" && settings.categoryIds?.length !== 1;
+}
+
+/** Züge je Runde: jede Person wählt einmal – ohne Wahl genau einer (eine Runde = eine Kategorie, ADR-056). */
+export function turnsPerRound(
+  players: number,
+  settings: { categoryIds?: readonly string[] | null; categoryMode?: CategoryMode },
+): number {
+  return hasCategoryPick(settings) ? players : Math.min(players, 1);
+}
+
 /** Wendet eine (validierte) Änderung an und liefert neue Einstellungen. */
 export function applySettingsUpdate(current: LobbySettings, update: SettingsUpdate): LobbySettings {
-  return {
+  return withCategoryMode({
     rounds: update.rounds ?? current.rounds,
     questionsPerCategory: update.questionsPerCategory ?? current.questionsPerCategory,
     maxPlayers: update.maxPlayers ?? current.maxPlayers,
@@ -240,7 +280,8 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
     difficultyMax: update.difficultyMax ?? current.difficultyMax,
     difficultyBasis: update.difficultyBasis ?? current.difficultyBasis,
     difficultyOrder: update.difficultyOrder ?? current.difficultyOrder,
-  };
+    categoryMode: update.categoryMode ?? current.categoryMode,
+  });
 }
 
 /** Gleicher Einstellungswert; eine Kategorie-Auswahl gilt unabhängig von der Reihenfolge als gleich. */

@@ -59,4 +59,22 @@ describe("Zusatzzeile der Lobby-Zusammenfassung (ADR-046/048/049)", () => {
       ),
     ).toEqual(["Schwierigkeit 2–4, pro Kategorie zufällig"]);
   });
+
+  it("Kategorien der Reihe nach: Namen mit Pfeil, ab fünf die Anzahl (ADR-056)", () => {
+    const names = { ...catalog, musik: { id: "musik", name: "Musik", icon: "music", color: "#336699" } };
+    expect(
+      settingsExtras(
+        { ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport", "musik"], categoryMode: "sequence" },
+        names,
+        null,
+      ),
+    ).toEqual(["Sport → Musik"]);
+    expect(
+      settingsExtras(
+        { ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["a", "b", "c", "d", "e"], categoryMode: "sequence" },
+        names,
+        null,
+      ),
+    ).toEqual(["5 Kategorien der Reihe nach"]);
+  });
 });

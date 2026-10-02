@@ -5,6 +5,7 @@
  * guestId erscheint nie. Rückgaben sind frische Objekte (keine Referenzen in den Engine-Zustand).
  */
 import {
+  hasCategoryPick,
   PROTOCOL_VERSION,
   type PrivatePlayerState,
   type PublicLobbyState,
@@ -31,6 +32,10 @@ export function remainingPickers(state: LobbyState, game: GameState): string[] {
 function projectProgress(state: LobbyState): Progress | null {
   const game = state.game;
   if (game === null || !isRunningPhase(state.phase)) return null;
+  // Ohne Wahl ist eine Runde genau ein Zug (ADR-056).
+  if (!hasCategoryPick(state.settings)) {
+    return { round: game.round, rounds: state.settings.rounds, turn: 1, turnsPerRound: 1 };
+  }
   const turnsInRound = game.turns.filter((turn) => turn.round === game.round).length;
   const turn = Math.max(1, turnsInRound);
   return {

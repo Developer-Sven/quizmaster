@@ -4,10 +4,13 @@
  */
 import {
   applySettingsUpdate,
+  type CategoryMode,
   DIFFICULTIES,
   type Difficulty,
   type LobbySettings,
+  SETTINGS_BOUNDS,
   type SettingsChanges,
+  type SettingsUpdate,
   SUGGESTABLE_SETTINGS,
   type SuggestableSetting,
   spreadDifficulties,
@@ -30,9 +33,14 @@ export function toggleCategory(current: readonly string[] | null, id: string): s
   return next.length === 0 ? null : next;
 }
 
-/** Wert der Kategorie-Zeile: „Alle“, der Name bei genau einer, sonst „3 ausgewählt“. */
-export function categorySummary(categoryIds: readonly string[] | null, catalog: CategoryCatalog): string {
+/** Wert der Kategorie-Zeile: „Alle“, der Name bei genau einer, sonst „3 ausgewählt“ bzw. „3 der Reihe nach“. */
+export function categorySummary(
+  categoryIds: readonly string[] | null,
+  catalog: CategoryCatalog,
+  mode: CategoryMode = "pick",
+): string {
   if (categoryIds === null) return de.settings.categoriesAllShort;
+  if (mode === "sequence" && categoryIds.length >= 2) return de.settings.categoriesInSequence(categoryIds.length);
   const [only] = categoryIds;
   if (categoryIds.length === 1 && only !== undefined) return catalog[only]?.name ?? de.settings.categoriesCount(1);
   return de.settings.categoriesCount(categoryIds.length);
@@ -97,6 +105,25 @@ export function difficultyPreview(
   return de.settings.difficultyPreviewCategory(turns.length > PREVIEW_MAX_TURNS ? `${shown} …` : shown);
 }
 
+/** Höchstens so viele Kategorien der Reihe nach – eine je Runde (ADR-056). */
+export const MAX_SEQUENCE_CATEGORIES = SETTINGS_BOUNDS.rounds.max;
+
+/**
+ * Änderung der Kategorie-Auswahl: der Reihe nach (ADR-056) mit passender Rundenzahl bzw. zurück zur Wahl unter zwei
+ * Kategorien – so zeigt das Sheet schon vor der Bestätigung des Servers den richtigen Stand (er rechnet genauso).
+ */
+export function categoryUpdate(settings: LobbySettings, categoryIds: string[] | null): SettingsUpdate {
+  if (settings.categoryMode !== "sequence") return { categoryIds };
+  const count = categoryIds?.length ?? 0;
+  if (count < 2) return { categoryIds, categoryMode: "pick" };
+  return { categoryIds, rounds: Math.min(count, MAX_SEQUENCE_CATEGORIES) };
+}
+
+/** Reihenfolge der Kategorien, z. B. „1. Sport · 2. Musik · 3. Kunst“. */
+export function categoryOrderText(categoryIds: readonly string[], catalog: CategoryCatalog): string {
+  return categoryIds.map((id, index) => `${index + 1}. ${catalog[id]?.name ?? id}`).join(" · ");
+}
+
 /** Beschriftung einer Einstellung wie im Sheet. */
 export function settingLabel(key: SuggestableSetting): string {
   switch (key) {
@@ -118,6 +145,8 @@ export function settingLabel(key: SuggestableSetting): string {
       return de.settings.afterRound;
     case "hostPlays":
       return de.settings.hostTitleOther;
+    case "categoryMode":
+      return de.settings.categoryModeTitle;
     case "difficultyMin":
       return de.settings.difficultyMin;
     case "difficultyMax":
@@ -133,7 +162,9 @@ export function settingLabel(key: SuggestableSetting): string {
 export function settingValueText(settings: LobbySettings, key: SuggestableSetting, catalog: CategoryCatalog): string {
   switch (key) {
     case "categoryIds":
-      return categorySummary(settings.categoryIds, catalog);
+      return categorySummary(settings.categoryIds, catalog, settings.categoryMode);
+    case "categoryMode":
+      return de.settings.categoryModes[settings.categoryMode];
     case "answerSec":
     case "afterQuestionSec":
     case "afterTurnSec":

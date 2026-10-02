@@ -21,9 +21,12 @@ import { Sheet } from "../ui/sheet";
 import { Stepper } from "../ui/stepper";
 import {
   asDifficulty,
+  categoryOrderText,
   categorySummary,
+  categoryUpdate,
   difficultyPreview,
   difficultySummary,
+  MAX_SEQUENCE_CATEGORIES,
   settingValueText,
   sortedCategories,
   toggleCategory,
@@ -95,7 +98,12 @@ export function SettingsSheet({
     baseline === undefined || sameSettingValue(baseline[key], settings[key])
       ? undefined
       : de.suggestions.currently(settingValueText(baseline, key, categories));
-  const categoriesNote = changedNote("categoryIds");
+  // Kategorien (ADR-048/056): „Aktuell: …“, sobald Auswahl oder Spielweise abweicht.
+  const categoriesNote =
+    baseline !== undefined && (changedNote("categoryIds") !== undefined || changedNote("categoryMode") !== undefined)
+      ? de.suggestions.currently(categorySummary(baseline.categoryIds, categories, baseline.categoryMode))
+      : undefined;
+  const sequence = settings.categoryMode === "sequence";
   const hostNote = changedNote("hostPlays");
   // Schwierigkeit (ADR-055): die Zeile der Hauptansicht zeigt „Aktuell: …“, sobald eins der vier Felder abweicht.
   const difficultyChanged =
@@ -132,26 +140,70 @@ export function SettingsSheet({
       >
         <ul className="flex flex-col" data-testid="settings-categories">
           <li>
-            <ListRow selected={settings.categoryIds === null} onClick={selectable({ categoryIds: null })}>
+            <ListRow selected={settings.categoryIds === null} onClick={selectable(categoryUpdate(settings, null))}>
               {de.settings.categoriesAll}
             </ListRow>
           </li>
-          {sortedCategories(categories).map((category) => (
-            <li key={category.id}>
-              <ListRow
-                selected={settings.categoryIds?.includes(category.id) ?? false}
-                onClick={selectable({ categoryIds: toggleCategory(settings.categoryIds, category.id) })}
-                data-testid={`settings-category-${category.id}`}
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <CategoryBadge category={category} compact />
-                  <span className="truncate">{category.name}</span>
-                </span>
-              </ListRow>
-            </li>
-          ))}
+          {sortedCategories(categories).map((category) => {
+            const selected = settings.categoryIds?.includes(category.id) ?? false;
+            // Der Reihe nach höchstens 10 – eine je Runde (ADR-056).
+            const full = sequence && !selected && (settings.categoryIds?.length ?? 0) >= MAX_SEQUENCE_CATEGORIES;
+            return (
+              <li key={category.id}>
+                <ListRow
+                  selected={selected}
+                  disabled={full}
+                  onClick={selectable(categoryUpdate(settings, toggleCategory(settings.categoryIds, category.id)))}
+                  data-testid={`settings-category-${category.id}`}
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <CategoryBadge category={category} compact />
+                    <span className="truncate">{category.name}</span>
+                  </span>
+                </ListRow>
+              </li>
+            );
+          })}
         </ul>
         <p className="pt-2 pb-2 text-caption text-text-2">{de.settings.categoriesHint}</p>
+        {(settings.categoryIds?.length ?? 0) >= 2 ? (
+          <>
+            <h3 className="pt-2 text-label text-text-2">{de.settings.categoryModeTitle}</h3>
+            {changedNote("categoryMode") ? (
+              <p className="text-caption text-text-2">{changedNote("categoryMode")}</p>
+            ) : null}
+            <ul className="flex flex-col" data-testid="settings-category-mode">
+              {(["pick", "sequence"] as const).map((mode) => (
+                <li key={mode}>
+                  <ListRow
+                    selected={settings.categoryMode === mode}
+                    disabled={mode === "sequence" && (settings.categoryIds?.length ?? 0) > MAX_SEQUENCE_CATEGORIES}
+                    onClick={selectable(
+                      mode === "sequence"
+                        ? { categoryMode: "sequence", rounds: settings.categoryIds?.length ?? settings.rounds }
+                        : { categoryMode: "pick" },
+                    )}
+                  >
+                    <span className="flex min-w-0 flex-col py-2">
+                      <span>{de.settings.categoryModes[mode]}</span>
+                      <span className="text-caption text-text-2">{de.settings.categoryModeHints[mode]}</span>
+                    </span>
+                  </ListRow>
+                </li>
+              ))}
+            </ul>
+            {sequence && settings.categoryIds ? (
+              <p className="pt-2 pb-2 text-body text-text" data-testid="settings-category-order">
+                {de.settings.categorySequence(categoryOrderText(settings.categoryIds, categories))}
+              </p>
+            ) : null}
+            {(settings.categoryIds?.length ?? 0) >= MAX_SEQUENCE_CATEGORIES ? (
+              <p className="pb-2 text-caption text-text-2">
+                {de.settings.categorySequenceMax(MAX_SEQUENCE_CATEGORIES)}
+              </p>
+            ) : null}
+          </>
+        ) : null}
       </Sheet>
     );
   }
@@ -270,10 +322,15 @@ export function SettingsSheet({
           value={settings.rounds}
           min={SETTINGS_BOUNDS.rounds.min}
           max={SETTINGS_BOUNDS.rounds.max}
-          disabled={readOnly}
+          disabled={readOnly || sequence}
           changedNote={changedNote("rounds")}
           onChange={(rounds) => change({ rounds })}
         />
+        {sequence ? (
+          <p className="pb-1 text-caption text-text-2" data-testid="settings-rounds-sequence">
+            {de.settings.roundsFromCategories}
+          </p>
+        ) : null}
         <Stepper
           label={de.settings.questionsPerCategory}
           value={settings.questionsPerCategory}
@@ -299,7 +356,7 @@ export function SettingsSheet({
               {categoriesNote ? <span className="text-caption text-text-2">{categoriesNote}</span> : null}
             </span>
             <span className={cx("truncate text-label", categoriesNote ? "text-primary" : "text-text-2")}>
-              {categorySummary(settings.categoryIds, categories)}
+              {categorySummary(settings.categoryIds, categories, settings.categoryMode)}
             </span>
           </span>
         </ListRow>

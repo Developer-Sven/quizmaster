@@ -83,6 +83,48 @@ test("Feste Kategorie: keine Wahl, alle Züge in dieser Kategorie (ADR-048)", as
   }
 });
 
+test("Kategorien der Reihe nach: keine Wahl, eine Runde je Kategorie, 3 s pro Frage (ADR-056)", async ({ players }) => {
+  const host = await players.create("Mia");
+  const ben = await players.create("Ben");
+  const code = await host.createLobby();
+  await ben.joinByCode(code);
+  await host.changeSettings({ "Fragen pro Kategorie": 1, "Zeit pro Frage": 3 });
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
+  const sheet = host.page.getByRole("dialog", { name: "Einstellungen" });
+  await sheet.getByTestId("settings-categories-row").click();
+  const rows = host.page.getByTestId("settings-categories").locator('[data-testid^="settings-category-"]');
+  const names: string[] = [];
+  for (const index of [1, 0]) {
+    const row = rows.nth(index);
+    names.push(((await row.textContent()) ?? "").trim());
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+  }
+  await host.page.getByRole("button", { name: /^Der Reihe nach, ohne Wahl/ }).click();
+  await expect(host.page.getByTestId("settings-category-order")).toHaveText(
+    `Reihenfolge: 1. ${names[0]} · 2. ${names[1]}`,
+  );
+  await host.page.getByTestId("settings-categories-done").click();
+  // Die Runden folgen der Anzahl der Kategorien und sind gesperrt.
+  await expect(sheet.getByRole("group", { name: "Runden" }).locator("output")).toHaveText("2");
+  await expect(sheet.getByRole("button", { name: "Runden erhöhen" })).toHaveAttribute("aria-disabled", "true");
+  await expect(sheet.getByTestId("settings-categories-row")).toContainText("2 der Reihe nach");
+  await sheet.getByRole("button", { name: "Fertig" }).click();
+  await expect(ben.page.getByTestId("lobby-summary-extras")).toHaveText(`${names[0]} → ${names[1]} · 3 s pro Frage`);
+  // 2 Runden × 1 Zug × 1 Frage – nicht mehr je Person ein Zug.
+  await expect(ben.page.getByTestId("lobby-summary")).toContainText("2 Fragen");
+
+  await host.startGame();
+  const reveal = await waitForOverlay(ben, "category-reveal");
+  await expect(reveal).toContainText(names[0] ?? "");
+  await expect(reveal).toContainText("Runde 1 von 2");
+  await playQuicklyUntil([host, ben], "game-over");
+  for (const player of [host, ben]) {
+    const overlays = (await stageEvents(player.page)).map((event) => event.testId);
+    expect(overlays, `${player.name}: keine Kategoriewahl`).not.toContain("overlay-category-pick");
+  }
+});
+
 test("Zeit pro Frage „Host“: kein Countdown, der Host löst mit Stand der Antworten auf (ADR-049)", async ({
   players,
 }) => {

@@ -16,6 +16,7 @@ import {
   nameKey,
   pickPlayerColor,
   playerIdSchema,
+  SETTINGS_BOUNDS,
   type SettingsSuggestion,
   type SuggestionStatus,
   settingsChangesBetween,
@@ -205,16 +206,27 @@ export function onLeave(state: LobbyState, command: LeaveCommand, tx: Tx): Lobby
   return removeFromLobby(state, requireMember(state, command.guestId).playerId, tx);
 }
 
+/**
+ * Fachliche Grenzen neuer Einstellungen: „Personen maximal“ nie unter der Personenzahl, Schwierigkeit „von“ ≤ „bis“
+ * (ADR-055), der Reihe nach höchstens so viele Kategorien wie Runden möglich (ADR-056).
+ */
+function checkSettings(state: LobbyState, settings: LobbySettings): void {
+  if (settings.maxPlayers < members(state).length) {
+    reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
+  }
+  if (settings.difficultyMin > settings.difficultyMax) reject("INVALID_OPTION", "Schwierigkeit „von“ über „bis“");
+  if (settings.categoryMode === "sequence" && (settings.categoryIds?.length ?? 0) > SETTINGS_BOUNDS.rounds.max) {
+    reject("INVALID_OPTION", `Der Reihe nach höchstens ${SETTINGS_BOUNDS.rounds.max} Kategorien`);
+  }
+}
+
 export function onUpdateSettings(state: LobbyState, command: UpdateSettingsCommand, tx: Tx): LobbyState {
   requireHost(state, command.guestId);
   if (state.phase !== "lobby") reject("INVALID_PHASE", "Einstellungen nur vor Spielbeginn");
   const parsed = updateSettingsPayloadSchema.safeParse(command.update);
   if (!parsed.success) return reject("VALIDATION_FAILED", "Ungültige Einstellungen");
   const settings = applySettingsUpdate(state.settings, parsed.data);
-  if (settings.maxPlayers < members(state).length) {
-    reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
-  }
-  if (settings.difficultyMin > settings.difficultyMax) reject("INVALID_OPTION", "Schwierigkeit „von“ über „bis“");
+  checkSettings(state, settings);
   requestPersist(tx, "settings");
   return { ...state, settings };
 }
@@ -295,10 +307,7 @@ function settingsWithChanges(state: LobbyState, changes: unknown): LobbySettings
   const parsed = settingsChangesSchema.safeParse(changes);
   if (!parsed.success) return reject("VALIDATION_FAILED", "Ungültige Einstellungen im Vorschlag");
   const settings = applySettingsUpdate(state.settings, parsed.data);
-  if (settings.maxPlayers < members(state).length) {
-    reject("INVALID_OPTION", "Personen maximal liegt unter der aktuellen Personenzahl");
-  }
-  if (settings.difficultyMin > settings.difficultyMax) reject("INVALID_OPTION", "Schwierigkeit „von“ über „bis“");
+  checkSettings(state, settings);
   return settings;
 }
 

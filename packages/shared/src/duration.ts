@@ -7,7 +7,17 @@
  * 3 × 3 × 3 = 611 s → 10,18 → „ca. 10 Min.“.
  */
 
-import { ADVANCE_DEFAULTS, type AdvanceSettings, GAME_RULES, type LobbySettings, MANUAL_ADVANCE } from "./settings.ts";
+import {
+  ADVANCE_DEFAULTS,
+  type AdvanceSettings,
+  GAME_RULES,
+  type LobbySettings,
+  MANUAL_ADVANCE,
+  turnsPerRound,
+} from "./settings.ts";
+
+/** Einstellungen, die die Schätzung kennt: Weiter-Zeiten, Zeit pro Frage und ob jemand wählt (ADR-056). */
+type EstimateSettings = Partial<AdvanceSettings & Pick<LobbySettings, "answerSec" | "categoryIds" | "categoryMode">>;
 
 function assertCount(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 0) {
@@ -67,9 +77,11 @@ export function formatGameEstimate(
   rounds: number,
   players: number,
   questionsPerCategory: number,
-  advance: Partial<AdvanceSettings & Pick<LobbySettings, "answerSec">> = {},
+  advance: EstimateSettings = {},
 ): string {
-  const count = questionCount(rounds, players, questionsPerCategory);
-  const seconds = estimateDurationSeconds(rounds, players, questionsPerCategory, advance);
+  // Ohne Wahl spielt jede Runde genau einen Zug (ADR-056) – gerechnet wird mit Zügen je Runde.
+  const turns = turnsPerRound(players, advance);
+  const count = questionCount(rounds, turns, questionsPerCategory);
+  const seconds = estimateDurationSeconds(rounds, turns, questionsPerCategory, advance);
   return `${count} ${count === 1 ? "Frage" : "Fragen"} · ${formatDurationEstimate(seconds)}`;
 }

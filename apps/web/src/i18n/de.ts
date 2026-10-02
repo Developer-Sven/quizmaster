@@ -109,6 +109,9 @@ export const de = {
     categoryCount: (count: number) => `${count} Kategorien`,
     answerTime: (seconds: number) => (seconds === 0 ? "Auflösen per Host" : `${seconds} s pro Frage`),
     hostPresents: (name: string) => `${name} zeigt nur an`,
+    /** Kategorien der Reihe nach (ADR-056): bis vier Namen mit Pfeil, sonst die Anzahl */
+    categorySequence: (names: readonly string[]) =>
+      names.length <= 4 ? names.join(" → ") : `${names.length} Kategorien der Reihe nach`,
     /** Schwierigkeit, wenn nicht alle Stufen pro Frage aufsteigend (ADR-055) */
     difficulty: (text: string) => `Schwierigkeit ${text}`,
     copyCode: "Code kopieren",
@@ -151,7 +154,19 @@ export const de = {
     categoriesAll: "Alle Kategorien",
     categoriesAllShort: "Alle",
     categoriesCount: (count: number) => `${count} ausgewählt`,
-    categoriesHint: "Bei einer Kategorie entfällt die Wahl, bei zwei oder drei stehen alle zur Wahl.",
+    categoriesHint:
+      "Bei einer Kategorie entfällt die Wahl – jede Runde spielt sie. Bei zwei oder drei stehen alle zur Wahl.",
+    /** Kategorien der Reihe nach (ADR-056) */
+    categoryModeTitle: "So wird gespielt",
+    categoryModes: { pick: "Wer dran ist, wählt", sequence: "Der Reihe nach, ohne Wahl" },
+    categoryModeHints: {
+      pick: "Aus drei Kategorien deiner Auswahl.",
+      sequence: "Jede Runde eine Kategorie – Runde 1 die erste, Runde 2 die zweite … Die Runden passen sich an.",
+    },
+    categorySequence: (order: string) => `Reihenfolge: ${order}`,
+    categorySequenceMax: (max: number) => `Der Reihe nach höchstens ${max} Kategorien – so viele Runden gibt es.`,
+    categoriesInSequence: (count: number) => `${count} der Reihe nach`,
+    roundsFromCategories: "Runden = Anzahl der Kategorien (der Reihe nach).",
     /** Anzeige-Modus (ADR-046) */
     hostTitle: "Du als Host",
     hostPlays: "Du spielst mit",
@@ -239,7 +254,7 @@ export const de = {
   game: {
     /** HUD-Fortschritt, z. B. „Runde 2/3 · Zug 3/4“ */
     progress: (round: number, rounds: number, turn: number, turns: number) =>
-      `Runde ${round}/${rounds} · Zug ${turn}/${turns}`,
+      turns === 1 ? `Runde ${round}/${rounds}` : `Runde ${round}/${rounds} · Zug ${turn}/${turns}`,
     resign: "Aufgeben",
     /** Host beendet das Spiel für alle (ADR-051) */
     endGame: "Spiel beenden",
@@ -255,12 +270,15 @@ export const de = {
     /** Nur eine Kategorie erlaubt (ADR-048) – niemand hat gewählt */
     revealSubtitleFixed: (questions: number) =>
       `${questions} ${plural(questions, "Frage", "Fragen")} · feste Kategorie`,
+    /** Kategorien der Reihe nach (ADR-056) */
+    revealSubtitleSequence: (questions: number, round: number, rounds: number) =>
+      `${questions} ${plural(questions, "Frage", "Fragen")} · Runde ${round} von ${rounds}`,
     questionProgress: (index: number, total: number) => `Frage ${index}/${total}`,
     /** Überschrift (nur Screenreader) über Frage und Auflösung, zugleich Beschreibung der Antwortgruppe */
     questionHeading: (index: number, total: number) => `Frage ${index} von ${total}`,
     /** Hauptüberschrift des Spielscreens (nur Screenreader), z. B. „Runde 2 von 3, Zug 3 von 4“ */
     screenHeading: (round: number, rounds: number, turn: number, turns: number) =>
-      `Runde ${round} von ${rounds}, Zug ${turn} von ${turns}`,
+      turns === 1 ? `Runde ${round} von ${rounds}` : `Runde ${round} von ${rounds}, Zug ${turn} von ${turns}`,
     /** Hauptüberschrift des Spielscreens am Spielende (nur Screenreader) */
     gameOverHeading: "Spiel beendet",
     /** Kurzform im Kategoriestreifen, z. B. „1/3“ */

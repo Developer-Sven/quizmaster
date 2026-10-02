@@ -127,6 +127,7 @@ function questionState(): PublicLobbyState {
       difficultyMax: 5,
       difficultyBasis: "question",
       difficultyOrder: "ascending",
+      categoryMode: "pick",
     },
     players: players.map((player) => ({ ...player })),
     order: ["p1", "p2"],

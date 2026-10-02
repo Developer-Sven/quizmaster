@@ -716,7 +716,7 @@ describe("Anzeige-Modus: Host spielt nicht mit (ADR-046)", () => {
 });
 
 describe("Kategorien begrenzen (ADR-048)", () => {
-  it("eine feste Kategorie: keine Wahl, jeder Zug in dieser Kategorie (pickedBy fixed)", () => {
+  it("eine feste Kategorie: keine Wahl, ein Zug je Runde in dieser Kategorie (pickedBy fixed, ADR-056)", () => {
     const sim = lobbyWith(2);
     const fixed = sim.catalog.categories[0]?.id ?? "";
     sim.ok({
@@ -728,16 +728,62 @@ describe("Kategorien begrenzen (ADR-048)", () => {
     const phases = new Set<string>();
     sim.runUntil((state) => {
       phases.add(state.phase);
+      if (state.phase === "question")
+        expect(toPublicState(state).progress).toMatchObject({ turn: 1, turnsPerRound: 1 });
       return state.phase === "game_over";
     });
     expect(phases.has("category_pick")).toBe(false);
+    // Eine Runde = eine Kategorie: nicht mehr zweimal hintereinander je Runde (ein Zug je Person).
     const turns = sim.state.game?.turns ?? [];
-    expect(turns).toHaveLength(4);
+    expect(turns.map((turn) => turn.round)).toEqual([1, 2]);
     for (const turn of turns) {
       expect(turn.categoryId).toBe(fixed);
       expect(turn.pickedBy).toBe("fixed");
       expect(turn.options.map((option) => option.id)).toEqual([fixed]);
     }
+    // Die (nominelle) Person wechselt reihum.
+    expect(new Set(turns.map((turn) => turn.pickerId)).size).toBe(2);
+  });
+
+  it("der Reihe nach: Runde 1 die erste Kategorie, Runde 2 die zweite … – keine Wahl, Runden = Anzahl (ADR-056)", () => {
+    const sim = lobbyWith(3);
+    const ids = sim.catalog.categories.slice(0, 3).map((category) => category.id);
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { categoryIds: ids, categoryMode: "sequence", rounds: 1, questionsPerCategory: 1 },
+    });
+    expect(sim.state.settings.rounds).toBe(3);
+    sim.ok({ type: "START", guestId: sim.host });
+    const phases = new Set<string>();
+    sim.runUntil((state) => {
+      phases.add(state.phase);
+      return state.phase === "game_over";
+    });
+    expect(phases.has("category_pick")).toBe(false);
+    const turns = sim.state.game?.turns ?? [];
+    expect(turns.map((turn) => [turn.round, turn.categoryId])).toEqual(ids.map((id, index) => [index + 1, id]));
+    expect(turns.every((turn) => turn.pickedBy === "fixed")).toBe(true);
+  });
+
+  it("der Reihe nach höchstens 10 Kategorien (so viele Runden gibt es)", () => {
+    const sim = lobbyWith(2);
+    const eleven = Array.from({ length: 11 }, (_, index) => `kategorie-${index + 1}`);
+    expect(
+      errorCode(
+        sim.dispatch({
+          type: "UPDATE_SETTINGS",
+          guestId: sim.host,
+          update: { categoryIds: eleven, categoryMode: "sequence" },
+        }),
+      ),
+    ).toBe("INVALID_OPTION");
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { categoryIds: eleven.slice(0, 10), categoryMode: "sequence" },
+    });
+    expect(sim.state.settings.rounds).toBe(10);
   });
 
   it("zwei Kategorien: Wahl zwischen beiden, auch der des letzten Zuges", () => {

@@ -18,6 +18,8 @@ export interface CategoryRevealOverlayProps {
   pickerName: string;
   /** feste Kategorie (nur eine erlaubt, ADR-048): niemand hat gewählt */
   fixed?: boolean;
+  /** Kategorien der Reihe nach (ADR-056): Runde und Rundenzahl statt „feste Kategorie“ */
+  sequence?: { round: number; rounds: number } | null;
   /** Beginn des Vorlaufs (`phaseStartedAt` der Phase `question`) – Anker der Choreografie */
   phaseStartedAt: number;
   /** Start der ersten Frage (Serverzeit) – Ende des Vorlaufs */
@@ -38,6 +40,7 @@ export function CategoryRevealOverlay({
   questionCount,
   pickerName,
   fixed = false,
+  sequence = null,
   phaseStartedAt,
   startsAt,
 }: CategoryRevealOverlayProps) {
@@ -62,7 +65,11 @@ export function CategoryRevealOverlay({
           {category.name}
         </m.h2>
         <m.p {...line(2)} className="text-label text-text-2">
-          {fixed ? de.game.revealSubtitleFixed(questionCount) : de.game.revealSubtitle(questionCount, pickerName)}
+          {sequence
+            ? de.game.revealSubtitleSequence(questionCount, sequence.round, sequence.rounds)
+            : fixed
+              ? de.game.revealSubtitleFixed(questionCount)
+              : de.game.revealSubtitle(questionCount, pickerName)}
         </m.p>
       </div>
     </OverlayFrame>

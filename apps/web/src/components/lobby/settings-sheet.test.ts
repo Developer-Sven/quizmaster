@@ -9,7 +9,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { SettingsSummary, settingsSummaryParts } from "./settings-sheet";
 import {
+  categoryOrderText,
   categorySummary,
+  categoryUpdate,
   difficultyPreview,
   difficultySummary,
   settingValueText,
@@ -121,5 +123,29 @@ describe("Schwierigkeit: Zeile und Vorschau (ADR-055)", () => {
       "Jede Frage bekommt zufällig eine Stufe von 1 bis 3.",
     );
     expect(difficultyPreview({ ...settings, rounds: 10, difficultyBasis: "category" }, 8)).toMatch(/ …$/);
+  });
+});
+
+describe("Kategorien der Reihe nach (ADR-056)", () => {
+  const catalog = {
+    sport: { id: "sport", name: "Sport", icon: "trophy", color: "#3F9FF3" },
+    musik: { id: "musik", name: "Musik", icon: "music", color: "#26D9B5" },
+  };
+  const sequence = { ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport", "musik"], categoryMode: "sequence" as const };
+
+  it("hält Runden und Spielweise beim Ändern der Auswahl stimmig", () => {
+    expect(categoryUpdate(DEFAULT_LOBBY_SETTINGS, ["sport"])).toEqual({ categoryIds: ["sport"] });
+    expect(categoryUpdate(sequence, ["sport", "musik", "kunst"])).toEqual({
+      categoryIds: ["sport", "musik", "kunst"],
+      rounds: 3,
+    });
+    expect(categoryUpdate(sequence, ["sport"])).toEqual({ categoryIds: ["sport"], categoryMode: "pick" });
+    expect(categoryUpdate(sequence, null)).toEqual({ categoryIds: null, categoryMode: "pick" });
+  });
+
+  it("zeigt Zeile und Reihenfolge", () => {
+    expect(categorySummary(sequence.categoryIds, catalog, "sequence")).toBe("2 der Reihe nach");
+    expect(categorySummary(sequence.categoryIds, catalog, "pick")).toBe("2 ausgewählt");
+    expect(categoryOrderText(sequence.categoryIds, catalog)).toBe("1. Sport · 2. Musik");
   });
 });

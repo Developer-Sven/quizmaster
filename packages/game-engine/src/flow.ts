@@ -9,8 +9,11 @@ import {
   answerWindowMs,
   type DifficultyRule,
   GAME_RULES,
+  hasCategoryPick,
+  type LobbySettings,
   MANUAL_ANSWER_CAP_MS,
   questionLeadInMs,
+  turnsPerRound,
 } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import type { TurnRef } from "./effects.ts";
@@ -69,6 +72,23 @@ export function startGame(state: LobbyState, tx: Tx): LobbyState {
   return enterPhase({ ...state, players, game, lastGame: null }, "intro", tx, { endsAt: tx.now + tx.timings.introMs });
 }
 
+/**
+ * Ohne Wahl (ADR-056) hat jede Runde genau einen Zug. Seine Person wechselt reihum je Runde (Runde 1 die erste
+ * aktive der Reihenfolge, Runde 2 die zweite …) – nach `afterIndex` die nächste aktive, wenn die vorgesehene vor dem
+ * Zug aufgegeben hat. Gewählt wird nichts; die Person hält nur Tafel und Ablauf wie gewohnt zusammen.
+ */
+function roundPickerIndex(state: LobbyState, game: GameState, round: number, afterIndex: number): number | null {
+  const active = new Set(activePlayers(state).map((player) => player.playerId));
+  const count = game.order.length;
+  const start = afterIndex >= 0 ? afterIndex + 1 : (round - 1) % Math.max(count, 1);
+  for (let step = 0; step < count; step++) {
+    const index = (start + step) % count;
+    const playerId = game.order[index];
+    if (playerId !== undefined && active.has(playerId)) return index;
+  }
+  return null;
+}
+
 /** Position der nächsten aktiven Person in der Reihenfolge nach `afterIndex`, sonst `null`. */
 function nextPickerIndex(state: LobbyState, game: GameState, afterIndex: number): number | null {
   const active = new Set(activePlayers(state).map((player) => player.playerId));
@@ -99,6 +119,17 @@ export function onRequestTimeout(state: LobbyState, tx: Tx): LobbyState {
   return finishGame(state, "load_failed", tx);
 }
 
+/**
+ * Auswahl für das Angebot: „der Reihe nach“ (ADR-056) nur die Kategorie dieser Runde – genau eine Option, also ohne
+ * Wahl –, sonst die Auswahl des Hosts (`null` = alle).
+ */
+function offeredCategoryIds(settings: LobbySettings, round: number): string[] | null {
+  const ids = settings.categoryIds;
+  if (ids === null) return null;
+  const roundCategory = settings.categoryMode === "sequence" ? ids[(round - 1) % ids.length] : undefined;
+  return roundCategory === undefined ? [...ids] : [roundCategory];
+}
+
 /** Fordert bei der Shell 3 Kategorien für den nächsten Zug an (Effect `offerCategories`). */
 function requestOptions(state: LobbyState, round: number, orderIndex: number, tx: Tx): LobbyState {
   const game = requireGame(state);
@@ -113,7 +144,7 @@ function requestOptions(state: LobbyState, round: number, orderIndex: number, tx
     questionsPerTurn: state.settings.questionsPerCategory,
     playedCategoryIds: game.turns.flatMap((entry) => (entry.categoryId === null ? [] : [entry.categoryId])),
     usedQuestionIds: usedQuestionIds(game),
-    categoryIds: state.settings.categoryIds === null ? null : [...state.settings.categoryIds],
+    categoryIds: offeredCategoryIds(state.settings, round),
     difficulty: { min: state.settings.difficultyMin, max: state.settings.difficultyMax },
   };
   tx.effects.push({ type: "offerCategories", token, turn });
@@ -131,9 +162,15 @@ function requestOptions(state: LobbyState, round: number, orderIndex: number, tx
 export function advanceFrom(state: LobbyState, round: number, afterIndex: number, tx: Tx): LobbyState {
   const cleared = updateGame(state, (game) => ({ ...game, pending: null }));
   const game = requireGame(cleared);
-  const next = nextPickerIndex(cleared, game, afterIndex);
+  const played = game.turns.some((turn) => turn.round === round);
+  // Ohne Wahl ist eine Runde genau ein Zug (ADR-056): danach folgt die Rundentafel.
+  const next = hasCategoryPick(cleared.settings)
+    ? nextPickerIndex(cleared, game, afterIndex)
+    : played
+      ? null
+      : roundPickerIndex(cleared, game, round, afterIndex);
   if (next !== null) return requestOptions(cleared, round, next, tx);
-  if (game.turns.some((turn) => turn.round === round)) {
+  if (played) {
     return enterPhase(cleared, "round_board", tx, {
       endsAt: advancePhaseEnd(cleared, "round_board", tx.now, tx.timings),
     });
@@ -144,7 +181,7 @@ export function advanceFrom(state: LobbyState, round: number, afterIndex: number
 
 /**
  * Schwierigkeit für den Zug `turnNumber` (ADR-055): Bereich, pro Frage oder Kategorie, aufsteigend oder zufällig;
- * geplant sind Runden × Personen der Reihenfolge Züge (für „pro Kategorie, aufsteigend“).
+ * geplant sind Runden × Züge je Runde (für „pro Kategorie, aufsteigend“; ohne Wahl ein Zug je Runde, ADR-056).
  */
 function difficultyRule(state: LobbyState, game: GameState, turnNumber: number): DifficultyRule {
   const { difficultyMin, difficultyMax, difficultyBasis, difficultyOrder, rounds } = state.settings;
@@ -154,7 +191,7 @@ function difficultyRule(state: LobbyState, game: GameState, turnNumber: number):
     basis: difficultyBasis,
     order: difficultyOrder,
     turnNumber,
-    turns: rounds * game.order.length,
+    turns: rounds * turnsPerRound(game.order.length, state.settings),
   };
 }
 

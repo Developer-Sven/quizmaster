@@ -10,7 +10,13 @@ import { difficultySummary, isCustomDifficulty } from "./settings-text";
 export function settingsExtras(
   settings: Pick<
     LobbySettings,
-    "categoryIds" | "answerSec" | "difficultyMin" | "difficultyMax" | "difficultyBasis" | "difficultyOrder"
+    | "categoryIds"
+    | "categoryMode"
+    | "answerSec"
+    | "difficultyMin"
+    | "difficultyMax"
+    | "difficultyBasis"
+    | "difficultyOrder"
   >,
   categories: CategoryCatalog,
   presenterName: string | null,
@@ -18,7 +24,9 @@ export function settingsExtras(
   const parts: string[] = [];
   const ids = settings.categoryIds;
   const [only] = ids ?? [];
-  if (ids !== null && ids.length === 1 && only !== undefined) {
+  if (ids !== null && ids.length >= 2 && settings.categoryMode === "sequence") {
+    parts.push(de.lobby.categorySequence(ids.map((id) => categories[id]?.name ?? id)));
+  } else if (ids !== null && ids.length === 1 && only !== undefined) {
     parts.push(de.lobby.onlyCategory(categories[only]?.name ?? only));
   } else if (ids !== null) {
     parts.push(de.lobby.categoryCount(ids.length));
