@@ -115,6 +115,8 @@ export const de = {
     hideQrCode: "QR-Code ausblenden",
     qrCodeAlt: "QR-Code zum Beitreten",
     settings: "Einstellungen",
+    /** Alle außer dem Host sehen die Einstellungen nur an (ADR-050) */
+    viewSettings: "Einstellungen ansehen",
     kick: (name: string) => `${name} entfernen`,
     codeCopied: "Code kopiert.",
     linkCopied: "Link kopiert.",
@@ -152,6 +154,12 @@ export const de = {
     hostTitle: "Du als Host",
     hostPlays: "Du spielst mit",
     hostPresents: "Du zeigst nur an (großer Bildschirm)",
+    /** Nur lesbare Ansicht für alle außer dem Host (ADR-050) */
+    readOnlyHint: (host: string) => `Nur ${host} kann die Einstellungen ändern.`,
+    hostTitleOther: "Host",
+    hostPlaysOther: (host: string) => `${host} spielt mit`,
+    hostPresentsOther: (host: string) => `${host} zeigt nur an (großer Bildschirm)`,
+    advanceHintOther: "„Host“: Es geht erst weiter, wenn der Host auf „Auflösen“ bzw. „Weiter“ tippt.",
   },
 
   game: {

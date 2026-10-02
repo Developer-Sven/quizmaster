@@ -146,7 +146,7 @@ export class Player {
 
   /** Einstellungen-Sheet öffnen, Werte setzen (Stepper), „Fertig“. */
   async changeSettings(values: Partial<Record<SettingLabel, number>>): Promise<void> {
-    await this.page.getByRole("button", { name: "Einstellungen" }).click();
+    await this.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
     const sheet = this.page.getByRole("dialog", { name: "Einstellungen" });
     await expect(sheet).toBeVisible();
     for (const [label, target] of Object.entries(values) as [SettingLabel, number][]) {

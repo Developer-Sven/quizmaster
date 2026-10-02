@@ -65,7 +65,7 @@ test("Einstellungen schnell durchtippen: kein „Zu viele Versuche“, alle sehe
   const guest = await players.create("Ben");
   const code = await host.createLobby();
   await guest.joinByCode(code);
-  await host.page.getByRole("button", { name: "Einstellungen" }).click();
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
   const sheet = host.page.getByRole("dialog", { name: "Einstellungen" });
   const more = sheet.getByRole("button", { name: "Runden erhöhen" });
   const moreQuestions = sheet.getByRole("button", { name: "Fragen pro Kategorie erhöhen" });

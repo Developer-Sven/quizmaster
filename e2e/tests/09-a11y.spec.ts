@@ -171,7 +171,7 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     await checkScreen(mia.page, "lobby-qr", testInfo);
     await mia.page.getByRole("button", { name: "QR-Code ausblenden" }).click();
 
-    const settingsButton = mia.page.getByRole("button", { name: "Einstellungen" });
+    const settingsButton = mia.page.getByRole("button", { name: "Einstellungen", exact: true });
     await settingsButton.click();
     const sheet = mia.page.getByRole("dialog", { name: "Einstellungen" });
     await expect(sheet).toBeVisible();

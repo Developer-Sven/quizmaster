@@ -25,6 +25,10 @@ export interface SettingsSheetProps {
   playerCount: number;
   /** Spielbare Kategorien für die Auswahl (ADR-048) */
   categories: CategoryCatalog;
+  /** Alle außer dem Host: alles sehen, nichts ändern (ADR-050) */
+  readOnly?: boolean;
+  /** Name des Hosts für die nur lesbare Ansicht („Nur Mia kann …“, „Mia zeigt nur an“) */
+  hostName?: string;
   onChange: (update: SettingsUpdate) => void;
   onClose: () => void;
 }
@@ -58,8 +62,22 @@ export function categorySummary(categoryIds: readonly string[] | null, catalog: 
  * Sekunden oder „Host“; „Kategorien“ (Unteransicht, ADR-048); „Du spielst mit“ / „Du zeigst nur an“ (ADR-046);
  * „Fertig“. Änderungen wirken sofort für alle; gesendet wird gebündelt (ADR-042).
  */
-export function SettingsSheet({ open, settings, playerCount, categories, onChange, onClose }: SettingsSheetProps) {
+export function SettingsSheet({
+  open,
+  settings,
+  playerCount,
+  categories,
+  readOnly = false,
+  hostName = "",
+  onChange,
+  onClose,
+}: SettingsSheetProps) {
   const [view, setView] = useState<"main" | "categories">("main");
+  // Nur lesbar (ADR-050): Zeilen ohne Handler sind statisch, Stepper deaktiviert – die Werte bleiben lesbar.
+  const change = (update: SettingsUpdate) => {
+    if (!readOnly) onChange(update);
+  };
+  const selectable = (update: SettingsUpdate) => (readOnly ? undefined : () => change(update));
   // Mitspielende für die Schätzung: ohne den Host, wenn er nur anzeigt.
   const players = Math.max(settings.hostPlays ? playerCount : playerCount - 1, 1);
   const close = () => {
@@ -75,14 +93,19 @@ export function SettingsSheet({ open, settings, playerCount, categories, onChang
         view="categories"
         onBack={() => setView("main")}
         footer={
-          <Button variant="primary" block onClick={() => setView("main")} data-testid="settings-categories-done">
-            {de.actions.done}
+          <Button
+            variant={readOnly ? "secondary" : "primary"}
+            block
+            onClick={() => setView("main")}
+            data-testid="settings-categories-done"
+          >
+            {readOnly ? de.actions.back : de.actions.done}
           </Button>
         }
       >
         <ul className="flex flex-col" data-testid="settings-categories">
           <li>
-            <ListRow selected={settings.categoryIds === null} onClick={() => onChange({ categoryIds: null })}>
+            <ListRow selected={settings.categoryIds === null} onClick={selectable({ categoryIds: null })}>
               {de.settings.categoriesAll}
             </ListRow>
           </li>
@@ -90,7 +113,7 @@ export function SettingsSheet({ open, settings, playerCount, categories, onChang
             <li key={category.id}>
               <ListRow
                 selected={settings.categoryIds?.includes(category.id) ?? false}
-                onClick={() => onChange({ categoryIds: toggleCategory(settings.categoryIds, category.id) })}
+                onClick={selectable({ categoryIds: toggleCategory(settings.categoryIds, category.id) })}
                 data-testid={`settings-category-${category.id}`}
               >
                 <span className="flex min-w-0 items-center gap-3">
@@ -112,32 +135,36 @@ export function SettingsSheet({ open, settings, playerCount, categories, onChang
       title={de.settings.title}
       view="main"
       footer={
-        <Button variant="primary" block onClick={close} data-testid="settings-done">
-          {de.actions.done}
+        <Button variant={readOnly ? "secondary" : "primary"} block onClick={close} data-testid="settings-done">
+          {readOnly ? de.actions.close : de.actions.done}
         </Button>
       }
     >
-      <div className="flex flex-col" data-testid="settings-sheet">
+      <div className="flex flex-col" data-testid="settings-sheet" data-readonly={readOnly || undefined}>
+        {readOnly ? <p className="pb-2 text-caption text-text-2">{de.settings.readOnlyHint(hostName)}</p> : null}
         <Stepper
           label={de.settings.rounds}
           value={settings.rounds}
           min={SETTINGS_BOUNDS.rounds.min}
           max={SETTINGS_BOUNDS.rounds.max}
-          onChange={(rounds) => onChange({ rounds })}
+          disabled={readOnly}
+          onChange={(rounds) => change({ rounds })}
         />
         <Stepper
           label={de.settings.questionsPerCategory}
           value={settings.questionsPerCategory}
           min={SETTINGS_BOUNDS.questionsPerCategory.min}
           max={SETTINGS_BOUNDS.questionsPerCategory.max}
-          onChange={(questionsPerCategory) => onChange({ questionsPerCategory })}
+          disabled={readOnly}
+          onChange={(questionsPerCategory) => change({ questionsPerCategory })}
         />
         <Stepper
           label={de.settings.maxPlayers}
           value={settings.maxPlayers}
           min={Math.max(SETTINGS_BOUNDS.maxPlayers.min, playerCount)}
           max={SETTINGS_BOUNDS.maxPlayers.max}
-          onChange={(maxPlayers) => onChange({ maxPlayers })}
+          disabled={readOnly}
+          onChange={(maxPlayers) => change({ maxPlayers })}
         />
         <ListRow onClick={() => setView("categories")} data-testid="settings-categories-row">
           <span className="flex items-center justify-between gap-3">
@@ -153,41 +180,47 @@ export function SettingsSheet({ open, settings, playerCount, categories, onChang
             value={settings.answerSec}
             options={ANSWER_SECONDS}
             format={de.settings.advanceValue}
-            onChange={(answerSec) => onChange({ answerSec })}
+            disabled={readOnly}
+            onChange={(answerSec) => change({ answerSec })}
           />
           <Stepper
             label={de.settings.afterQuestion}
             value={settings.afterQuestionSec}
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
-            onChange={(afterQuestionSec) => onChange({ afterQuestionSec })}
+            disabled={readOnly}
+            onChange={(afterQuestionSec) => change({ afterQuestionSec })}
           />
           <Stepper
             label={de.settings.afterTurn}
             value={settings.afterTurnSec}
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
-            onChange={(afterTurnSec) => onChange({ afterTurnSec })}
+            disabled={readOnly}
+            onChange={(afterTurnSec) => change({ afterTurnSec })}
           />
           <Stepper
             label={de.settings.afterRound}
             value={settings.afterRoundSec}
             options={ADVANCE_SECONDS}
             format={de.settings.advanceValue}
-            onChange={(afterRoundSec) => onChange({ afterRoundSec })}
+            disabled={readOnly}
+            onChange={(afterRoundSec) => change({ afterRoundSec })}
           />
         </div>
-        <p className="pt-1 text-caption text-text-2">{de.settings.advanceHint}</p>
-        <h3 className="pt-4 text-label text-text-2">{de.settings.hostTitle}</h3>
+        <p className="pt-1 text-caption text-text-2">
+          {readOnly ? de.settings.advanceHintOther : de.settings.advanceHint}
+        </p>
+        <h3 className="pt-4 text-label text-text-2">{readOnly ? de.settings.hostTitleOther : de.settings.hostTitle}</h3>
         <ul className="flex flex-col pb-2" data-testid="settings-host-mode">
           <li>
-            <ListRow selected={settings.hostPlays} onClick={() => onChange({ hostPlays: true })}>
-              {de.settings.hostPlays}
+            <ListRow selected={settings.hostPlays} onClick={selectable({ hostPlays: true })}>
+              {readOnly ? de.settings.hostPlaysOther(hostName) : de.settings.hostPlays}
             </ListRow>
           </li>
           <li>
-            <ListRow selected={!settings.hostPlays} onClick={() => onChange({ hostPlays: false })}>
-              {de.settings.hostPresents}
+            <ListRow selected={!settings.hostPlays} onClick={selectable({ hostPlays: false })}>
+              {readOnly ? de.settings.hostPresentsOther(hostName) : de.settings.hostPresents}
             </ListRow>
           </li>
         </ul>

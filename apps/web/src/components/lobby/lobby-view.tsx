@@ -126,14 +126,13 @@ export function LobbyView({
             }
             title={<HeaderTitle>{de.lobby.title}</HeaderTitle>}
             right={
-              isHost ? (
-                <IconButton
-                  icon={Settings2Icon}
-                  label={de.lobby.settings}
-                  onClick={() => setSettingsOpen(true)}
-                  data-testid="lobby-settings"
-                />
-              ) : null
+              // Alle sehen die Einstellungen – nur der Host ändert sie (ADR-050).
+              <IconButton
+                icon={Settings2Icon}
+                label={isHost ? de.lobby.settings : de.lobby.viewSettings}
+                onClick={() => setSettingsOpen(true)}
+                data-testid="lobby-settings"
+              />
             }
           />
         }
@@ -191,19 +190,19 @@ export function LobbyView({
           <AppFooter newTab />
         </div>
       </AppShell>
-      {isHost ? (
-        <SettingsSheet
-          open={settingsOpen}
-          settings={settings}
-          playerCount={players.length}
-          categories={categories}
-          onChange={onChangeSettings}
-          onClose={() => {
-            setSettingsOpen(false);
-            onSettingsClosed?.();
-          }}
-        />
-      ) : null}
+      <SettingsSheet
+        open={settingsOpen}
+        settings={settings}
+        playerCount={players.length}
+        categories={categories}
+        readOnly={!isHost}
+        hostName={host?.name ?? ""}
+        onChange={onChangeSettings}
+        onClose={() => {
+          setSettingsOpen(false);
+          if (isHost) onSettingsClosed?.();
+        }}
+      />
       {onRename ? (
         <RenameSheet
           open={renameOpen}

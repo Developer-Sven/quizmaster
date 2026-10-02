@@ -16,7 +16,7 @@ test("Anzeige-Modus: Host zeigt nur an, zwei spielen am Handy (ADR-046)", async 
   await ben.joinByCode(code);
   await lea.joinByCode(code);
   await host.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1 });
-  await host.page.getByRole("button", { name: "Einstellungen" }).click();
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
   const sheet = host.page.getByRole("dialog", { name: "Einstellungen" });
   await sheet.getByRole("button", { name: "Du zeigst nur an (großer Bildschirm)" }).click();
   await expect(sheet.getByRole("button", { name: "Du zeigst nur an (großer Bildschirm)" })).toHaveAttribute(
@@ -49,8 +49,9 @@ test("Host übertragen: Ben wird Host, Mia wartet (ADR-047)", async ({ players }
   const dialog = host.page.getByRole("alertdialog", { name: "Ben zum Host machen?" });
   await dialog.getByRole("button", { name: "Übertragen" }).click();
   await expect(ben.lobbyPlayer("Ben")).toHaveAttribute("data-host", "true");
-  await expect(ben.page.getByRole("button", { name: "Einstellungen" })).toBeVisible();
-  await expect(host.page.getByRole("button", { name: "Einstellungen" })).toHaveCount(0);
+  await expect(ben.page.getByRole("button", { name: "Einstellungen", exact: true })).toBeVisible();
+  await expect(host.page.getByRole("button", { name: "Einstellungen", exact: true })).toHaveCount(0);
+  await expect(host.page.getByRole("button", { name: "Einstellungen ansehen" })).toBeVisible();
   await expect(host.waitingNote).toHaveText("Warte auf Ben …");
 });
 
@@ -60,7 +61,7 @@ test("Feste Kategorie: keine Wahl, alle Züge in dieser Kategorie (ADR-048)", as
   const code = await host.createLobby();
   await ben.joinByCode(code);
   await host.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1 });
-  await host.page.getByRole("button", { name: "Einstellungen" }).click();
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
   await host.page.getByTestId("settings-categories-row").click();
   const list = host.page.getByTestId("settings-categories");
   const first = list.locator('[data-testid^="settings-category-"]').first();

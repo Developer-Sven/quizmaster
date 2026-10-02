@@ -26,7 +26,7 @@ test("Host verlässt die Lobby → Host-Übergabe", async ({ players }) => {
     await expect(player.lobbyPlayer("Ben")).toHaveAttribute("data-host", "true");
   }
   await expect(ben.startButton).toBeEnabled();
-  await expect(ben.page.getByRole("button", { name: "Einstellungen" })).toBeVisible();
+  await expect(ben.page.getByRole("button", { name: "Einstellungen", exact: true })).toBeVisible();
   await expect(lea.waitingNote).toHaveText("Warte auf Ben …");
 
   // Der neue Host kann das Spiel starten.
@@ -44,5 +44,5 @@ test("Host trennt sich → Übergabe nach der Frist", async ({ players }) => {
 
   await expect(ben.lobbyPlayer("Ben")).toHaveAttribute("data-host", "true", { timeout: 15_000 });
   await expect(ben.toast("Ben ist jetzt Host.")).toBeAttached();
-  await expect(ben.page.getByRole("button", { name: "Einstellungen" })).toBeVisible();
+  await expect(ben.page.getByRole("button", { name: "Einstellungen", exact: true })).toBeVisible();
 });
