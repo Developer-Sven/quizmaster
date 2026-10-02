@@ -28,12 +28,14 @@ export const UNKNOWN_PAGE_PATH = "/e2e-unbekannte-seite";
 
 /**
  * Konsolenfehler, die keine App-Fehler sind: absichtliche 404-Seiten (ungültiger Code in der URL, unbekannter
- * Pfad {@link UNKNOWN_PAGE_PATH}) und der Hinweis des Browsers, wenn eine Seite neu lädt, während ihr
- * WebSocket noch verbindet.
+ * Pfad {@link UNKNOWN_PAGE_PATH}), der Hinweis des Browsers, wenn eine Seite neu lädt, während ihr WebSocket noch
+ * verbindet, und Meldungen aus dem iframe von Cloudflare Turnstile (Smoke-Test gegen Produktion mit Turnstile –
+ * interne Ausgaben wie „%c%d font-size:0;…“, die wir nicht beeinflussen). CSP-Verstöße zählen immer (Prüfung davor).
  */
 const BENIGN_CONSOLE_ERRORS: readonly BenignConsoleError[] = [
   { text: /the server responded with a status of 404/, url: /\/((j|lobby)\/[^/?#]+|e2e-unbekannte-seite)$/ },
   { text: /WebSocket is closed before the connection is established/ },
+  { text: /[\s\S]*/, url: /^https:\/\/challenges\.cloudflare\.com\// },
 ];
 
 /** Name der Brücke zwischen Seite und Test (Init-Skript → `exposeBinding`). */
