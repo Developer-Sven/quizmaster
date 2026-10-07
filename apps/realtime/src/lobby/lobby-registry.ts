@@ -21,7 +21,7 @@
  * Die Metrik `qm_lobbies_active` folgt jeder Änderung. `shutdown` friert alle Actors ein, schreibt ihre
  * Snapshots, wartet befristet auf laufende Spielabschlüsse (Abschluss-Warteschlange, `game-finish.ts`) und
  * meldet ehrlich, was nicht gesichert ist (Fehlerlog + Bericht statt pauschal „gesichert“); `adopt` nimmt einen
- * wiederhergestellten Zustand auf (Wiederaufnahme nach Neustart, W4).
+ * wiederhergestellten Zustand auf (Wiederaufnahme nach Neustart, `resume/`).
  */
 import { randomInt } from "node:crypto";
 import type { Repositories } from "@quizmaster/db";

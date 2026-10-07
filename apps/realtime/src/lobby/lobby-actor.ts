@@ -12,7 +12,7 @@
  * | `notice` | `notice { code }` an den Lobby-Raum |
  * | `scheduleTimer` / `cancelTimer` | ein `setTimeout` je Token → `TIMEOUT { token }` in die Warteschlange |
  * | `offerCategories` | Fragen-Service → `OPTIONS_READY` (keine 3 Kategorien → `LOAD_FAILED`) |
- * | `loadQuestions` | ziehen + Volldokumente laden → `QUESTIONS_READY` (nichts → `LOAD_FAILED`) |
+ * | `loadQuestions` | ziehen, Spielinhalte aus dem Speicher des Fragen-Service (ADR-057, ohne Datenbank) → `QUESTIONS_READY` (nichts → `LOAD_FAILED`) |
  * | `gameFinished` | finishGame-Transaktion im Hintergrund über die Abschluss-Warteschlange (Gast-/Fragen-Statistik, Bots ausgenommen; technischer Abbruch zählt nicht als Spiel) |
  * | `persist` | Snapshot entprellt (`SNAPSHOT_DEBOUNCE_MS`) |
  * | `closeLobby` | Timer löschen, Snapshot sofort, Sockets lösen, aus der Registry entfernen |
@@ -139,7 +139,7 @@ export interface LobbyActor {
   /** Führt die Effects von `createLobby` aus (Socket in den Raum, Ack, Zustand senden, Timer, Snapshot). */
   start(effects: readonly Effect[], options?: DispatchOptions): Promise<void>;
   /**
-   * Wiederaufnahme (W4): stellt alle Timer aus `state.timers` neu, plant die Bots und lädt die gesehenen
+   * Wiederaufnahme nach Neustart: stellt alle Timer aus `state.timers` neu, plant die Bots und lädt die gesehenen
    * Fragen, falls ein Spiel läuft. Nur für Zustände, die nicht über `createLobby` entstanden sind.
    */
   resume(): Promise<void>;
@@ -327,7 +327,9 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
     dispatch({ type: "THAW" })
       .then((result) => {
         if (result.ok && since !== null && state.frozen === null) {
-          log.info({ pausedMs: deps.clock.now() - since }, "Verbindung wieder da – Spiel läuft weiter");
+          // Schonfrist (ADR-060): so viele Personen fehlen noch – frühe Auflösung und Host-Übergabe warten auf sie.
+          const awaited = state.reconnectHold?.playerIds.length ?? 0;
+          log.info({ pausedMs: deps.clock.now() - since, awaited }, "Verbindung wieder da – Spiel läuft weiter");
         }
       })
       .catch((error: unknown) => {

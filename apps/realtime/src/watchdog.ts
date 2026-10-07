@@ -14,6 +14,7 @@
  * | `mongo` | ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler in 5 min – länger als 6 min |
  * | `restart_loop` | ≥ 3 Neustarts von Realtime in 15 min (`qm_process_start_time_seconds`) |
  * | `auto_retire` | Schutzautomatik: ≥ 5 zurückgezogene Fragen in 15 min oder ≥ 1 vom Tagesbudget zurückgehaltene |
+ * | `origin_retention` | 30-Tage-Löschung der IP-Schlüssel (ADR-058): letzter Erfolg – ohne Erfolg der Start von Realtime – über 3 h her |
  * | `metrics` | `/metrics` 5 min lang nicht lesbar, obwohl `/healthz` antwortet (z. B. 401 → Token prüfen) |
  *
  * Entprellung: eine Regel meldet erst, wenn ihre Bedingung die Haltezeit erfüllt (Health 2 min, Event-Loop
@@ -86,6 +87,11 @@ export const WATCHDOG_THRESHOLDS = {
   autoRetireWindowMs: 900_000,
   /** `/metrics` so lange nicht lesbar (bei gesundem `/healthz`). */
   metricsDownForMs: 300_000,
+  /**
+   * 30-Tage-Löschung der IP-Schlüssel (ADR-058, stündlich): letzter Erfolg älter als das = mindestens zwei Läufe in
+   * Folge gescheitert. Ein dauerhafter Fehler (1 je Stunde) bliebe sonst unter der Mongo-Schwelle.
+   */
+  originRetentionStaleMs: 10_800_000,
   /** Mindestabstand zweier Alarme derselben Regel. */
   cooldownMs: 900_000,
   /** Erinnerung, solange eine Störung anhält. */
@@ -285,6 +291,7 @@ export const WATCHDOG_RULES = [
   "mongo",
   "restart_loop",
   "auto_retire",
+  "origin_retention",
   "metrics",
 ] as const;
 export type WatchdogRule = (typeof WATCHDOG_RULES)[number];
@@ -408,6 +415,13 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
       hint:
         "pnpm admin:reports --env prod --confirm-prod; zu Unrecht zurückgezogene: pnpm admin:reports --restore-auto " +
         "--since <iso> --env prod --confirm-prod; docs/06 Notfall-Runbook (admin:ban, turnstileOnJoin)",
+    },
+    origin_retention: {
+      forMs: 0,
+      title: "Herkunft älterer Meldungen/Bewertungen nicht entfernt (30-Tage-Löschung, ADR-058)",
+      hint:
+        "pm2 logs quizmaster-realtime --lines 200 (component origin-retention); Teilindizes createdAt_origin " +
+        "(questionReports) und updatedAt_origin (questionRatings) prüfen – Realtime legt sie beim Start an (ensureIndexes)",
     },
     metrics: {
       forMs: limits.metricsDownForMs,
@@ -769,7 +783,30 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
           : { kind: "good" },
       );
     }
+
+    verdicts.set("origin_retention", originRetentionVerdict(current, startTime));
     return verdicts;
+  };
+
+  /**
+   * Datensparsamkeit (ADR-058): letzter erfolgreicher Lauf der 30-Tage-Löschung. 0 = seit dem Start keiner – dann
+   * zählt der Start, aber erst ein Erfolg ist „in Ordnung“: Ein Neustart allein ist keine Entwarnung (bis 3 h danach
+   * gibt es kein Urteil). Ohne die Metrik (Realtime ohne den Dienst) ebenso kein Urteil.
+   */
+  const originRetentionVerdict = (current: MetricsSnapshot, startTime: number | null): Verdict => {
+    const lastSuccess = gaugeValue(current, "qm_origin_retention_last_success_seconds");
+    if (lastSuccess === null) return { kind: "unknown" };
+    if (lastSuccess > 0) {
+      const ageMs = current.at - lastSuccess * 1_000;
+      return ageMs > limits.originRetentionStaleMs
+        ? { kind: "bad", detail: `letzter erfolgreicher Lauf vor ${minutes(ageMs)} min` }
+        : { kind: "good" };
+    }
+    if (startTime === null) return { kind: "unknown" };
+    const sinceStartMs = current.at - startTime * 1_000;
+    return sinceStartMs > limits.originRetentionStaleMs
+      ? { kind: "bad", detail: `seit dem Start von Realtime vor ${minutes(sinceStartMs)} min kein erfolgreicher Lauf` }
+      : { kind: "unknown" };
   };
 
   const runTick = async (): Promise<WatchdogReport> => {

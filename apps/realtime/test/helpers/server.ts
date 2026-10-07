@@ -23,7 +23,7 @@ import { type MintTicketOptions, mintTicket } from "./tickets.ts";
 export const TEST_ORIGIN = "http://localhost:3000";
 /** Vertrauenswürdiger IP-Header des Test-Servers. */
 export const TEST_IP_HEADER = "x-qm-test-ip";
-/** Port-Bereich von W2#2 (apps/realtime/test/core); andere Suiten übergeben ihren eigenen. */
+/** Port-Bereich der Kern-Suite (apps/realtime/test/core); andere Suiten übergeben ihren eigenen. */
 export const DEFAULT_TEST_PORTS = { from: 4130, to: 4139 } as const;
 
 export interface PortRange {

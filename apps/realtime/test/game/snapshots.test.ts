@@ -1,7 +1,7 @@
 /**
  * Lobby-Snapshots (docs/04 lobbies, docs/07 §Graceful Shutdown): `persist` schreibt entprellt den aktuellen
  * Stand; die Lobby-Metrik folgt der Registry; der Shutdown-Hook friert alle Lobbys ein und sichert ihren
- * aktuellen Stand (Wiederaufnahme nach Neustart folgt in W4 – hier nur: korrekt geschrieben).
+ * aktuellen Stand (die Wiederaufnahme nach Neustart prüft test/resume – hier nur: korrekt geschrieben).
  */
 import { randomInt, randomUUID } from "node:crypto";
 import { createLobby, createSeededRng } from "@quizmaster/game-engine";
@@ -63,7 +63,7 @@ describe("Snapshots", () => {
     );
   });
 
-  it("adopt (Wiederaufnahme-Schnittstelle für W4): Zustand übernehmen, Timer laufen, Mitglieder können zurück", async () => {
+  it("adopt (Schnittstelle der Wiederaufnahme nach Neustart): Zustand übernehmen, Timer laufen, Mitglieder können zurück", async () => {
     const runtime = runtimeOf(server);
     const guestId = randomUUID();
     const code = code6();

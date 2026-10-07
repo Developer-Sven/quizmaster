@@ -9,6 +9,6 @@ import { securityModule } from "../services/security-module.ts";
 import { timeSyncModule } from "./time-sync.ts";
 import type { RealtimeModule } from "./types.ts";
 
-// lobbyGameModule (W2#3): alle Lobby-/Spiel-Events, Fragen-Service mit Change Streams, Snapshots im Shutdown.
-// securityModule (W4): Watcher auf bans (sofortige Trennung) und appConfig (Kill-Switches live), Sicherheitsnetz.
+// lobbyGameModule: alle Lobby-/Spiel-Events, Fragen-Service mit Change Streams, Snapshots im Shutdown.
+// securityModule: Watcher auf bans (sofortige Trennung) und appConfig (Kill-Switches live), Sicherheitsnetz.
 export const REALTIME_MODULES: readonly RealtimeModule[] = [timeSyncModule, lobbyGameModule, securityModule];

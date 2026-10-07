@@ -1,5 +1,5 @@
 /**
- * Hilfen für die Lobby-/Spiel-Integrationstests (W2#3): Server im eigenen Port-Bereich 4140–4149 mit
+ * Hilfen für die Lobby-/Spiel-Integrationstests: Server im eigenen Port-Bereich 4140–4149 mit
  * `GAME_TIMING=fast`, Gäste mit guests-Dokument, Lobby erstellen/beitreten und ein automatischer Spieler,
  * der wie ein Client auf `lobby:state` reagiert (Kategorie wählen, zum `startsAt` antworten).
  *
@@ -21,7 +21,7 @@ import {
   type TestServer,
 } from "../helpers/index.ts";
 
-/** Port-Bereich der Suite test/game (W2#2 nutzt 4130–4139). */
+/** Port-Bereich der Suite test/game (test/core nutzt 4130–4139). */
 export const GAME_TEST_PORTS = { from: 4140, to: 4149 } as const;
 
 export function startGameServer(options: StartTestServerOptions = {}): Promise<TestServer> {

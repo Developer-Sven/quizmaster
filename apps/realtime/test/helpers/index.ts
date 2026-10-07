@@ -1,5 +1,5 @@
 /**
- * Test-Harness für Integrationstests von apps/realtime (W2#2 Kern, W2#3 Lobby/Spiel, W4 Watcher).
+ * Test-Harness für Integrationstests von apps/realtime (Kern, Lobby/Spiel, Watcher, Sicherheit, Wiederaufnahme).
  *
  * ```ts
  * import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@
  *
  * let server: TestServer;
  * beforeAll(async () => {
- *   // Eigenen Port-Bereich angeben (oder REALTIME_TEST_PORTS="4140-4149"); Standard ist 4130–4139 (W2#2).
+ *   // Eigenen Port-Bereich angeben (oder REALTIME_TEST_PORTS="4140-4149"); Standard ist 4130–4139 (test/core).
  *   server = await startTestServer({ timing: "fast", devBots: true, ports: { from: 4140, to: 4149 } });
  * });
  * afterAll(() => server?.cleanup());

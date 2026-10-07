@@ -1,5 +1,5 @@
 /**
- * Metriken aus W4 (docs/07 Checkliste Phase 6, docs/12 §Monitoring): Broadcast-/Event-Größen über den
+ * Betriebsmetriken (docs/07 Checkliste Phase 6, docs/12 §Monitoring): Broadcast-/Event-Größen über den
  * Socket.IO-Encoder, Event-Loop-p99 je Fenster als Histogramm, CPU-Zeit, Startzeit, Wiederaufnahme-Zähler.
  */
 import { Server } from "socket.io";

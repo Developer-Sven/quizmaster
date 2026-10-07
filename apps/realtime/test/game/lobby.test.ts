@@ -84,7 +84,7 @@ describe("Erstellen und Beitreten", () => {
       ok: false,
       error: { code: "LOBBY_NOT_FOUND" },
     });
-    for (const name of ["A", "Admin", "4dm1n", "Ben​", "Mia 🙂", "Arschloch"]) {
+    for (const name of ["A", "Admin", "4dm1n", "Ben\u200B", "Mia 🙂", "Arschloch"]) {
       const result = await guest.emit("lobby:join", { code, name });
       expect(result, name).toMatchObject({ ok: false, error: { code: "NAME_REJECTED" } });
       if (!result.ok) expect(result.error.message).not.toContain(name);

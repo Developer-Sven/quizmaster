@@ -40,6 +40,11 @@ interface FakeState {
     retireSuppressed: Record<string, number>;
   };
   startTime: number;
+  /**
+   * `qm_origin_retention_last_success_seconds` (ADR-058): Unix-Sekunden des letzten erfolgreichen Laufs, 0 = seit dem
+   * Start keiner, `null` = Metrik fehlt (Realtime ohne den Dienst).
+   */
+  originRetentionLastSuccess: number | null;
   hookStatus: number;
   hang: boolean;
 }
@@ -60,6 +65,7 @@ const fresh = (): FakeState => ({
     retireSuppressed: {},
   },
   startTime: 1_759_300_000,
+  originRetentionLastSuccess: null,
   hookStatus: 204,
   hang: false,
 });
@@ -93,6 +99,9 @@ function metricsText(): string {
       ([reason, value]) => `qm_questions_auto_retire_suppressed_total{reason="${reason}"} ${value}`,
     ),
     `qm_process_start_time_seconds ${state.startTime}`,
+    ...(state.originRetentionLastSuccess === null
+      ? []
+      : [`qm_origin_retention_last_success_seconds ${state.originRetentionLastSuccess}`]),
     "qm_sockets 3",
   ];
   return `${lines.join("\n")}\n`;
@@ -422,6 +431,54 @@ describe("Alarme", () => {
     await run(dog, 30_000, () => bump(state.counters.retireSuppressed, "reports", 1));
     expect(hooks).toHaveLength(3);
     expect(hooks[2]?.content).toContain("1 vom Tagesbudget zurückgehalten");
+  });
+
+  it("meldet, wenn die Herkunft älterer Meldungen (ADR-058) seit über 3 h nicht entfernt wurde – mit Index-Hinweis", async () => {
+    expect(WATCHDOG_THRESHOLDS.originRetentionStaleMs).toBe(3 * 3_600_000);
+    const dog = makeWatchdog();
+    // Realtime ist gerade gestartet; der erste Lauf (nach 1 min) klappt, danach scheitert jeder (z. B. Teilindex weg).
+    clock = state.startTime * 1_000;
+    state.originRetentionLastSuccess = 0;
+    await run(dog, 60_000);
+    state.originRetentionLastSuccess = state.startTime + 60;
+    await run(dog, WATCHDOG_THRESHOLDS.originRetentionStaleMs - 30_000);
+    expect(hooks).toEqual([]);
+    expect(dog.status("origin_retention")).toBe("ok");
+    await run(dog, 60_000);
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]?.content).toContain("ALARM Herkunft älterer Meldungen/Bewertungen nicht entfernt");
+    expect(hooks[0]?.content).toContain("letzter erfolgreicher Lauf vor 181 min");
+    expect(hooks[0]?.content).toContain("createdAt_origin");
+    expect(hooks[0]?.content).toContain("updatedAt_origin");
+    // Ein Neustart allein ist keine Entwarnung: Das Gauge steht wieder auf 0, aber noch hat kein Lauf geklappt.
+    state.startTime = Math.floor(clock / 1_000);
+    state.originRetentionLastSuccess = 0;
+    await run(dog, 90_000);
+    expect(hooks).toHaveLength(1);
+    expect(dog.status("origin_retention")).toBe("firing");
+    // Erst ein erfolgreicher Lauf beendet die Störung.
+    state.originRetentionLastSuccess = Math.floor(clock / 1_000);
+    await run(dog, 30_000);
+    expect(hooks).toHaveLength(2);
+    expect(hooks[1]?.content).toContain("Entwarnung: Herkunft älterer Meldungen/Bewertungen");
+    expect(dog.status("origin_retention")).toBe("ok");
+  });
+
+  it("origin_retention: ohne Erfolg seit dem Start ab 3 h nach dem Start; ohne Metrik (älteres Release) nie", async () => {
+    const dog = makeWatchdog();
+    clock = state.startTime * 1_000;
+    // Ohne die Metrik (Realtime ohne den Dienst) gibt es kein Urteil – auch nach Stunden kein Alarm.
+    await run(dog, WATCHDOG_THRESHOLDS.originRetentionStaleMs + 60_000);
+    expect(dog.status("origin_retention")).toBe("ok");
+    expect(hooks).toEqual([]);
+    // Neustart: Das Gauge steht auf 0, gerechnet wird ab dem neuen Start.
+    state.startTime = Math.floor(clock / 1_000);
+    state.originRetentionLastSuccess = 0;
+    await run(dog, WATCHDOG_THRESHOLDS.originRetentionStaleMs - 30_000);
+    expect(dog.status("origin_retention")).toBe("ok");
+    await run(dog, 60_000);
+    expect(dog.status("origin_retention")).toBe("firing");
+    expect(hooks.at(-1)?.content).toContain("seit dem Start von Realtime vor 181 min kein erfolgreicher Lauf");
   });
 
   it("meldet einen falschen METRICS_TOKEN nur, solange /healthz antwortet", async () => {

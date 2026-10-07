@@ -39,7 +39,7 @@ const WRONG_VALUES: readonly unknown[] = [
   "",
   "x",
   " ",
-  "‮evil",
+  "\u202Eevil",
   [],
   ["x"],
   {},

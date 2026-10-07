@@ -30,6 +30,7 @@
  * | `qm_process_memory_bytes` | Gauge | type (heap_used, heap_total, rss, external) | Speicher |
  * | `qm_process_cpu_seconds_total` | Counter | – | CPU-Zeit (user + system) |
  * | `qm_process_start_time_seconds` | Gauge | – | Startzeit (Unix-Sekunden) – Neustart-Erkennung im Watchdog |
+ * | `qm_origin_retention_last_success_seconds` | Gauge | – | letzter erfolgreicher Lauf der 30-Tage-Löschung der IP-Schlüssel (ADR-058, 0 = seit dem Start keiner; registriert `services/origin-retention.ts`) – Watchdog `origin_retention` |
  */
 import { type ELDHistogram, monitorEventLoopDelay } from "node:perf_hooks";
 import { Counter, Gauge, Histogram, Registry } from "@prometheus-io/client";

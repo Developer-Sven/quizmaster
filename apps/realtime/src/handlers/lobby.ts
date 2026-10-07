@@ -41,8 +41,6 @@ import {
 /** Fehlercodes, nach denen die Person sicher kein Mitglied (mehr) ist – ihre Sockets verlassen den Raum. */
 const NOT_A_MEMBER = new Set(["LOBBY_NOT_FOUND", "KICKED", "RESIGNED"]);
 
-/** Fehlversuch für die IP-Regeln von join/resume: nur ein unbekannter bzw. fremder Code (Code-Raten). */
-
 /** Kategorie-Auswahl (ADR-048): nur spielbare Kategorien des Katalogs – sonst INVALID_OPTION. */
 function assertPlayableCategories(rt: HandlerRuntime, categoryIds: readonly string[] | null | undefined): void {
   if (!categoryIds) return;
@@ -52,6 +50,7 @@ function assertPlayableCategories(rt: HandlerRuntime, categoryIds: readonly stri
   }
 }
 
+/** Fehlversuch für die IP-Regeln von join/resume: nur ein unbekannter bzw. fremder Code (Code-Raten). */
 export function countsAsCodeGuess(code: ErrorCode): boolean {
   return code === "LOBBY_NOT_FOUND";
 }

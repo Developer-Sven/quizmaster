@@ -39,7 +39,7 @@ import { eventually, metricValue, startTestServer, type TestServer } from "../he
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
 
-/** Port-Bereich dieser Suite (W4#3). */
+/** Port-Bereich dieser Suite (Schutzautomatik). */
 export const QUALITY_TEST_PORTS = { from: 4530, to: 4539 } as const;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 

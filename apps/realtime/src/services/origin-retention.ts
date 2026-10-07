@@ -5,8 +5,12 @@
  * Einträge zählen danach als „IP unbekannt“ und hängen damit zusammen (fail closed, `@quizmaster/db` independence).
  *
  * Läufe überlappen nie; ein Fehler wird geloggt und gezählt (`qm_mongo_errors_total{operation="origin_retention"}`),
- * der nächste Lauf versucht es erneut.
+ * der nächste Lauf versucht es erneut. Überwacht: Nur ein vollständiger Lauf (Meldungen UND Bewertungen) setzt
+ * `qm_origin_retention_last_success_seconds` (Unix-Sekunden, 0 = seit dem Start keiner); der Watchdog meldet
+ * (Regel `origin_retention`), wenn der letzte Erfolg – bzw. ohne Erfolg der Start – über 3 h zurückliegt. Ein
+ * dauerhafter Fehler (z. B. fehlender Teilindex, an dem der `hint` scheitert) bliebe sonst unter der Mongo-Schwelle.
  */
+import { Gauge, type Registry } from "@prometheus-io/client";
 import type { Repositories } from "@quizmaster/db";
 import { RETENTION } from "@quizmaster/shared/documents";
 import type { Logger } from "../logger.ts";
@@ -19,14 +23,27 @@ export const ORIGIN_RETENTION_INTERVAL_MS = 60 * 60_000;
 export const ORIGIN_RETENTION_FIRST_RUN_MS = 60_000;
 /** Frist je Collection und Lauf. */
 export const ORIGIN_RETENTION_TIMEOUT_MS = 30_000;
+/** Gauge des letzten vollständig erfolgreichen Laufs (Name ist Vertrag mit dem Watchdog). */
+export const ORIGIN_RETENTION_SUCCESS_METRIC = "qm_origin_retention_last_success_seconds";
 
 export interface OriginRetentionDeps {
   repos: Pick<Repositories, "reports" | "ratings">;
   clock: { now(): number };
   logger: Logger;
-  metrics: Pick<RealtimeMetrics, "recordMongoError">;
+  metrics: Pick<RealtimeMetrics, "recordMongoError" | "registry">;
   intervalMs?: number;
   firstRunMs?: number;
+}
+
+/** Gauge je Registry genau einmal (ein erneuter Aufbau der Laufzeit teilt es). */
+function successGauge(registry: Registry): Gauge {
+  const existing = registry.getSingleMetric(ORIGIN_RETENTION_SUCCESS_METRIC);
+  if (existing instanceof Gauge) return existing;
+  return new Gauge({
+    name: ORIGIN_RETENTION_SUCCESS_METRIC,
+    help: "Letzter erfolgreicher Lauf der 30-Tage-Löschung der IP-Schlüssel (Unix-Sekunden, 0 = seit dem Start keiner)",
+    registers: [registry],
+  });
 }
 
 export interface OriginRetentionResult {
@@ -46,6 +63,7 @@ export function createOriginRetention(deps: OriginRetentionDeps): OriginRetentio
   const log = deps.logger.child({ component: "origin-retention" });
   const intervalMs = deps.intervalMs ?? ORIGIN_RETENTION_INTERVAL_MS;
   const firstRunMs = deps.firstRunMs ?? ORIGIN_RETENTION_FIRST_RUN_MS;
+  const lastSuccess = successGauge(deps.metrics.registry);
   let first: NodeJS.Timeout | undefined;
   let interval: NodeJS.Timeout | undefined;
   let running = false;
@@ -63,6 +81,7 @@ export function createOriginRetention(deps: OriginRetentionDeps): OriginRetentio
     const before = new Date(deps.clock.now() - RETENTION.feedbackOriginMs);
     const reports = await guarded(deps.repos.reports.forgetOrigins(before));
     const ratings = await guarded(deps.repos.ratings.forgetOrigins(before));
+    lastSuccess.set(Math.floor(deps.clock.now() / 1_000));
     if (reports + ratings > 0) {
       log.info({ reports, ratings, before: before.toISOString() }, "Herkunft älterer Meldungen/Bewertungen entfernt");
     }

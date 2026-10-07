@@ -1,5 +1,5 @@
 /**
- * Modul „Lobby & Spiel“ (W2#3): registriert die Handler aller Lobby-/Spiel-Events und baut beim Start die
+ * Modul „Lobby & Spiel“: registriert die Handler aller Lobby-/Spiel-Events und baut beim Start die
  * Laufzeit aus Fragen-Service (Pool + Change Streams), Feedback-Service und Lobby-Registry.
  *
  * - `setup` registriert nur Handler und Hooks; alles, was Datenbank, `io` oder Dienste braucht, entsteht erst
@@ -11,7 +11,7 @@
  * - Produktion (`databaseKind = production`): Start nur mit brauchbarem Fragenkatalog (sonst Exit 1), danach
  *   meldet `/healthz` 503, solange der Katalog unbrauchbar ist (Health-Prüfung `catalog`).
  *
- * Zugriff für andere Module (z. B. Wiederaufnahme aus Snapshots in W4, Modul-Reihenfolge: danach eintragen)
+ * Zugriff für andere Module (z. B. die Wiederaufnahme aus Snapshots, `resume/` – in der Modul-Reihenfolge danach)
  * und Tests: `gameRuntimeOf(context)` bzw. `gameRuntimeOf(app)` – ab `onStart` dieses Moduls verfügbar.
  */
 import type { Rng } from "@quizmaster/game-engine";

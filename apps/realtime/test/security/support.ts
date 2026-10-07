@@ -1,5 +1,5 @@
 /**
- * Hilfen der Sicherheits-Suite (W4, docs/06 Phase-4-Checkliste, docs/11 §Sicherheits-Invarianten und
+ * Hilfen der Sicherheits-Suite (docs/06 Phase-4-Checkliste, docs/11 §Sicherheits-Invarianten und
  * Missbrauchstests): eigener Port-Bereich 4510–4519, Server mit den Produktions-Modulen (inkl. Sicherheits-Modul
  * mit kurzen Neustart-Pausen), ein Protokoll ALLER Server→Client-Daten (Events und Acks) für Invariante 4 sowie
  * gültige Beispiel-Payloads je Event.
@@ -30,7 +30,7 @@ import {
   type TestSocket,
 } from "../helpers/index.ts";
 
-/** Port-Bereich der Sicherheits-Suite (W4#1). */
+/** Port-Bereich der Sicherheits-Suite. */
 export const SECURITY_TEST_PORTS = { from: 4510, to: 4519 } as const;
 
 /** Wie `REALTIME_MODULES`, aber mit kurzen Neustart-Pausen der Sicherheits-Watcher (Tests). */

@@ -10,14 +10,15 @@
 import type { GuestsRepo } from "@quizmaster/db";
 import { buildSeenQuestions, type SeenQuestions } from "@quizmaster/game-engine";
 import { guestIdSchema } from "@quizmaster/shared";
+import { RECENT_QUESTION_IDS_MAX } from "@quizmaster/shared/documents";
 import type { Logger } from "../logger.ts";
 import type { RealtimeMetrics } from "../metrics.ts";
 import { withTimeout } from "../registry/util.ts";
 
 /** Frist für das Laden der gesehenen Fragen (weit unter der Engine-Frist für Shell-Anfragen). */
 export const SEEN_QUESTIONS_TIMEOUT_MS = 3_000;
-/** So viele Fragen früherer Spiele merkt sich eine Lobby (wie `recentQuestionIds` je Gast). */
-export const LOBBY_HISTORY_MAX = 1_000;
+/** So viele Fragen früherer Spiele merkt sich eine Lobby – genauso viele wie `recentQuestionIds` je Gast. */
+export const LOBBY_HISTORY_MAX = RECENT_QUESTION_IDS_MAX;
 
 export interface SeenQuestionsDeps {
   guests: Pick<GuestsRepo, "loadRecentQuestionIds">;

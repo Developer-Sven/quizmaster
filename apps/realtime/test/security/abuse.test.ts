@@ -194,15 +194,15 @@ describe("Gesperrter Gast", () => {
 
 describe("Namen (docs/06 §Eingaben)", () => {
   const REJECTED: ReadonlyArray<[string, string]> = [
-    ["Zero-Width Space", "Mia​"],
-    ["Zero-Width Joiner", "Mi‍a"],
-    ["Zero-Width Non-Joiner", "Mi‌a"],
-    ["Word Joiner", "Mia⁠"],
-    ["BOM in der Mitte", "Mi﻿a"],
-    ["Right-to-Left Override", "Mi‮a"],
-    ["Bidi-Isolate", "⁦Mia⁩"],
-    ["Right-to-Left Mark", "Mia‏"],
-    ["Arabic Letter Mark", "Mia؜"],
+    ["Zero-Width Space", "Mia\u200B"],
+    ["Zero-Width Joiner", "Mi\u200Da"],
+    ["Zero-Width Non-Joiner", "Mi\u200Ca"],
+    ["Word Joiner", "Mia\u2060"],
+    ["BOM in der Mitte", "Mi\uFEFFa"],
+    ["Right-to-Left Override", "Mi\u202Ea"],
+    ["Bidi-Isolate", "\u2066Mia\u2069"],
+    ["Right-to-Left Mark", "Mia\u200F"],
+    ["Arabic Letter Mark", "Mia\u061C"],
     ["Emoji", "Mia \u{1F600}"],
     ["nur Emojis", "\u{1F525}\u{1F525}"],
     ["Leetspeak englisch", "F1ck"],
@@ -241,7 +241,7 @@ describe("Namen (docs/06 §Eingaben)", () => {
     const host = await server.connectClient();
     const code = await createLobby(host, "  Jürgen  ");
     const names: string[] = [];
-    for (const name of ["Zoë", "Ben-2", "Ana_Lena", "﻿Jürgen"]) {
+    for (const name of ["Zoë", "Ben-2", "Ana_Lena", "\uFEFFJürgen"]) {
       const guest = await server.connectClient();
       const state = guest.waitFor("lobby:state", (payload) => payload.players.length >= 2);
       await joinLobby(guest, code, name);

@@ -23,7 +23,7 @@ import { metricValue, startTestServer, type TestServer } from "../helpers/index.
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
 
-/** Port-Bereich dieser Suite (W4#2). */
+/** Port-Bereich dieser Suite (Wiederaufnahme nach Neustart). */
 const RESUME_TEST_PORTS = { from: 4520, to: 4529 } as const;
 
 let database: TestDatabase;
