@@ -177,7 +177,7 @@ describe("Kalibrierung gegen die Test-DB", () => {
     await setStats(reported._id, 40, reported.difficulty === 1 ? 4 : 38);
     await setStats(edited._id, 40, edited.difficulty === 1 ? 4 : 38);
     await repos.reports.create(
-      { questionId: reported._id, reason: "tippfehler", guestId: randomUUID(), lobbyCode: null },
+      { questionId: reported._id, reason: "tippfehler", guestId: randomUUID(), lobbyCode: null, ipKey: null },
       new Date(),
     );
     // edited: im Repo geändert und noch nicht geseedet → Hash weicht ab (nur die Zeile dieser Frage).

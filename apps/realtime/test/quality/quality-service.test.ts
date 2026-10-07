@@ -28,6 +28,8 @@ import {
 import { metricValue } from "../helpers/index.ts";
 
 const now = new Date("2026-10-01T10:00:00Z");
+/** Herkunft einer Bewertung, wo sie keine Rolle spielt (ADR-058). */
+const ORIGIN = { ipKey: null, lobbyCode: null } as const;
 
 function capture() {
   const lines: string[] = [];
@@ -64,6 +66,8 @@ interface FakeOptions {
   quality?: QuestionQualityState | null;
   reporters?: number | (() => Promise<number>);
   summary?: RatingSummary | (() => Promise<RatingSummary>);
+  /** Unabhängige Quellen der Daumen-runter (Standard 3, ADR-058). */
+  dislikeSources?: number;
   autoRetire?: () => Promise<boolean>;
   counts?: () => Promise<PlayableCounts>;
   applyCounts?: () => Promise<CategoryRecount | null>;
@@ -82,6 +86,9 @@ function fakeRepos(options: FakeOptions = {}) {
     applyCounts: 0,
     appConfig: 0,
     reporters: 0,
+    dislikeSources: 0,
+    rateOrigins: [] as unknown[],
+    reportsCreated: [] as unknown[],
     retiredSince: [] as Array<{ since: Date; category: string | undefined }>,
   };
   const config = defaultAppConfig(now);
@@ -107,20 +114,22 @@ function fakeRepos(options: FakeOptions = {}) {
       },
     },
     reports: {
-      async create() {
+      async create(report: unknown) {
+        calls.reportsCreated.push(report);
         return {};
       },
       async findReportedQuestionIds() {
         return new Set<string>();
       },
-      async countDistinctReporters() {
+      async countIndependentReporters() {
         calls.reporters += 1;
         const value = options.reporters ?? 0;
         return typeof value === "number" ? value : value();
       },
     },
     ratings: {
-      async rate() {
+      async rate(_questionId: string, _guestId: string, _value: number, _now: Date, origin: unknown) {
+        calls.rateOrigins.push(origin);
         return (
           options.change ?? {
             previous: null,
@@ -134,6 +143,10 @@ function fakeRepos(options: FakeOptions = {}) {
         calls.summary += 1;
         const value = options.summary ?? { likes: 10, dislikes: 10 };
         return typeof value === "function" ? value() : value;
+      },
+      async dislikeSources() {
+        calls.dislikeSources += 1;
+        return options.dislikeSources ?? 3;
       },
       async findByGuest() {
         return new Map();
@@ -169,7 +182,7 @@ describe("Schutzautomatik – Fehlerpfade", () => {
       summary: () => Promise.reject(new Error("Netzwerk weg")),
     });
     const guestId = randomUUID();
-    const change = await feedback.rate("co-unit0001", guestId, -1);
+    const change = await feedback.rate("co-unit0001", guestId, -1, ORIGIN);
     expect(change.current).toBe(-1);
     expect(lines.some((line) => line.includes("Schutzautomatik: Prüfung fehlgeschlagen"))).toBe(true);
     expect(await metricValue(metrics, "qm_mongo_errors_total", { operation: "quality_check" })).toBe(1);
@@ -179,7 +192,13 @@ describe("Schutzautomatik – Fehlerpfade", () => {
   it("ein Fehler der Prüfung nach einer Meldung lässt die Meldung bestehen", async () => {
     const { feedback, lines, metrics } = setup({ reporters: () => Promise.reject(new Error("Zeitüberschreitung")) });
     expect(
-      await feedback.report({ questionId: "co-unit0001", guestId: randomUUID(), reason: "falsch", lobbyCode: null }),
+      await feedback.report({
+        questionId: "co-unit0001",
+        guestId: randomUUID(),
+        reason: "falsch",
+        lobbyCode: null,
+        ipKey: null,
+      }),
     ).toBe("created");
     expect(lines.some((line) => line.includes("Schutzautomatik: Prüfung fehlgeschlagen"))).toBe(true);
     expect(await metricValue(metrics, "qm_mongo_errors_total", { operation: "quality_check" })).toBe(1);
@@ -204,7 +223,7 @@ describe("Schutzautomatik – Zeitbudget je Bewertung/Meldung", () => {
       metrics,
       budgetMs: 0,
     });
-    expect((await feedback.rate("co-unit0001", randomUUID(), -1)).current).toBe(-1);
+    expect((await feedback.rate("co-unit0001", randomUUID(), -1, ORIGIN)).current).toBe(-1);
     expect(calls.summary).toBe(0);
     expect(lines.some((line) => line.includes("Schutzautomatik übersprungen – Zeitbudget aufgebraucht"))).toBe(true);
   });
@@ -222,7 +241,7 @@ describe("Schutzautomatik – Zeitbudget je Bewertung/Meldung", () => {
       timeoutMs: 150,
     });
     const started = performance.now();
-    expect((await feedback.rate("co-unit0001", randomUUID(), -1)).current).toBe(-1);
+    expect((await feedback.rate("co-unit0001", randomUUID(), -1, ORIGIN)).current).toBe(-1);
     expect(performance.now() - started).toBeLessThan(140);
     expect(lines.some((line) => line.includes("Schutzautomatik: Prüfung fehlgeschlagen"))).toBe(true);
     await vi.waitFor(() =>
@@ -246,11 +265,45 @@ describe("Schutzautomatik – Schwellen und Übergänge", () => {
       outcome: "retired",
       reason: "rating",
       ratings: { likes: 5, dislikes: 15 },
+      dislikeSources: 3,
     });
     // Genau 30 % → bleibt.
     const border = setup({ summary: { likes: 6, dislikes: 14 } });
     expect(await border.quality.afterRating("co-unit0001", enough)).toMatchObject({ outcome: "kept" });
     expect(border.calls.autoRetire).toBe(0);
+  });
+
+  it("Quote greift, aber Daumen-runter aus weniger als 3 unabhängigen Quellen → bleibt im Pool (ADR-058)", async () => {
+    const question = state({ stats: { shown: 0, correct: 0, likes: 2, dislikes: 20, reports: 0 } });
+    const change: RatingChange = { previous: null, current: -1, delta: { likes: 0, dislikes: 1 }, question };
+    const dependent = setup({ summary: { likes: 2, dislikes: 20 }, dislikeSources: 2 });
+    expect(await dependent.quality.afterRating("co-unit0001", change)).toEqual({
+      outcome: "kept",
+      reason: null,
+      ratings: { likes: 2, dislikes: 20 },
+      dislikeSources: 2,
+    });
+    expect(dependent.calls.autoRetire).toBe(0);
+    // Greift die Quote nicht, werden die Quellen gar nicht erst gezählt.
+    const fine = setup({ summary: { likes: 10, dislikes: 12 } });
+    expect(await fine.quality.afterRating("co-unit0001", change)).toMatchObject({ outcome: "kept" });
+    expect(fine.calls.dislikeSources).toBe(0);
+    const independent = setup({ summary: { likes: 2, dislikes: 20 }, dislikeSources: 3 });
+    expect(await independent.quality.afterRating("co-unit0001", change)).toMatchObject({
+      outcome: "retired",
+      reason: "rating",
+      dislikeSources: 3,
+    });
+  });
+
+  it("Feedback reicht die Herkunft (HMAC-IP-Schlüssel, Lobby) an die Repositories weiter (ADR-058)", async () => {
+    const { feedback, calls } = setup();
+    const origin = { ipKey: "c".repeat(32), lobbyCode: "ABC234" };
+    await feedback.rate("co-unit0001", randomUUID(), -1, origin);
+    expect(calls.rateOrigins).toEqual([origin]);
+    const report = { questionId: "co-unit0001", guestId: randomUUID(), reason: "falsch" as const, ...origin };
+    expect(await feedback.report(report)).toBe("created");
+    expect(calls.reportsCreated).toEqual([report]);
   });
 
   it("schon retired oder unbekannt → keine Prüfung", async () => {
@@ -363,6 +416,7 @@ describe("Schutzautomatik – Missbrauchsbremse (Tagesbudget je Kategorie und in
         guestId: randomUUID(),
         reason: "falsch",
         lobbyCode: "ABC234",
+        ipKey: null,
       }),
     ).toBe("created");
     expect(calls.autoRetire).toBe(0);

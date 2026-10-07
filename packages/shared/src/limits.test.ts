@@ -115,7 +115,9 @@ const EXPECTED: Record<string, Expected> = {
   "event.game-pick.socket": ["game:pick", "socket", 5, 5, 0, "memory", ACK],
   "event.game-review.socket": ["game:review", "socket", 20, 60, 0, "memory", ACK],
   "event.question-rate.guest": ["question:rate", "guest", 60, 600, 0, "memory", ACK],
+  "event.question-rate.ip": ["question:rate", "ip", 400, 600, 0, "memory", ACK],
   "event.question-report.guest": ["question:report", "guest", 10, 600, 0, "memory", ACK],
+  "event.question-report.ip": ["question:report", "ip", 40, 600, 0, "memory", ACK],
   "socket.any-event": ["socket:any-event", "socket", 30, 1, 0, "memory", ACK],
   "socket.violations": ["socket:violation", "socket", 10, 60, 0, "memory", { action: "disconnect" }],
   "guest.violation-disconnects": [

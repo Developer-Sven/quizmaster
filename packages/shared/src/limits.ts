@@ -284,6 +284,16 @@ export const RATE_LIMITS: readonly RateLimitRule[] = [
     countsAsViolation: true,
   }),
   rule({
+    id: "event.question-rate.ip",
+    target: "question:rate",
+    scope: "ip",
+    points: 400,
+    durationSec: 600,
+    onExceed: RATE_LIMITED_ACK,
+    countsAsViolation: true,
+    note: "Viele Sessions hinter einer IP; reicht für 8 Personen im selben WLAN, die ein langes Spiel bewerten (ADR-058)",
+  }),
+  rule({
     id: "event.question-report.guest",
     target: "question:report",
     scope: "guest",
@@ -291,6 +301,16 @@ export const RATE_LIMITS: readonly RateLimitRule[] = [
     durationSec: 600,
     onExceed: RATE_LIMITED_ACK,
     countsAsViolation: true,
+  }),
+  rule({
+    id: "event.question-report.ip",
+    target: "question:report",
+    scope: "ip",
+    points: 40,
+    durationSec: 600,
+    onExceed: RATE_LIMITED_ACK,
+    countsAsViolation: true,
+    note: "Viele Sessions hinter einer IP; reicht für 8 Personen im selben WLAN mit je 5 Meldungen (ADR-058)",
   }),
 
   // --- Fallback, Verstöße, Sperren ---

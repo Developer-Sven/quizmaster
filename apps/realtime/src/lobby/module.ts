@@ -23,6 +23,7 @@ import { registerLobbyHandlers } from "../handlers/lobby.ts";
 import type { AppServer, ModuleContext, RealtimeModule } from "../registry/types.ts";
 import type { AppConfigService } from "../services/app-config.ts";
 import { createFeedbackService, type FeedbackService } from "../services/feedback.ts";
+import { createOriginRetention, type OriginRetention } from "../services/origin-retention.ts";
 import { createQuestionService, type QuestionService } from "../services/questions.ts";
 import { createLobbyRegistry, type LobbyRegistry } from "./lobby-registry.ts";
 
@@ -30,6 +31,8 @@ export interface GameRuntime {
   readonly lobbies: LobbyRegistry;
   readonly questions: QuestionService;
   readonly feedback: FeedbackService;
+  /** Entfernt die Herkunft älterer Meldungen/Bewertungen (ADR-058, ab `start()` stündlich). */
+  readonly originRetention: OriginRetention;
   readonly appConfig: AppConfigService;
   /** Fragenkatalog laden und Change Streams öffnen. */
   start(): Promise<void>;
@@ -67,6 +70,7 @@ export function createGameRuntime(context: ModuleContext, options: GameRuntimeOp
     ...(options.watchBackoff === undefined ? {} : { watchBackoff: options.watchBackoff }),
   });
   const feedback = createFeedbackService({ repos: db.repos, clock, logger, metrics: services.metrics });
+  const originRetention = createOriginRetention({ repos: db.repos, clock, logger, metrics: services.metrics });
   const lobbies = createLobbyRegistry({
     io,
     clock,
@@ -84,13 +88,16 @@ export function createGameRuntime(context: ModuleContext, options: GameRuntimeOp
     lobbies,
     questions,
     feedback,
+    originRetention,
     appConfig: services.appConfig,
     async start() {
       await questions.start();
+      originRetention.start();
       if (production) services.health.register("catalog", () => questions.catalog().usable);
     },
     shutdown(reason) {
       stopping ??= (async () => {
+        originRetention.stop();
         const results = await Promise.allSettled([lobbies.shutdown(), questions.stop()]);
         for (const result of results) {
           if (result.status === "rejected")

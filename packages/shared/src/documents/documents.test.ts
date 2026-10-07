@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ipKey } from "../ip/index.ts";
 import {
   APP_CONFIG_ID,
   appConfigDocSchema,
@@ -8,6 +9,7 @@ import {
   defaultAppConfig,
   gameDocSchema,
   guestDocSchema,
+  ipKeySchema,
   lobbyDocSchema,
   questionDocSchema,
   questionRatingDocSchema,
@@ -185,6 +187,25 @@ describe("DB-Dokumente (docs/04 §Schemas)", () => {
     expect(questionRatingDocSchema.safeParse(rating).success).toBe(true);
     expect(questionRatingDocSchema.safeParse({ ...rating, _id: `other:${guestId}` }).success).toBe(false);
     expect(questionRatingDocSchema.safeParse({ ...rating, value: 0 }).success).toBe(false);
+    // Herkunft (ADR-058): nur der HMAC-IP-Schlüssel, nie die IP; ältere Dokumente ohne Herkunft bleiben gültig.
+    const key = ipKey("203.0.113.7", "x".repeat(32)) ?? "";
+    expect(ipKeySchema.safeParse(key).success).toBe(true);
+    expect(ipKeySchema.safeParse("203.0.113.7").success).toBe(false);
+    expect(questionRatingDocSchema.safeParse({ ...rating, ipKey: key, lobbyCode: "ABC234" }).success).toBe(true);
+    expect(questionRatingDocSchema.safeParse({ ...rating, ipKey: "203.0.113.7" }).success).toBe(false);
+    const report = {
+      _id: "r2",
+      questionId: "rw-8f3k2m1q",
+      reason: "falsch",
+      guestId,
+      lobbyCode: "ABC234",
+      status: "open",
+      createdAt: now,
+      expiresAt: now,
+    };
+    expect(questionReportDocSchema.safeParse({ ...report, ipKey: key }).success).toBe(true);
+    expect(questionReportDocSchema.safeParse({ ...report, ipKey: null }).success).toBe(true);
+    expect(questionReportDocSchema.safeParse({ ...report, ipKey: "::1" }).success).toBe(false);
     expect(
       banDocSchema.safeParse({ _id: "b1", kind: "ip", value: "hmac", reason: "flood", createdAt: now }).success,
     ).toBe(true);

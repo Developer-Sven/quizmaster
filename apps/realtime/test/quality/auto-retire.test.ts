@@ -1,23 +1,27 @@
 /**
  * Schutzautomatik und Live-Zähler im laufenden Server (docs/08 §5) gegen die Test-DB:
  *
- * - Ende-zu-Ende: drei Mitspielende melden dieselbe Frage über `question:report` → DB-Status `retired` +
- *   `autoRetired`, der questions-Watcher nimmt sie live aus dem Pool, Metrik `qm_questions_auto_retired_total`.
- * - Schwellen: verschiedene Gäste, nur „falsch/veraltet/mehrdeutig“, 7-Tage-Fenster; Bewertungsquote < 30 % bei
- *   ≥ 20 Bewertungen (genau 30 % bleibt).
+ * - Ende-zu-Ende: drei Mitspielende EINER Lobby melden dieselbe Frage über `question:report` – eine Quelle
+ *   (ADR-058), die Frage bleibt; Meldungen und Bewertungen speichern HMAC-IP-Schlüssel und Lobby-Code. Zwei weitere
+ *   unabhängige Quellen → DB-Status `retired` + `autoRetired`, der questions-Watcher nimmt sie live aus dem Pool,
+ *   Metrik `qm_questions_auto_retired_total`.
+ * - Schwellen: unabhängige Quellen (eigene IP und eigene Lobby, ADR-058), nur „falsch/veraltet/mehrdeutig“,
+ *   7-Tage-Fenster; Bewertungsquote < 30 % bei ≥ 20 Bewertungen (genau 30 % bleibt), Daumen-runter aus ≥ 3
+ *   unabhängigen Quellen.
  * - Idempotenz/Race: parallele Meldungen ziehen genau einmal zurück.
  * - Bezugszeit: Nach einer Wiederherstellung zählen alte Meldungen nicht erneut.
  * - Live-Zähler: Fällt eine Kategorie unter `appConfig.catalog.minPlayable`, wird sie nicht mehr angeboten
  *   (Kategorien-Watcher); nach der Wiederherstellung wieder.
- * - Missbrauchsbremse: Dieselben drei Gäste melden jede Frage einer Kategorie → höchstens das Tagesbudget je
- *   Kategorie wird zurückgezogen, der Rest bleibt im Pool (Metrik `qm_questions_auto_retire_suppressed_total`).
+ * - Missbrauchsbremse: Dieselben drei unabhängigen Gäste melden jede Frage einer Kategorie → höchstens das
+ *   Tagesbudget je Kategorie wird zurückgezogen, der Rest bleibt im Pool (Metrik
+ *   `qm_questions_auto_retire_suppressed_total`).
  *
  * Eigener Port-Bereich 4530–4539.
  */
 import { randomUUID } from "node:crypto";
 import { AUTO_RETIRE_BUDGET } from "@quizmaster/db";
 import { findShownQuestion } from "@quizmaster/game-engine";
-import type { ReportReason } from "@quizmaster/shared";
+import { LOBBY_CODE_ALPHABET, type ReportReason } from "@quizmaster/shared";
 import type { QuestionDoc } from "@quizmaster/shared/documents";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type GameRuntime, gameRuntimeOf } from "../../src/lobby/module.ts";
@@ -71,12 +75,37 @@ async function question(questionId: string): Promise<QuestionDoc> {
   return doc;
 }
 
-function report(questionId: string, reason: ReportReason = "falsch", guestId: string = randomUUID()) {
-  return runtime().feedback.report({ questionId, guestId, reason, lobbyCode: null });
+/** Gültiger Lobby-Code zu einer Zahl (Alphabet ohne I, L, O, 0, 1). */
+function lobbyCodeFor(n: number): string {
+  let code = "";
+  let rest = n;
+  for (let index = 0; index < 6; index++) {
+    code = `${LOBBY_CODE_ALPHABET[rest % LOBBY_CODE_ALPHABET.length] ?? "A"}${code}`;
+    rest = Math.floor(rest / LOBBY_CODE_ALPHABET.length);
+  }
+  return code;
 }
 
-function rate(questionId: string, value: 1 | -1) {
-  return runtime().feedback.rate(questionId, randomUUID(), value);
+const ipKeyOf = (n: number) => n.toString(16).padStart(32, "0");
+
+let origins = 0;
+/** Eigene IP und eigene Lobby: eine unabhängige Quelle (ADR-058). */
+function independentOrigin(): { ipKey: string; lobbyCode: string } {
+  origins += 1;
+  return { ipKey: ipKeyOf(100_000 + origins), lobbyCode: lobbyCodeFor(100_000 + origins) };
+}
+
+function report(
+  questionId: string,
+  reason: ReportReason = "falsch",
+  guestId: string = randomUUID(),
+  origin = independentOrigin(),
+) {
+  return runtime().feedback.report({ questionId, guestId, reason, ...origin });
+}
+
+function rate(questionId: string, value: 1 | -1, origin: { ipKey: string; lobbyCode: string } = independentOrigin()) {
+  return runtime().feedback.rate(questionId, randomUUID(), value, origin);
 }
 
 function retiredMetric(reason: "reports" | "rating"): Promise<number> {
@@ -90,7 +119,7 @@ function offered(categoryId: string): boolean {
 }
 
 describe("Schutzautomatik über Meldungen", () => {
-  it("drei Mitspielende melden über question:report → retired, der Watcher nimmt die Frage live aus dem Pool", async () => {
+  it("drei Mitspielende einer Lobby sind eine Quelle; zwei weitere unabhängige → retired, live aus dem Pool", async () => {
     const host = await connectGuest(server, { guestDoc: true });
     const ben = await connectGuest(server, { guestDoc: true });
     const cleo = await connectGuest(server, { guestDoc: true });
@@ -116,19 +145,33 @@ describe("Schutzautomatik über Meldungen", () => {
     const before = await retiredMetric("reports");
 
     const reasons: ReportReason[] = ["falsch", "veraltet", "mehrdeutig"];
-    for (const [index, client] of [host, ben].entries()) {
+    for (const [index, client] of [host, ben, cleo].entries()) {
       expect(
         await client.emit("question:report", { questionId: instanceId, reason: reasons[index] ?? "falsch" }),
       ).toEqual({ ok: true, data: null });
     }
+    // Drei Mitspielende EINER Lobby sind eine Quelle (ADR-058): Die Frage bleibt, die Meldungen stehen in der Queue.
     expect((await question(dbId)).status).not.toBe("retired");
     expect(runtime().questions.hasQuestion(dbId)).toBe(true);
+    // Gespeichert mit Herkunft: je Person ihr HMAC-IP-Schlüssel (eigene Test-IPs), dieselbe Lobby – nie die IP.
+    const stored = await server.db.collections.questionReports.find({ questionId: dbId }).toArray();
+    expect(stored).toHaveLength(3);
+    expect(new Set(stored.map((doc) => doc.lobbyCode))).toEqual(new Set([code]));
+    expect(new Set(stored.map((doc) => doc.ipKey)).size).toBe(3);
+    for (const doc of stored) {
+      expect(doc.ipKey).toMatch(/^[0-9a-f]{32}$/);
+      expect(doc.ipKey).not.toContain(host.ip);
+    }
+    expect(await ben.emit("question:rate", { questionId: instanceId, value: -1 })).toEqual({ ok: true, data: null });
+    const rating = await server.db.collections.questionRatings.findOne({ questionId: dbId });
+    expect(rating).toMatchObject({ value: -1, lobbyCode: code });
+    expect(rating?.ipKey).toBe(stored.find((doc) => doc.reason === "veraltet")?.ipKey);
 
-    expect(await cleo.emit("question:report", { questionId: instanceId, reason: "mehrdeutig" })).toEqual({
-      ok: true,
-      data: null,
-    });
-    // Das Ack kommt nach der Prüfung: Die Frage ist schon zurückgezogen …
+    // Zwei weitere, unabhängige Quellen (andere IP, andere Lobby).
+    expect(await report(dbId, "falsch")).toBe("created");
+    expect((await question(dbId)).status).not.toBe("retired");
+    expect(await report(dbId, "veraltet")).toBe("created");
+    // Die Prüfung läuft vor dem Ergebnis: Die Frage ist schon zurückgezogen …
     expect(await question(dbId)).toMatchObject({ status: "retired", autoRetired: { reason: "reports" } });
     // … und der questions-Watcher entfernt sie live aus dem Pool.
     await eventually(() => !runtime().questions.hasQuestion(dbId), 10_000);
@@ -142,7 +185,7 @@ describe("Schutzautomatik über Meldungen", () => {
     }
   });
 
-  it("zählt nur verschiedene Gäste mit „falsch/veraltet/mehrdeutig“ in den letzten 7 Tagen", async () => {
+  it("zählt nur unabhängige Quellen mit „falsch/veraltet/mehrdeutig“ in den letzten 7 Tagen", async () => {
     const [questionId = ""] = await unverifiedQuestions("kunst-kultur", 1);
     windowQuestionId = questionId;
     // Letzte Änderung lange her, damit allein das 7-Tage-Fenster greift (updatedAt ist kein Pool-Feld).
@@ -166,14 +209,14 @@ describe("Schutzautomatik über Meldungen", () => {
 
     const guest = randomUUID();
     expect(await report(questionId, "falsch", guest)).toBe("created");
-    expect(await report(questionId, "veraltet", guest)).toBe("duplicate"); // dieselbe Person zählt einmal
+    expect(await report(questionId, "veraltet", guest)).toBe("duplicate"); // dieselbe Person meldet einmal
     expect(await report(questionId, "tippfehler")).toBe("created"); // Grund zählt nicht
     expect(await report(questionId, "unpassend")).toBe("created");
     expect(await report(questionId, "mehrdeutig")).toBe("created"); // zweiter Gast im Fenster
     expect((await question(questionId)).status).toBe("unverified");
     expect(runtime().questions.hasQuestion(questionId)).toBe(true);
 
-    expect(await report(questionId, "veraltet")).toBe("created"); // dritter Gast → zurückgezogen
+    expect(await report(questionId, "veraltet")).toBe("created"); // dritte Quelle → zurückgezogen
     expect(await question(questionId)).toMatchObject({ status: "retired", autoRetired: { reason: "reports" } });
     await eventually(() => !runtime().questions.hasQuestion(questionId), 10_000);
   });
@@ -237,6 +280,65 @@ describe("Schutzautomatik über Bewertungen", () => {
   });
 });
 
+describe("Unabhängige Quellen (ADR-058)", () => {
+  it("eine Person mit Sessions in mehreren Lobbys oder eine Gruppe in einer Lobby zieht nichts allein zurück", async () => {
+    const [questionId = ""] = await unverifiedQuestions("zeugen-der-zeit", 1);
+    // Fünf Sessions hinter EINER IP in fünf Lobbys, dazu fünf Personen mit eigenen IPs in EINER Lobby.
+    for (let index = 0; index < 5; index++) {
+      expect(
+        await report(questionId, "falsch", randomUUID(), { ipKey: "e".repeat(32), lobbyCode: lobbyCodeFor(index) }),
+      ).toBe("created");
+      expect(
+        await report(questionId, "falsch", randomUUID(), { ipKey: ipKeyOf(9_000 + index), lobbyCode: "HJK234" }),
+      ).toBe("created");
+    }
+    // Zehn Meldungen, aber zwei Quellen: bleibt im Pool (Prüf-Queue).
+    expect(await question(questionId)).toMatchObject({ status: "unverified", autoRetired: null });
+    const since = new Date(Date.now() - DAY_MS);
+    expect(await server.db.repos.reports.countIndependentReporters(questionId, since)).toBe(2);
+    expect(runtime().questions.hasQuestion(questionId)).toBe(true);
+  });
+
+  it("24 Daumen-runter aus zwei Quellen ziehen nicht zurück, die dritte unabhängige schon", async () => {
+    const [questionId = ""] = await unverifiedQuestions("draussen-im-gruenen", 1);
+    for (let index = 0; index < 12; index++)
+      await rate(questionId, -1, { ipKey: ipKeyOf(9_100 + index), lobbyCode: "DEF234" });
+    for (let index = 0; index < 12; index++) {
+      await rate(questionId, -1, { ipKey: "d".repeat(32), lobbyCode: lobbyCodeFor(9_200 + index) });
+    }
+    // Quote 0 % bei 24 Bewertungen – aber nur zwei unabhängige Quellen.
+    expect(await question(questionId)).toMatchObject({ status: "unverified", autoRetired: null });
+    expect(await server.db.repos.ratings.dislikeSources(questionId, new Date(0))).toBe(2);
+    await rate(questionId, -1);
+    expect(await question(questionId)).toMatchObject({ status: "retired", autoRetired: { reason: "rating" } });
+    await eventually(() => !runtime().questions.hasQuestion(questionId), 10_000);
+  });
+});
+
+describe("Datensparsamkeit (ADR-058)", () => {
+  it("die laufende App entfernt den IP-Schlüssel nach 30 Tagen, Meldung und Lobby-Code bleiben", async () => {
+    const [questionId = ""] = await unverifiedQuestions("glaube-religion", 1);
+    const old = new Date(Date.now() - 31 * DAY_MS);
+    const { ipKey, lobbyCode } = independentOrigin();
+    await server.db.collections.questionReports.insertOne({
+      _id: "origin-retention-old",
+      questionId,
+      reason: "tippfehler",
+      guestId: randomUUID(),
+      lobbyCode,
+      ipKey,
+      status: "open",
+      createdAt: old,
+      expiresAt: new Date(old.getTime() + 365 * DAY_MS),
+    });
+    const result = await runtime().originRetention.runOnce();
+    expect(result.reports).toBeGreaterThanOrEqual(1);
+    const doc = await server.db.collections.questionReports.findOne({ _id: "origin-retention-old" });
+    expect(doc).toMatchObject({ lobbyCode, status: "open" });
+    expect(doc).not.toHaveProperty("ipKey");
+  });
+});
+
 describe("Live-Zähler der Kategorien", () => {
   it("unter der Mindestmenge nicht mehr angeboten, nach der Wiederherstellung wieder", async () => {
     const category = "essen-trinken";
@@ -272,7 +374,7 @@ describe("Live-Zähler der Kategorien", () => {
 });
 
 describe("Missbrauchsbremse (Tagesbudget der Schutzautomatik)", () => {
-  it("drei Gäste einer Lobby melden jede Frage einer Kategorie → höchstens das Budget, der Rest bleibt im Pool", async () => {
+  it("drei unabhängige Gäste melden jede Frage einer Kategorie → höchstens das Budget, der Rest bleibt im Pool", async () => {
     const category = "musik-hits";
     const ids = await unverifiedQuestions(category, 8);
     const since = new Date(Date.now() - AUTO_RETIRE_BUDGET.windowMs);
@@ -280,12 +382,13 @@ describe("Missbrauchsbremse (Tagesbudget der Schutzautomatik)", () => {
     const suppressedBefore = await metricValue(server.app.services.metrics, AUTO_RETIRE_SUPPRESSED_METRIC, {
       reason: "reports",
     });
-    const trio = [randomUUID(), randomUUID(), randomUUID()];
+    const trio = [randomUUID(), randomUUID(), randomUUID()].map((guestId) => ({
+      guestId,
+      origin: independentOrigin(),
+    }));
     for (const questionId of ids) {
-      for (const guestId of trio) {
-        expect(await runtime().feedback.report({ questionId, guestId, reason: "falsch", lobbyCode: "ABC234" })).toBe(
-          "created",
-        );
+      for (const { guestId, origin } of trio) {
+        expect(await report(questionId, "falsch", guestId, origin)).toBe("created");
       }
     }
     expect(await server.db.repos.questions.countAutoRetiredSince(since, category)).toBe(AUTO_RETIRE_BUDGET.perCategory);
@@ -301,7 +404,7 @@ describe("Missbrauchsbremse (Tagesbudget der Schutzautomatik)", () => {
     // Die Kategorie bleibt spielbar; die zurückgehaltenen Fragen stehen mit ihren Meldungen in der Prüf-Queue.
     await eventually(() => offered(category), 10_000);
     const reporters = await Promise.all(
-      kept.map((doc) => server.db.repos.reports.countDistinctReporters(doc._id, since)),
+      kept.map((doc) => server.db.repos.reports.countIndependentReporters(doc._id, since)),
     );
     expect(reporters.every((count) => count === 3)).toBe(true);
   });

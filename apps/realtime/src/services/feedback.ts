@@ -6,6 +6,8 @@
  *   und Zähler `stats.likes/dislikes` der Frage ändern sich atomar (Transaktion im Repository).
  * - `report`: eine Meldung je Gast und Frage (weitere Meldungen derselben Person werden still ignoriert);
  *   `stats.reports` der Frage zählt mit.
+ * - Beide speichern die Herkunft – HMAC-IP-Schlüssel und Lobby-Code –, damit die Schutzautomatik nur unabhängige
+ *   Quellen zählt (ADR-058).
  * - Nach jeder Bewertung bzw. neuen Meldung prüft die Schutzautomatik (`./quality.ts`) die Schwellen und nimmt die
  *   Frage bei Bedarf sofort aus dem Pool. Fehler der Prüfung werden geloggt und gezählt, brechen das gespeicherte
  *   Feedback aber nie ab (die nächste Meldung/Bewertung prüft erneut).
@@ -15,7 +17,7 @@
  * Alle Aufrufe sind befristet; Fragen-IDs sind hier immer DB-IDs (die Handler bilden Instanz-IDs vorher über
  * `findShownQuestion` ab – nur in diesem Spiel gezeigte Fragen).
  */
-import type { QuestionPool, QuestionQualityState, RatingChange, Repositories } from "@quizmaster/db";
+import type { QuestionPool, QuestionQualityState, RatingChange, RatingOrigin, Repositories } from "@quizmaster/db";
 import type { ReviewContext } from "@quizmaster/game-engine";
 import type { RatingValue, ReportReason } from "@quizmaster/shared";
 import type { Logger } from "../logger.ts";
@@ -39,6 +41,8 @@ export interface ReportInput {
   guestId: string;
   reason: ReportReason;
   lobbyCode: string | null;
+  /** HMAC-IP-Schlüssel der meldenden Person (ADR-058); `null`, wenn die IP nicht bestimmbar war. */
+  ipKey: string | null;
 }
 
 export type ReportResult = "created" | "duplicate";
@@ -46,7 +50,8 @@ export type ReportResult = "created" | "duplicate";
 export interface FeedbackService {
   /** Eigene Bewertungen und Meldungen zu den Fragen (DB-IDs); bei Fehlern leer. */
   reviewContext(guestId: string, questionIds: readonly string[]): Promise<ReviewContext>;
-  rate(questionId: string, guestId: string, value: RatingValue): Promise<RatingChange>;
+  /** `origin`: HMAC-IP-Schlüssel und Lobby-Code der Abgabe (ADR-058). */
+  rate(questionId: string, guestId: string, value: RatingValue, origin: RatingOrigin): Promise<RatingChange>;
   report(input: ReportInput): Promise<ReportResult>;
   /** Schutzautomatik und Live-Zähler (auch für Tests und Diagnose). */
   readonly quality: QualityService;
@@ -153,11 +158,11 @@ export function createFeedbackService(deps: FeedbackServiceDeps): FeedbackServic
       }
     },
 
-    async rate(questionId, guestId, value) {
+    async rate(questionId, guestId, value, origin) {
       const startedAt = performance.now();
       const change = await guarded(
         "question_rate",
-        deps.repos.ratings.rate(questionId, guestId, value, new Date(deps.clock.now())),
+        deps.repos.ratings.rate(questionId, guestId, value, new Date(deps.clock.now()), origin),
       );
       await check("rating", questionId, startedAt, () => quality.afterRating(questionId, change));
       return change;

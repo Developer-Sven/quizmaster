@@ -214,9 +214,15 @@ export function reviewHints(item: ReviewQueueItem): string[] {
     );
   }
   if (item.reports !== null) {
+    const { severeReporters, severeSources } = item.reports;
+    // Unabhängige Quellen (ADR-058): Was die Schutzautomatik zählt – über IP oder Lobby verbundene Gäste als eine.
+    const sources =
+      severeReporters === 0
+        ? ""
+        : `, schwere Gründe aus ${severeSources} unabhängigen Quelle${severeSources === 1 ? "" : "n"}`;
     hints.push(
       `${item.reports.open} offene Meldung${item.reports.open === 1 ? "" : "en"} von ${item.reports.reporters} ` +
-        `${item.reports.reporters === 1 ? "Gast" : "Gästen"}: ${reasonSummary(item.reports.byReason)} ` +
+        `${item.reports.reporters === 1 ? "Gast" : "Gästen"}${sources}: ${reasonSummary(item.reports.byReason)} ` +
         `(${day(item.reports.firstAt)} bis ${day(item.reports.lastAt)})`,
     );
   }
@@ -251,7 +257,11 @@ export function queueToJson(queue: ReviewQueue, context: QueueContext) {
           windowDays: AUTO_RETIRE_REPORTS.windowMs / (24 * 60 * 60 * 1_000),
           reasons: [...AUTO_RETIRE_REPORTS.reasons],
         },
-        rating: { minRatings: AUTO_RETIRE_RATING.minRatings, belowPercent: AUTO_RETIRE_RATING.belowPercent },
+        rating: {
+          minRatings: AUTO_RETIRE_RATING.minRatings,
+          belowPercent: AUTO_RETIRE_RATING.belowPercent,
+          minDislikeSources: AUTO_RETIRE_RATING.minDislikeSources,
+        },
         budget: {
           windowHours: AUTO_RETIRE_BUDGET.windowMs / 3_600_000,
           perCategory: AUTO_RETIRE_BUDGET.perCategory,
@@ -282,6 +292,7 @@ export function queueToJson(queue: ReviewQueue, context: QueueContext) {
               open: item.reports.open,
               reporters: item.reports.reporters,
               severeReporters: item.reports.severeReporters,
+              severeSources: item.reports.severeSources,
               byReason: item.reports.byReason,
               firstAt: item.reports.firstAt.toISOString(),
               lastAt: item.reports.lastAt.toISOString(),

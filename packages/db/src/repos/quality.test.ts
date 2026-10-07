@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { RatingValue } from "@quizmaster/shared";
-import type { CategoryDoc, QuestionReportDoc } from "@quizmaster/shared/documents";
+import { type CategoryDoc, type QuestionReportDoc, questionRatingId, RETENTION } from "@quizmaster/shared/documents";
 import type { Document } from "mongodb";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sampleQuestion } from "../test-support.ts";
@@ -20,6 +20,7 @@ import {
   calibrateQuestion,
   createRepositories,
   difficultyForHitRate,
+  hasIndependentDislikes,
   hitRate,
   isRatingRetireDue,
   isReportRetireDue,
@@ -38,6 +39,10 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 // und der TTL-Monitor löschte sie mitten im Test.
 const now = new Date();
 const PRIMARY = { readPreference: "primary" } as const;
+/** Herkunft einer Bewertung, wo sie keine Rolle spielt (ADR-058). */
+const ORIGIN = { ipKey: null, lobbyCode: null } as const;
+/** Gültiger HMAC-IP-Schlüssel für Tests (32 Hex-Zeichen). */
+const ipKeyOf = (n: number) => n.toString(16).padStart(32, "0");
 
 beforeAll(async () => {
   t = await createTestDatabase({ ensureIndexes: true });
@@ -140,7 +145,9 @@ describe("Schwellen und Regeln (docs/08 §5)", () => {
   });
 
   it("Bewertungen: Quote < 30 % bei ≥ 20 Bewertungen (Grenzen exakt)", () => {
-    expect(AUTO_RETIRE_RATING).toEqual({ minRatings: 20, belowPercent: 30 });
+    expect(AUTO_RETIRE_RATING).toEqual({ minRatings: 20, belowPercent: 30, minDislikeSources: 3 });
+    expect(hasIndependentDislikes(2)).toBe(false); // ADR-058
+    expect(hasIndependentDislikes(3)).toBe(true);
     expect(isRatingRetireDue({ likes: 5, dislikes: 14 })).toBe(false); // 19 Bewertungen
     expect(isRatingRetireDue({ likes: 5, dislikes: 15 })).toBe(true); // 25 %
     expect(isRatingRetireDue({ likes: 6, dislikes: 14 })).toBe(false); // genau 30 %
@@ -214,14 +221,14 @@ describe("ratings.rate – atomar (Transaktion)", () => {
 
   it("Übergänge null → 1 → −1 → −1 und Stand der Frage aus derselben Transaktion", async () => {
     const guest = randomUUID();
-    const first = await repos.ratings.rate("co-rate0001", guest, 1, now);
+    const first = await repos.ratings.rate("co-rate0001", guest, 1, now, ORIGIN);
     expect(first).toMatchObject({ previous: null, current: 1, delta: { likes: 1, dislikes: 0 } });
     expect(first.question).toMatchObject({ _id: "co-rate0001", category: "comics", status: "unverified" });
     expect(first.question?.stats).toMatchObject({ likes: 1, dislikes: 0 });
-    const flipped = await repos.ratings.rate("co-rate0001", guest, -1, now);
+    const flipped = await repos.ratings.rate("co-rate0001", guest, -1, now, ORIGIN);
     expect(flipped).toMatchObject({ previous: 1, current: -1, delta: { likes: -1, dislikes: 1 } });
     expect(flipped.question?.stats).toMatchObject({ likes: 0, dislikes: 1 });
-    const same = await repos.ratings.rate("co-rate0001", guest, -1, now);
+    const same = await repos.ratings.rate("co-rate0001", guest, -1, now, ORIGIN);
     expect(same).toMatchObject({ previous: -1, delta: { likes: 0, dislikes: 0 } });
     expect(same.question?.stats).toMatchObject({ likes: 0, dislikes: 1 });
     expect(await t.collections.questionRatings.countDocuments({ questionId: "co-rate0001" })).toBe(1);
@@ -234,8 +241,8 @@ describe("ratings.rate – atomar (Transaktion)", () => {
       // Je Runde jede Person zweimal gleichzeitig mit entgegengesetzten Werten (Doppelklick in zwei Tabs).
       const results = await Promise.allSettled(
         guests.flatMap((guest, index) => [
-          repos.ratings.rate("co-rate0002", guest, values[(index + round) % 2] ?? 1, now),
-          repos.ratings.rate("co-rate0002", guest, values[(index + round + 1) % 2] ?? -1, now),
+          repos.ratings.rate("co-rate0002", guest, values[(index + round) % 2] ?? 1, now, ORIGIN),
+          repos.ratings.rate("co-rate0002", guest, values[(index + round + 1) % 2] ?? -1, now, ORIGIN),
         ]),
       );
       const failures = results.filter((result) => result.status === "rejected");
@@ -249,21 +256,91 @@ describe("ratings.rate – atomar (Transaktion)", () => {
 
   it("ein älterer Zählerfehler (likes = 0 trotz Like) blockiert keine Änderung (Untergrenze 0)", async () => {
     const guest = randomUUID();
-    await repos.ratings.rate("co-rate0003", guest, 1, now);
+    await repos.ratings.rate("co-rate0003", guest, 1, now, ORIGIN);
     await t.collections.questions.updateOne({ _id: "co-rate0003" }, { $set: { "stats.likes": 0 } });
-    const change = await repos.ratings.rate("co-rate0003", guest, -1, now);
+    const change = await repos.ratings.rate("co-rate0003", guest, -1, now, ORIGIN);
     expect(change.question?.stats).toMatchObject({ likes: 0, dislikes: 1 });
   });
 
+  it("speichert die Herkunft und zählt unabhängige Quellen der Daumen-runter seit `since` (ADR-058)", async () => {
+    await t.collections.questions.insertOne(sampleQuestion("co-rate0005"));
+    const since = new Date(now.getTime() - DAY_MS);
+    // Drei Daumen-runter aus einer Lobby (eigene IPs), einer aus einer zweiten Lobby mit anderer IP.
+    for (const n of [51, 52, 53]) {
+      await repos.ratings.rate("co-rate0005", randomUUID(), -1, now, { ipKey: ipKeyOf(n), lobbyCode: "UVW234" });
+    }
+    await repos.ratings.rate("co-rate0005", randomUUID(), -1, now, { ipKey: ipKeyOf(54), lobbyCode: "HJK234" });
+    expect(await repos.ratings.dislikeSources("co-rate0005", since)).toBe(2);
+    // Daumen hoch und Abgaben vor `since` zählen nicht.
+    await repos.ratings.rate("co-rate0005", randomUUID(), 1, now, { ipKey: ipKeyOf(55), lobbyCode: "DEF234" });
+    const old = new Date(now.getTime() - 2 * DAY_MS);
+    await repos.ratings.rate("co-rate0005", randomUUID(), -1, old, { ipKey: ipKeyOf(56), lobbyCode: "GHJ234" });
+    expect(await repos.ratings.dislikeSources("co-rate0005", since)).toBe(2);
+    await repos.ratings.rate("co-rate0005", randomUUID(), -1, now, { ipKey: ipKeyOf(57), lobbyCode: "RST234" });
+    expect(await repos.ratings.dislikeSources("co-rate0005", since)).toBe(3);
+    // Eine neue Abgabe ersetzt die Herkunft der vorigen.
+    const guest = randomUUID();
+    await repos.ratings.rate("co-rate0005", guest, 1, now, { ipKey: ipKeyOf(58), lobbyCode: "XYZ234" });
+    await repos.ratings.rate("co-rate0005", guest, -1, now, { ipKey: ipKeyOf(59), lobbyCode: null });
+    expect(await t.collections.questionRatings.findOne({ _id: questionRatingId("co-rate0005", guest) })).toMatchObject({
+      value: -1,
+      ipKey: ipKeyOf(59),
+      lobbyCode: null,
+    });
+    // Nur der HMAC-Schlüssel, nie eine IP (docs/06).
+    await expect(
+      repos.ratings.rate("co-rate0005", guest, 1, now, { ipKey: "203.0.113.7", lobbyCode: null }),
+    ).rejects.toThrow();
+  });
+
+  it("forgetOrigins entfernt den IP-Schlüssel älterer Meldungen und Bewertungen, die Dokumente bleiben (ADR-058)", async () => {
+    await t.collections.questions.insertOne(sampleQuestion("co-rate0007"));
+    const before = new Date(now.getTime() - RETENTION.feedbackOriginMs);
+    const old = new Date(before.getTime() - DAY_MS);
+    const [oldGuest, newGuest] = [randomUUID(), randomUUID()];
+    await repos.ratings.rate("co-rate0007", oldGuest, -1, old, { ipKey: ipKeyOf(71), lobbyCode: "XYZ234" });
+    await repos.ratings.rate("co-rate0007", newGuest, -1, now, { ipKey: ipKeyOf(72), lobbyCode: "XYZ234" });
+    await t.collections.questionReports.insertMany([
+      report("co-rate0007", { _id: "origin-old", createdAt: old, ipKey: ipKeyOf(73) }),
+      report("co-rate0007", { _id: "origin-new", createdAt: now, ipKey: ipKeyOf(74) }),
+    ]);
+    expect(await repos.reports.forgetOrigins(before)).toBe(1);
+    expect(await repos.ratings.forgetOrigins(before)).toBe(1);
+    expect(await t.collections.questionReports.findOne({ _id: "origin-old" })).not.toHaveProperty("ipKey");
+    expect(await t.collections.questionReports.findOne({ _id: "origin-new" })).toMatchObject({ ipKey: ipKeyOf(74) });
+    const oldRating = await t.collections.questionRatings.findOne({ _id: questionRatingId("co-rate0007", oldGuest) });
+    expect(oldRating).toMatchObject({ value: -1, lobbyCode: "XYZ234" });
+    expect(oldRating).not.toHaveProperty("ipKey");
+    expect(
+      await t.collections.questionRatings.findOne({ _id: questionRatingId("co-rate0007", newGuest) }),
+    ).toMatchObject({ ipKey: ipKeyOf(72) });
+    // Idempotent: ein zweiter Lauf findet nichts mehr.
+    expect(await repos.reports.forgetOrigins(before)).toBe(0);
+    expect(await repos.ratings.forgetOrigins(before)).toBe(0);
+  });
+
+  it("ältere Daumen-runter ohne Herkunft hängen zusammen – fail closed (ADR-058)", async () => {
+    await t.collections.questionRatings.insertMany(
+      [randomUUID(), randomUUID(), randomUUID()].map((guest) => ({
+        _id: questionRatingId("co-rate0006", guest),
+        questionId: "co-rate0006",
+        value: -1 as const,
+        updatedAt: now,
+        expiresAt: new Date(now.getTime() + 365 * DAY_MS),
+      })),
+    );
+    expect(await repos.ratings.dislikeSources("co-rate0006", new Date(now.getTime() - DAY_MS))).toBe(1);
+  });
+
   it("Bewertung ohne Frage in der DB: gespeichert, Stand null", async () => {
-    const change = await repos.ratings.rate("co-missing9", randomUUID(), 1, now);
+    const change = await repos.ratings.rate("co-missing9", randomUUID(), 1, now, ORIGIN);
     expect(change).toMatchObject({ previous: null, current: 1, question: null });
   });
 
   it("summary seit einem Zeitpunkt, summaries je Frage, countsByQuestion ab Mindestzahl", async () => {
     const before = new Date(now.getTime() - 10 * DAY_MS);
-    for (let index = 0; index < 4; index++) await repos.ratings.rate("co-rate0004", randomUUID(), -1, before);
-    await repos.ratings.rate("co-rate0004", randomUUID(), 1, now);
+    for (let index = 0; index < 4; index++) await repos.ratings.rate("co-rate0004", randomUUID(), -1, before, ORIGIN);
+    await repos.ratings.rate("co-rate0004", randomUUID(), 1, now, ORIGIN);
     expect(await repos.ratings.summary("co-rate0004")).toEqual({ likes: 1, dislikes: 4 });
     expect(await repos.ratings.summary("co-rate0004", new Date(now.getTime() - DAY_MS))).toEqual({
       likes: 1,
@@ -299,24 +376,59 @@ describe("questionReports – Schutzautomatik-Zählung und Prüf-Queue", () => {
 
   it("zählt nur offene Meldungen der Gründe, verschiedene Gäste, im Fenster", async () => {
     const [a, b, c, d] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+    // Jede Person mit eigener IP und Lobby – unabhängig (ADR-058); hier geht es um Gründe, Status und Fenster.
+    const from = (n: number, lobbyCode: string) => ({ ipKey: ipKeyOf(n), lobbyCode });
     await t.collections.questionReports.insertMany([
-      report("co-rep00001", { guestId: a, reason: "falsch" }),
-      report("co-rep00001", { guestId: a, reason: "veraltet" }), // gleiche Person zählt einmal
-      report("co-rep00001", { guestId: b, reason: "tippfehler" }), // Grund zählt nicht
-      report("co-rep00001", { guestId: c, reason: "mehrdeutig", status: "dismissed" }), // verworfen
-      report("co-rep00001", { guestId: d, reason: "falsch", createdAt: new Date(now.getTime() - 8 * DAY_MS) }), // alt
+      report("co-rep00001", { guestId: a, reason: "falsch", ...from(1, "ABC234") }),
+      report("co-rep00001", { guestId: a, reason: "veraltet", ...from(1, "ABC234") }), // gleiche Person zählt einmal
+      report("co-rep00001", { guestId: b, reason: "tippfehler", ...from(2, "QWE234") }), // Grund zählt nicht
+      report("co-rep00001", { guestId: c, reason: "mehrdeutig", status: "dismissed", ...from(3, "XYZ234") }),
+      report("co-rep00001", {
+        guestId: d,
+        reason: "falsch",
+        createdAt: new Date(now.getTime() - 8 * DAY_MS), // alt
+        ...from(4, "MNP234"),
+      }),
     ]);
     const since = reportWindowStart(now, null);
-    expect(await repos.reports.countDistinctReporters("co-rep00001", since)).toBe(1);
-    expect(await repos.reports.countDistinctReporters("co-rep00001", since, ["falsch", "tippfehler"])).toBe(2);
-    expect(await repos.reports.countDistinctReporters("co-rep00001", new Date(now.getTime() - 9 * DAY_MS))).toBe(2);
+    expect(await repos.reports.countIndependentReporters("co-rep00001", since)).toBe(1);
+    expect(await repos.reports.countIndependentReporters("co-rep00001", since, ["falsch", "tippfehler"])).toBe(2);
+    expect(await repos.reports.countIndependentReporters("co-rep00001", new Date(now.getTime() - 9 * DAY_MS))).toBe(2);
+  });
+
+  it("unabhängige Quellen: gleiche Lobby oder gleiche IP verbindet, Meldungen ohne IP hängen zusammen (ADR-058)", async () => {
+    await t.collections.questions.insertMany(
+      ["co-rep00004", "co-rep00005", "co-rep00006", "co-rep00007"].map((id) => sampleQuestion(id)),
+    );
+    const since = reportWindowStart(now, null);
+    const lobbies = ["XYZ234", "MNP234", "RST234"];
+    await t.collections.questionReports.insertMany([
+      // Drei Mitspielende einer Lobby mit eigenen IPs.
+      ...[11, 12, 13].map((n) => report("co-rep00004", { ipKey: ipKeyOf(n), lobbyCode: "UVW234" })),
+      // Drei Sessions hinter einer IP in drei Lobbys.
+      ...lobbies.map((lobbyCode) => report("co-rep00005", { ipKey: ipKeyOf(20), lobbyCode })),
+      // Drei wirklich unabhängige Personen.
+      ...lobbies.map((lobbyCode, index) => report("co-rep00006", { ipKey: ipKeyOf(30 + index), lobbyCode })),
+      // Ältere Meldungen ohne IP-Schlüssel (vor ADR-058) aus drei Lobbys.
+      ...lobbies.map((lobbyCode) => report("co-rep00007", { lobbyCode })),
+    ]);
+    expect(await repos.reports.countIndependentReporters("co-rep00004", since)).toBe(1);
+    expect(await repos.reports.countDistinctReporters("co-rep00004", since)).toBe(3); // drei Gäste, eine Quelle
+    expect(await repos.reports.countIndependentReporters("co-rep00005", since)).toBe(1);
+    expect(await repos.reports.countIndependentReporters("co-rep00006", since)).toBe(3);
+    expect(await repos.reports.countIndependentReporters("co-rep00007", since)).toBe(1);
   });
 
   it("gruppiert offene Meldungen je Frage – Gründe, Anzahl, Zeitraum, ohne guestIds", async () => {
     const guests = [randomUUID(), randomUUID()];
     await t.collections.questionReports.insertMany([
-      report("co-rep00002", { guestId: guests[0], reason: "falsch", createdAt: new Date(now.getTime() - DAY_MS) }),
-      report("co-rep00002", { guestId: guests[1], reason: "unpassend", createdAt: now }),
+      report("co-rep00002", {
+        guestId: guests[0],
+        reason: "falsch",
+        createdAt: new Date(now.getTime() - DAY_MS),
+        ipKey: ipKeyOf(41),
+      }),
+      report("co-rep00002", { guestId: guests[1], reason: "unpassend", createdAt: now, ipKey: ipKeyOf(42) }),
       report("co-rep00002", { guestId: guests[1], reason: "falsch", status: "resolved" }),
     ]);
     const { groups, truncated } = await repos.reports.summarizeOpen({ ...PRIMARY });
@@ -326,6 +438,7 @@ describe("questionReports – Schutzautomatik-Zählung und Prüf-Queue", () => {
       open: 2,
       reporters: 2,
       severeReporters: 1,
+      severeSources: 1,
       byReason: { falsch: 1, unpassend: 1 },
       firstAt: new Date(now.getTime() - DAY_MS),
       lastAt: now,
@@ -335,6 +448,7 @@ describe("questionReports – Schutzautomatik-Zählung und Prüf-Queue", () => {
     for (const guest of guests) expect(serialized).not.toContain(guest);
     expect(serialized).not.toContain("guestId");
     expect(serialized).not.toContain("ABC234");
+    expect(serialized).not.toContain(ipKeyOf(41));
   });
 
   it("resolveOpen: einzelne Meldung oder alle offenen einer Frage", async () => {
@@ -584,10 +698,10 @@ describe("Prüf-Queue (buildReviewQueue)", () => {
     ]);
     // 12 Bewertungen seit der letzten Änderung, 3 × hoch (25 %), dazu 10 ältere Daumen hoch (zählen nicht).
     for (let index = 0; index < 12; index++) {
-      await repos.ratings.rate("mh-queue003", randomUUID(), index < 3 ? 1 : -1, now);
+      await repos.ratings.rate("mh-queue003", randomUUID(), index < 3 ? 1 : -1, now, ORIGIN);
     }
     for (let index = 0; index < 10; index++) {
-      await repos.ratings.rate("mh-queue003", randomUUID(), 1, new Date(now.getTime() - 6 * DAY_MS));
+      await repos.ratings.rate("mh-queue003", randomUUID(), 1, new Date(now.getTime() - 6 * DAY_MS), ORIGIN);
     }
   });
 

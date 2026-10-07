@@ -124,12 +124,18 @@ describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
     const reasons = ["falsch", "veraltet", "tippfehler"] as const;
     for (const [index, reason] of reasons.entries()) {
       await repos.reports.create(
-        { questionId: reported._id, reason, guestId: guests[index] ?? randomUUID(), lobbyCode: "QWE234" },
+        { questionId: reported._id, reason, guestId: guests[index] ?? randomUUID(), lobbyCode: "QWE234", ipKey: null },
         new Date(now.getTime() - (2 - index) * DAY_MS),
       );
     }
     await repos.reports.create(
-      { questionId: retired._id, reason: "mehrdeutig", guestId: guests[3] ?? randomUUID(), lobbyCode: "QWE234" },
+      {
+        questionId: retired._id,
+        reason: "mehrdeutig",
+        guestId: guests[3] ?? randomUUID(),
+        lobbyCode: "QWE234",
+        ipKey: null,
+      },
       now,
     );
     expect(await repos.questions.autoRetire(retired._id, "reports", now)).toBe(true);
@@ -140,7 +146,7 @@ describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
     expect(json).toMatchObject({ schemaVersion: 1, kind: "quizmaster-review-queue", env: "dev" });
     expect(json.thresholds.autoRetire).toEqual({
       reports: { minReporters: 3, windowDays: 7, reasons: ["falsch", "veraltet", "mehrdeutig"] },
-      rating: { minRatings: 20, belowPercent: 30 },
+      rating: { minRatings: 20, belowPercent: 30, minDislikeSources: 3 },
       budget: { windowHours: 24, perCategory: 5, total: 20 },
     });
     const ids = json.items.map((item) => item.questionId);
@@ -150,7 +156,14 @@ describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
       file: `questions/musik-hits/${reported.topic}.json`,
       flags: ["reports"],
       tier: 0,
-      reports: { open: 3, reporters: 3, severeReporters: 2, byReason: { falsch: 1, veraltet: 1, tippfehler: 1 } },
+      reports: {
+        open: 3,
+        reporters: 3,
+        severeReporters: 2,
+        // Alle aus derselben Lobby: eine unabhängige Quelle (ADR-058).
+        severeSources: 1,
+        byReason: { falsch: 1, veraltet: 1, tippfehler: 1 },
+      },
     });
     expect(first?.reports?.reportIds).toHaveLength(3);
     expect(first?.hints.join(" ")).toContain("falsch 1, veraltet 1, tippfehler 1");
@@ -161,7 +174,7 @@ describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
     const text = formatQueueText(queue, context).join("\n");
     expect(text).toContain(`${reported._id} · musik-hits/${reported.topic} · unverified · [MELDUNGEN]`);
     expect(text).toContain(`[ZURÜCKGEZOGEN · MELDUNGEN]`);
-    expect(text).toContain("3 offene Meldungen von 3 Gästen");
+    expect(text).toContain("3 offene Meldungen von 3 Gästen, schwere Gründe aus 1 unabhängigen Quelle");
     expect(text).toContain(`Datei: content/questions/musik-hits/${reported.topic}.json`);
     // Weder guestIds noch Lobby-Codes verlassen die Datenbank.
     const serialized = `${JSON.stringify(json)}\n${text}`;
@@ -197,7 +210,7 @@ describe("Aktionen", () => {
     for (let index = 0; index < 3; index++) {
       created.push(
         await repos.reports.create(
-          { questionId: question._id, reason: "falsch", guestId: randomUUID(), lobbyCode: null },
+          { questionId: question._id, reason: "falsch", guestId: randomUUID(), lobbyCode: null, ipKey: null },
           now,
         ),
       );
@@ -223,7 +236,7 @@ describe("Aktionen", () => {
     if (question === undefined) throw new Error("Fixtures fehlen");
     const countsBefore = await repos.questions.countPlayable("glaube-religion");
     await repos.reports.create(
-      { questionId: question._id, reason: "falsch", guestId: randomUUID(), lobbyCode: null },
+      { questionId: question._id, reason: "falsch", guestId: randomUUID(), lobbyCode: null, ipKey: null },
       now,
     );
     expect(await repos.questions.autoRetire(question._id, "reports", now)).toBe(true);

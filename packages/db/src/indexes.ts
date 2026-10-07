@@ -55,6 +55,20 @@ export const INDEX_DEFINITIONS: readonly IndexDefinition[] = [
   { collection: "questionReports", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
   { collection: "questionRatings", name: "questionId", key: { questionId: 1 } },
   { collection: "questionRatings", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
+  // Herkunft nach 30 Tagen entfernen (ADR-058): Die partiellen Indizes enthalten nur Dokumente, die noch einen
+  // IP-Schlüssel tragen – das stündliche Aufräumen liest so nie die ganze Collection.
+  {
+    collection: "questionReports",
+    name: "createdAt_origin",
+    key: { createdAt: 1 },
+    options: { partialFilterExpression: { ipKey: { $type: "string" } } },
+  },
+  {
+    collection: "questionRatings",
+    name: "updatedAt_origin",
+    key: { updatedAt: 1 },
+    options: { partialFilterExpression: { ipKey: { $type: "string" } } },
+  },
   { collection: "bans", name: "kind_value_unique", key: { kind: 1, value: 1 }, options: { unique: true } },
   { collection: "bans", name: "expiresAt_ttl", key: { expiresAt: 1 }, options: TTL },
   // rateLimits (Mongo-Store von rate-limiter-flexible, docs/06): genau die Definitionen der Bibliothek

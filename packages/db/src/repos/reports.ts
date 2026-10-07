@@ -1,22 +1,26 @@
 /**
  * questionReports (docs/04, docs/08 §5): Meldungen aus „Fragen ansehen“ (TTL 365 Tage), Prüf-Queue
- * (Index `status + createdAt`) und Zählung für die Schutzautomatik – verschiedene Gäste je Frage in
+ * (Index `status + createdAt`) und Zählung für die Schutzautomatik – unabhängige Quellen je Frage in
  * einem Zeitfenster (Index `questionId + createdAt`).
  *
- * Schutzautomatik: mindestens 3 OFFENE Meldungen „falsch/veraltet/mehrdeutig“ von verschiedenen Gästen in 7 Tagen.
+ * Schutzautomatik: OFFENE Meldungen „falsch/veraltet/mehrdeutig“ aus mindestens 3 unabhängigen Quellen in 7 Tagen
+ * (ADR-058, `./independence.ts`: über dieselbe IP oder dieselbe Lobby verbundene Gäste zählen als EINE Quelle –
+ * jede Meldung speichert dafür den HMAC-IP-Schlüssel und den Lobby-Code).
  * Das Fenster beginnt frühestens bei der letzten Inhalts-/Statusänderung der Frage (`reportWindowStart`), und
  * erledigte (`resolved`) oder verworfene (`dismissed`) Meldungen zählen nicht – sonst zöge die nächste Meldung
  * eine geprüfte Frage sofort wieder zurück.
  *
  * Prüf-Queue (`buildReviewQueue`, Grundlage von `pnpm admin:reports` und `/faktencheck`): offene Meldungen je
  * Frage, automatisch zurückgezogene Fragen, schlecht bewertete Fragen und Fragen mit Trefferquote < 10 %. Die
- * guestIds verlassen die Datenbank dabei nie – gezählt wird serverseitig (`$addToSet` + `$size`).
+ * guestIds verlassen die Datenbank dabei nie – gezählt wird serverseitig (`$addToSet` + `$size`); für die
+ * unabhängigen Quellen verlassen nur IP-Schlüssel und Lobby-Codes je Gast die Datenbank (nie ausgegeben).
  */
 import { randomUUID } from "node:crypto";
 import { lobbyCodeSchema, REPORT_REASONS, type ReportReason } from "@quizmaster/shared";
 import type { QuestionDbStatus } from "@quizmaster/shared/content";
 import {
   documentIdSchema,
+  ipKeySchema,
   ownerGuestIdSchema,
   type QuestionReportDoc,
   REPORT_STATUSES,
@@ -27,6 +31,7 @@ import type { Collection, Filter } from "mongodb";
 import { z } from "zod";
 import { HOT_PATH_TIMEOUT_MS, POOL_LOAD_TIMEOUT_MS } from "../client.ts";
 import { chunk, questionIdSchema, uniqueIds } from "./ids.ts";
+import { countIndependentSources, type FeedbackOrigin, INDEPENDENCE_SCAN_MAX } from "./independence.ts";
 import {
   type AutoRetireReason,
   CALIBRATION,
@@ -43,7 +48,7 @@ export const AUTO_RETIRE_REPORT_REASONS: readonly ReportReason[] = Object.freeze
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
-/** Schutzautomatik: ≥ 3 Meldungen der Gründe oben von verschiedenen Gästen in 7 Tagen (docs/08 §5). */
+/** Schutzautomatik: Meldungen der Gründe oben aus ≥ 3 unabhängigen Quellen in 7 Tagen (docs/08 §5, ADR-058). */
 export const AUTO_RETIRE_REPORTS = Object.freeze({
   minReporters: 3,
   windowMs: 7 * DAY_MS,
@@ -59,7 +64,7 @@ export function reportWindowStart(now: Date, baseline: Date | null): Date {
   return new Date(baseline === null ? windowStart : Math.max(windowStart, baseline.getTime()));
 }
 
-/** Schutzautomatik: genug verschiedene Gäste? */
+/** Schutzautomatik: genug unabhängige Quellen (ADR-058)? */
 export function isReportRetireDue(reporters: number): boolean {
   return reporters >= AUTO_RETIRE_REPORTS.minReporters;
 }
@@ -69,11 +74,33 @@ export const newReportSchema = z.strictObject({
   reason: z.enum(REPORT_REASONS),
   guestId: ownerGuestIdSchema,
   lobbyCode: lobbyCodeSchema.nullable(),
+  /** HMAC-IP-Schlüssel der meldenden Person (ADR-058); `null`, wenn die IP nicht bestimmbar war. */
+  ipKey: ipKeySchema.nullable(),
 });
 export type NewReport = z.output<typeof newReportSchema>;
 
 /** Schlüssel des Index `questionId_createdAt` (docs/04) – Meldungen einer Frage. */
 const QUESTION_REPORTS_INDEX = { questionId: 1, createdAt: -1 } as const;
+
+/** Offene Meldungen einer Frage mit den Gründen `reasons` seit `since` – nur aus geprüften Primitiven. */
+function openReportsMatch(
+  questionId: string,
+  since: Date,
+  reasons: readonly ReportReason[],
+): Filter<QuestionReportDoc> {
+  return {
+    questionId: questionIdSchema.parse(questionId),
+    createdAt: { $gte: z.date().parse(since) },
+    reason: { $in: z.array(z.enum(REPORT_REASONS)).parse(reasons) },
+    status: "open",
+  };
+}
+
+/** Herkunft je Gast für die unabhängigen Quellen (ADR-058); fehlende Felder (ältere Meldungen) als `null`. */
+const ORIGIN_SETS = {
+  ipKeys: { $addToSet: { $ifNull: ["$ipKey", null] } },
+  lobbyCodes: { $addToSet: { $ifNull: ["$lobbyCode", null] } },
+} as const;
 
 /** Höchstzahl je Queue-Abfrage. */
 export const REPORT_QUEUE_MAX = 200;
@@ -93,6 +120,8 @@ export interface OpenReportGroup {
   reporters: number;
   /** Verschiedene Gäste mit Gründen der Schutzautomatik (falsch, veraltet, mehrdeutig). */
   severeReporters: number;
+  /** Unabhängige Quellen unter diesen Gästen (ADR-058) – was die Schutzautomatik zählt (ohne Zeitfenster). */
+  severeSources: number;
   byReason: Partial<Record<ReportReason, number>>;
   firstAt: Date;
   lastAt: Date;
@@ -106,10 +135,17 @@ export interface ReportsRepo {
   listOpen(limit?: number): Promise<QuestionReportDoc[]>;
   setStatus(reportId: string, status: ReportStatus): Promise<boolean>;
   /**
-   * Anzahl verschiedener Gäste mit OFFENEN Meldungen der Gründe `reasons` seit `since` (Schutzautomatik;
+   * Anzahl verschiedener Gäste mit OFFENEN Meldungen der Gründe `reasons` seit `since` (Prüf-Queue, Wiederherstellung;
    * erledigte und verworfene Meldungen zählen nicht).
    */
   countDistinctReporters(questionId: string, since: Date, reasons?: readonly ReportReason[]): Promise<number>;
+  /**
+   * Unabhängige Quellen (ADR-058) unter den OFFENEN Meldungen der Gründe `reasons` seit `since` – was die
+   * Schutzautomatik zählt.
+   */
+  countIndependentReporters(questionId: string, since: Date, reasons?: readonly ReportReason[]): Promise<number>;
+  /** Entfernt den IP-Schlüssel von Meldungen vor `before` (ADR-058, nach 30 Tagen); liefert die Anzahl. */
+  forgetOrigins(before: Date): Promise<number>;
   /** Welche der Fragen hat dieser Gast bereits gemeldet? (`myReported` im Rückblick) */
   findReportedQuestionIds(guestId: string, questionIds: readonly string[]): Promise<Set<string>>;
   /** Offene Meldungen gruppiert je Frage, meiste zuerst (höchstens `limit` Fragen). */
@@ -151,18 +187,10 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
     },
 
     async countDistinctReporters(questionId, since, reasons = AUTO_RETIRE_REPORT_REASONS) {
-      const reasonList = z.array(z.enum(REPORT_REASONS)).parse(reasons);
       const [row] = await reports
         .aggregate<{ reporters: number }>(
           [
-            {
-              $match: {
-                questionId: questionIdSchema.parse(questionId),
-                createdAt: { $gte: z.date().parse(since) },
-                reason: { $in: reasonList },
-                status: "open",
-              },
-            },
+            { $match: openReportsMatch(questionId, since, reasons) },
             { $group: { _id: "$guestId" } },
             { $count: "reporters" },
           ],
@@ -171,6 +199,32 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
         )
         .toArray();
       return row?.reporters ?? 0;
+    },
+
+    async countIndependentReporters(questionId, since, reasons = AUTO_RETIRE_REPORT_REASONS) {
+      const origins = await reports
+        .aggregate<FeedbackOrigin>(
+          [
+            { $match: openReportsMatch(questionId, since, reasons) },
+            // Je Gast nur seine Herkunft – die guestIds selbst verlassen die Datenbank nicht.
+            { $group: { _id: "$guestId", ...ORIGIN_SETS } },
+            { $project: { _id: 0, ipKeys: 1, lobbyCodes: 1 } },
+            { $limit: INDEPENDENCE_SCAN_MAX },
+          ],
+          // Selektiver Index je Frage – nie `status_createdAt` (alle offenen Meldungen aller Fragen).
+          { timeoutMS: HOT_PATH_TIMEOUT_MS, hint: QUESTION_REPORTS_INDEX },
+        )
+        .toArray();
+      return countIndependentSources(origins);
+    },
+
+    async forgetOrigins(before) {
+      const result = await reports.updateMany(
+        { ipKey: { $type: "string" }, createdAt: { $lt: z.date().parse(before) } },
+        { $unset: { ipKey: "" } },
+        { hint: "createdAt_origin", timeoutMS: POOL_LOAD_TIMEOUT_MS },
+      );
+      return result.modifiedCount;
     },
 
     async findReportedQuestionIds(guestId, questionIds) {
@@ -196,35 +250,62 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
         .max(REVIEW_QUEUE_MAX)
         .parse(options.limit ?? REVIEW_QUEUE_MAX);
       const rows = await reports
-        .aggregate<Omit<OpenReportGroup, "byReason"> & { reasons: ReportReason[] }>(
+        .aggregate<
+          Omit<OpenReportGroup, "byReason" | "severeSources"> & {
+            reasons: ReportReason[];
+            severeOrigins: FeedbackOrigin[];
+          }
+        >(
           [
             { $match: { status: "open" } },
+            // Stufe 1 je Frage und Gast: Meldungen, schwere Gründe und Herkunft dieses Gasts.
             {
               $group: {
-                _id: "$questionId",
+                _id: { questionId: "$questionId", guestId: "$guestId" },
                 open: { $sum: 1 },
-                guests: { $addToSet: "$guestId" },
-                severeGuests: {
-                  $addToSet: { $cond: [{ $in: ["$reason", [...AUTO_RETIRE_REPORT_REASONS]] }, "$guestId", null] },
-                },
+                severe: { $max: { $cond: [{ $in: ["$reason", [...AUTO_RETIRE_REPORT_REASONS]] }, 1, 0] } },
+                ...ORIGIN_SETS,
                 reasons: { $push: "$reason" },
                 firstAt: { $min: "$createdAt" },
                 lastAt: { $max: "$createdAt" },
                 reportIds: { $push: "$_id" },
               },
             },
-            // guestIds nur zählen – sie verlassen den Server nie (docs/06 Invariante 4).
+            // Stufe 2 je Frage: guestIds nur zählen – sie verlassen den Server nie (docs/06 Invariante 4).
+            {
+              $group: {
+                _id: "$_id.questionId",
+                open: { $sum: "$open" },
+                reporters: { $sum: 1 },
+                severeReporters: { $sum: "$severe" },
+                origins: { $push: { severe: "$severe", ipKeys: "$ipKeys", lobbyCodes: "$lobbyCodes" } },
+                reasons: { $push: "$reasons" },
+                firstAt: { $min: "$firstAt" },
+                lastAt: { $max: "$lastAt" },
+                reportIds: { $push: "$reportIds" },
+              },
+            },
             {
               $project: {
                 _id: 0,
                 questionId: "$_id",
                 open: 1,
-                reporters: { $size: "$guests" },
-                severeReporters: { $size: { $setDifference: ["$severeGuests", [null]] } },
-                reasons: 1,
+                reporters: 1,
+                severeReporters: 1,
+                severeOrigins: {
+                  $map: {
+                    input: { $filter: { input: "$origins", cond: { $eq: ["$$this.severe", 1] } } },
+                    in: { ipKeys: "$$this.ipKeys", lobbyCodes: "$$this.lobbyCodes" },
+                  },
+                },
+                reasons: {
+                  $reduce: { input: "$reasons", initialValue: [], in: { $concatArrays: ["$$value", "$$this"] } },
+                },
                 firstAt: 1,
                 lastAt: 1,
-                reportIds: 1,
+                reportIds: {
+                  $reduce: { input: "$reportIds", initialValue: [], in: { $concatArrays: ["$$value", "$$this"] } },
+                },
               },
             },
             { $sort: { severeReporters: -1, open: -1, lastAt: -1, questionId: 1 } },
@@ -237,10 +318,12 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
           },
         )
         .toArray();
-      const groups = rows.slice(0, limit).map(({ reasons, ...group }) => {
+      const groups = rows.slice(0, limit).map(({ reasons, severeOrigins, ...group }) => {
         const byReason: Partial<Record<ReportReason, number>> = {};
         for (const reason of reasons) byReason[reason] = (byReason[reason] ?? 0) + 1;
-        return { ...group, byReason, reportIds: [...group.reportIds].sort() };
+        // Nur die Zahl verlässt das Repository – IP-Schlüssel und Lobby-Codes nicht.
+        const severeSources = countIndependentSources(severeOrigins);
+        return { ...group, severeSources, byReason, reportIds: [...group.reportIds].sort() };
       });
       return { groups, truncated: rows.length > limit };
     },

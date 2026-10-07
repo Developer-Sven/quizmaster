@@ -23,6 +23,7 @@ export * from "./finish-game.ts";
 export * from "./games.ts";
 export * from "./guests.ts";
 export * from "./ids.ts";
+export * from "./independence.ts";
 export * from "./lobbies.ts";
 export * from "./questions.ts";
 export * from "./ratings.ts";

@@ -32,6 +32,11 @@ export const RETENTION = {
   questionReportMs: 365 * DAY_MS,
   /** questionRatings: updatedAt + 365 Tage. */
   questionRatingMs: 365 * DAY_MS,
+  /**
+   * Herkunft (HMAC-IP-Schlüssel) an Meldungen und Bewertungen: 30 Tage ab `createdAt` bzw. `updatedAt`, danach entfernt
+   * sie der Realtime-Server (ADR-058, Datensparsamkeit docs/06) – die Dokumente selbst bleiben.
+   */
+  feedbackOriginMs: 30 * DAY_MS,
   /** lobbies aktiv: updatedAt + 30 min. */
   activeLobbyMs: 30 * 60 * 1_000,
   /** lobbies beendet: endedAt + 2 h. */

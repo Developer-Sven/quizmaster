@@ -10,13 +10,22 @@
  * Schutzautomatik (docs/08 §5): Bewertungsquote (Daumen hoch / alle) unter 30 % bei mindestens 20 Bewertungen
  * → Frage sofort aus dem Pool. Gezählt werden Bewertungen seit der letzten Inhalts-/Statusänderung der Frage
  * (`summary(questionId, since)`), damit eine geprüfte Frage nicht an Bewertungen ihrer alten Fassung scheitert.
+ * Zusätzlich müssen die Daumen-runter aus mindestens 3 unabhängigen Quellen stammen (ADR-058,
+ * `dislikeSources`): Jede Bewertung speichert dafür HMAC-IP-Schlüssel und Lobby-Code ihrer letzten Abgabe.
  */
-import { RATING_VALUES, type RatingValue } from "@quizmaster/shared";
-import { ownerGuestIdSchema, type QuestionRatingDoc, questionRatingId, RETENTION } from "@quizmaster/shared/documents";
+import { lobbyCodeSchema, RATING_VALUES, type RatingValue } from "@quizmaster/shared";
+import {
+  ipKeySchema,
+  ownerGuestIdSchema,
+  type QuestionRatingDoc,
+  questionRatingId,
+  RETENTION,
+} from "@quizmaster/shared/documents";
 import type { Collection, Filter } from "mongodb";
 import { z } from "zod";
 import { HOT_PATH_TIMEOUT_MS, POOL_LOAD_TIMEOUT_MS } from "../client.ts";
 import { chunk, questionIdSchema, uniqueIds } from "./ids.ts";
+import { countIndependentSources, type FeedbackOrigin, INDEPENDENCE_SCAN_MAX } from "./independence.ts";
 import {
   type QuestionQualityState,
   type QuestionsRepo,
@@ -26,8 +35,11 @@ import {
 
 const ratingValueSchema = z.literal(RATING_VALUES);
 
-/** Schutzautomatik: Quote unter 30 % bei mindestens 20 Bewertungen (docs/08 §5). */
-export const AUTO_RETIRE_RATING = Object.freeze({ minRatings: 20, belowPercent: 30 });
+/**
+ * Schutzautomatik: Quote unter 30 % bei mindestens 20 Bewertungen (docs/08 §5), Daumen-runter aus mindestens 3
+ * unabhängigen Quellen (ADR-058).
+ */
+export const AUTO_RETIRE_RATING = Object.freeze({ minRatings: 20, belowPercent: 30, minDislikeSources: 3 });
 /** Prüf-Queue „schlecht bewertet“ (admin:reports): Quote unter 50 % ab 10 Bewertungen, noch nicht zurückgezogen. */
 export const RATING_WATCH = Object.freeze({ minRatings: 10, belowPercent: 50 });
 
@@ -70,6 +82,22 @@ export function isRatingRetireDue(summary: RatingSummary): boolean {
   return isRatingBelow(summary, AUTO_RETIRE_RATING);
 }
 
+/** Schutzautomatik: Stammen die Daumen-runter aus genug unabhängigen Quellen (ADR-058)? */
+export function hasIndependentDislikes(dislikeSources: number): boolean {
+  return dislikeSources >= AUTO_RETIRE_RATING.minDislikeSources;
+}
+
+/** Herkunft einer Bewertung (ADR-058): HMAC-IP-Schlüssel und Lobby-Code; `null` = unbekannt. */
+export interface RatingOrigin {
+  ipKey: string | null;
+  lobbyCode: string | null;
+}
+
+const ratingOriginSchema = z.strictObject({
+  ipKey: ipKeySchema.nullable(),
+  lobbyCode: lobbyCodeSchema.nullable(),
+});
+
 export interface RatingChange {
   previous: RatingValue | null;
   current: RatingValue;
@@ -92,8 +120,15 @@ export interface RatedQuestion extends RatingSummary {
 }
 
 export interface RatingsRepo {
-  /** Bewertung setzen/überschreiben und die Zähler der Frage anpassen – atomar (Transaktion). */
-  rate(questionId: string, guestId: string, value: RatingValue, now: Date): Promise<RatingChange>;
+  /**
+   * Bewertung setzen/überschreiben und die Zähler der Frage anpassen – atomar (Transaktion); `origin` ersetzt die
+   * Herkunft der vorigen Abgabe.
+   */
+  rate(questionId: string, guestId: string, value: RatingValue, now: Date, origin: RatingOrigin): Promise<RatingChange>;
+  /** Unabhängige Quellen (ADR-058) unter den Daumen-runter, die seit `since` gesetzt wurden (Schutzautomatik). */
+  dislikeSources(questionId: string, since: Date): Promise<number>;
+  /** Entfernt den IP-Schlüssel von Bewertungen, die vor `before` abgegeben wurden (ADR-058); liefert die Anzahl. */
+  forgetOrigins(before: Date): Promise<number>;
   /**
    * Likes/Dislikes einer Frage aus den Bewertungen (TTL 365 Tage); mit `since` nur Bewertungen, die seitdem
    * gesetzt oder geändert wurden (Schutzautomatik: seit der letzten Änderung der Frage).
@@ -125,10 +160,11 @@ export function createRatingsRepo(ratings: Collection<QuestionRatingDoc>, questi
   });
 
   return {
-    async rate(questionId, guestId, value, now) {
+    async rate(questionId, guestId, value, now, origin) {
       const question = questionIdSchema.parse(questionId);
       const guest = ownerGuestIdSchema.parse(guestId);
       const current = ratingValueSchema.parse(value);
+      const { ipKey, lobbyCode } = ratingOriginSchema.parse(origin);
       const ratingId = questionRatingId(question, guest);
       const expiresAt = new Date(now.getTime() + RETENTION.questionRatingMs);
       // Derselbe Client wie für `questions` (beide aus `createRepositories`). `withTransaction` wiederholt den
@@ -138,7 +174,7 @@ export function createRatingsRepo(ratings: Collection<QuestionRatingDoc>, questi
           async (): Promise<RatingChange> => {
             const before = await ratings.findOneAndUpdate(
               { _id: ratingId },
-              { $set: { questionId: question, value: current, updatedAt: now, expiresAt } },
+              { $set: { questionId: question, value: current, ipKey, lobbyCode, updatedAt: now, expiresAt } },
               { upsert: true, returnDocument: "before", projection: { value: 1 }, session },
             );
             const previous = before === null ? null : before.value;
@@ -149,6 +185,42 @@ export function createRatingsRepo(ratings: Collection<QuestionRatingDoc>, questi
           { timeoutMS: RATE_TRANSACTION_TIMEOUT_MS },
         ),
       );
+    },
+
+    async dislikeSources(questionId, since) {
+      const origins = await ratings
+        .aggregate<FeedbackOrigin>(
+          [
+            {
+              $match: {
+                questionId: questionIdSchema.parse(questionId),
+                updatedAt: { $gte: z.date().parse(since) },
+                value: -1,
+              },
+            },
+            // Eine Bewertung je Gast (`_id = questionId:guestId`) – nur ihre Herkunft verlässt die Datenbank.
+            {
+              $project: {
+                _id: 0,
+                ipKeys: [{ $ifNull: ["$ipKey", null] }],
+                lobbyCodes: [{ $ifNull: ["$lobbyCode", null] }],
+              },
+            },
+            { $limit: INDEPENDENCE_SCAN_MAX },
+          ],
+          { timeoutMS: HOT_PATH_TIMEOUT_MS },
+        )
+        .toArray();
+      return countIndependentSources(origins);
+    },
+
+    async forgetOrigins(before) {
+      const result = await ratings.updateMany(
+        { ipKey: { $type: "string" }, updatedAt: { $lt: z.date().parse(before) } },
+        { $unset: { ipKey: "" } },
+        { hint: "updatedAt_origin", timeoutMS: POOL_LOAD_TIMEOUT_MS },
+      );
+      return result.modifiedCount;
     },
 
     async summary(questionId, since) {

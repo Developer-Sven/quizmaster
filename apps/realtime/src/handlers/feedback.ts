@@ -44,7 +44,8 @@ export function registerFeedbackHandlers(registerEvent: RegisterEvent, runtime: 
     if (shown === null || !mayGiveFeedback(state, player.playerId)) {
       throw new ProtocolError("INVALID_OPTION", "Frage wurde in diesem Spiel nicht gezeigt");
     }
-    await rt.feedback.rate(shown.questionId, ctx.guestId, payload.value);
+    // Herkunft für die Schutzautomatik (ADR-058): nur der HMAC-IP-Schlüssel und der Lobby-Code.
+    await rt.feedback.rate(shown.questionId, ctx.guestId, payload.value, { ipKey: ctx.ipKey, lobbyCode: state.code });
     return null;
   });
 
@@ -62,6 +63,7 @@ export function registerFeedbackHandlers(registerEvent: RegisterEvent, runtime: 
       guestId: ctx.guestId,
       reason: payload.reason,
       lobbyCode: state.code,
+      ipKey: ctx.ipKey,
     });
     ctx.log.info({ result, reason: payload.reason }, "Frage gemeldet");
     return null;

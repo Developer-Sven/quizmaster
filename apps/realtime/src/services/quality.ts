@@ -2,8 +2,12 @@
  * Fragenqualität im Betrieb (docs/08 §5): Schutzautomatik und Live-Zähler der Kategorien.
  *
  * Schutzautomatik – geprüft nach JEDER Meldung bzw. Bewertung:
- * - ≥ 3 offene Meldungen „falsch/veraltet/mehrdeutig“ von verschiedenen Gästen in 7 Tagen, ODER
- * - Bewertungsquote (Daumen hoch / alle) < 30 % bei ≥ 20 Bewertungen
+ * - offene Meldungen „falsch/veraltet/mehrdeutig“ aus ≥ 3 unabhängigen Quellen in 7 Tagen, ODER
+ * - Bewertungsquote (Daumen hoch / alle) < 30 % bei ≥ 20 Bewertungen, die Daumen-runter aus ≥ 3 unabhängigen
+ *   Quellen
+ * Unabhängig (ADR-058): Über dieselbe IP (HMAC-Schlüssel) oder dieselbe Lobby verbundene Gäste zählen als EINE
+ * Quelle – Gast-Sessions kosten nichts, eine Person oder eine Gruppe in einer Lobby zieht so keine Frage allein
+ * zurück (die Meldungen stehen trotzdem in der Prüf-Queue).
  * → Frage sofort aus dem Pool: DB-Status `retired` + `autoRetired { reason, at }`. Der bestehende
  * questions-Watcher (`src/watchers/catalog.ts`) entfernt sie live aus dem Pool; in der Prüf-Queue
  * (`pnpm admin:reports`) steht sie, bis sie geprüft ist (Seed nach Korrektur oder `--restore`).
@@ -14,8 +18,8 @@
  * Prüfungen ziehen sie genau einmal zurück; nur dieser Übergang wird geloggt und gezählt
  * (`qm_questions_auto_retired_total{reason}`).
  *
- * Missbrauchsbremse (`AUTO_RETIRE_BUDGET`): Gast-Sessions kosten nichts – ohne Obergrenze könnten wenige Sessions in
- * einer Lobby jede gezeigte Frage melden und Kategorien unter die Mindestmenge drücken. Höchstens 5 automatische
+ * Missbrauchsbremse (`AUTO_RETIRE_BUDGET`): zusätzlich zur Unabhängigkeit – ohne Obergrenze könnten wenige
+ * unabhängige Quellen jede gezeigte Frage melden und Kategorien unter die Mindestmenge drücken. Höchstens 5 automatische
  * Rückzüge je Kategorie und 20 insgesamt in 24 h; darüber bleibt die fällige Frage im Pool (Meldungen bzw.
  * Bewertungen bleiben in der Prüf-Queue, die nächste Meldung/Bewertung prüft erneut), gezählt in
  * `qm_questions_auto_retire_suppressed_total{reason}` und als Fehler geloggt (je Kategorie höchstens alle 10 min) –
@@ -36,6 +40,7 @@ import {
   AUTO_RETIRE_RATING,
   type AutoRetireReason,
   type CategoryRecount,
+  hasIndependentDislikes,
   isRatingRetireDue,
   isReportRetireDue,
   type QuestionPool,
@@ -81,10 +86,12 @@ export interface QualityCheck {
    */
   outcome: "retired" | "kept" | "skipped" | "suppressed";
   reason: AutoRetireReason | null;
-  /** Verschiedene Gäste mit zählenden Meldungen im Fenster (nur bei Meldungen). */
+  /** Unabhängige Quellen der zählenden Meldungen im Fenster (nur bei Meldungen, ADR-058). */
   reporters?: number;
   /** Bewertungen seit der letzten Änderung (nur bei Bewertungen ab 20 insgesamt). */
   ratings?: RatingSummary;
+  /** Unabhängige Quellen der Daumen-runter seit der letzten Änderung (nur wenn die Quote greift, ADR-058). */
+  dislikeSources?: number;
 }
 
 export interface QualityService {
@@ -102,6 +109,9 @@ function reasonCounter(registry: Registry, name: string, help: string): Counter<
   if (existing instanceof Counter) return existing as Counter<"reason">;
   return new Counter({ name, help, labelNames: ["reason"] as const, registers: [registry] });
 }
+
+/** Belege einer fälligen Prüfung für Log und Ergebnis. */
+type Evidence = Pick<QualityCheck, "reporters" | "ratings" | "dislikeSources">;
 
 /** Erschöpftes Budget der Missbrauchsbremse. */
 interface BudgetExhausted {
@@ -215,7 +225,7 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
     state: QuestionQualityState,
     reason: AutoRetireReason,
     exhausted: BudgetExhausted,
-    evidence: Pick<QualityCheck, "reporters" | "ratings">,
+    evidence: Evidence,
   ) => {
     suppressed.inc({ reason });
     const fields = {
@@ -226,6 +236,7 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
       windowHours: AUTO_RETIRE_BUDGET.windowMs / 3_600_000,
       ...(evidence.reporters === undefined ? {} : { reporters: evidence.reporters }),
       ...(evidence.ratings === undefined ? {} : { likes: evidence.ratings.likes, dislikes: evidence.ratings.dislikes }),
+      ...(evidence.dislikeSources === undefined ? {} : { dislikeSources: evidence.dislikeSources }),
     };
     const message =
       "Schutzautomatik: Tagesbudget erschöpft – Frage bleibt im Pool, Meldungen/Bewertungen in der Prüf-Queue " +
@@ -243,7 +254,7 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
   const retire = async (
     state: QuestionQualityState,
     reason: AutoRetireReason,
-    evidence: Pick<QualityCheck, "reporters" | "ratings">,
+    evidence: Evidence,
   ): Promise<QualityCheck> => {
     const result = await exclusive(async (): Promise<BudgetExhausted | boolean> => {
       const exhausted = await budgetExhausted(state.category);
@@ -273,6 +284,7 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
         ...(evidence.ratings === undefined
           ? {}
           : { likes: evidence.ratings.likes, dislikes: evidence.ratings.dislikes }),
+        ...(evidence.dislikeSources === undefined ? {} : { dislikeSources: evidence.dislikeSources }),
       },
       "Schutzautomatik: Frage aus dem Pool genommen (Prüf-Queue: pnpm admin:reports)",
     );
@@ -293,7 +305,7 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
         state === undefined ? await guarded("quality_check", deps.repos.questions.findQualityState(questionId)) : state;
       if (current === null || current.status === "retired") return { outcome: "skipped", reason: null };
       const since = reportWindowStart(now(), current.updatedAt);
-      const reporters = await guarded("quality_check", deps.repos.reports.countDistinctReporters(questionId, since));
+      const reporters = await guarded("quality_check", deps.repos.reports.countIndependentReporters(questionId, since));
       if (!isReportRetireDue(reporters)) return { outcome: "kept", reason: null, reporters };
       return retire(current, "reports", { reporters });
     },
@@ -306,7 +318,13 @@ export function createQualityService(deps: QualityServiceDeps): QualityService {
       if (ratingTotal(state.stats) < AUTO_RETIRE_RATING.minRatings) return { outcome: "kept", reason: null };
       const ratings = await guarded("quality_check", deps.repos.ratings.summary(questionId, state.updatedAt));
       if (!isRatingRetireDue(ratings)) return { outcome: "kept", reason: null, ratings };
-      return retire(state, "rating", { ratings });
+      // Erst wenn die Quote greift: Stammen die Daumen-runter aus genug unabhängigen Quellen (ADR-058)?
+      const dislikeSources = await guarded(
+        "quality_check",
+        deps.repos.ratings.dislikeSources(questionId, state.updatedAt),
+      );
+      if (!hasIndependentDislikes(dislikeSources)) return { outcome: "kept", reason: null, ratings, dislikeSources };
+      return retire(state, "rating", { ratings, dislikeSources });
     },
 
     recountCategory: recount,

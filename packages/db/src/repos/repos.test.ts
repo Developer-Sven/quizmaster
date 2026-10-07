@@ -9,6 +9,8 @@ import { createTestDatabase, type TestDatabase } from "../testing/index.ts";
 import { activeLobbyExpiresAt, createRepositories, playableStatuses, type Repositories, ratingDelta } from "./index.ts";
 
 let t: TestDatabase;
+/** Herkunft einer Bewertung, wo sie keine Rolle spielt (ADR-058). */
+const ORIGIN = { ipKey: null, lobbyCode: null } as const;
 let repos: Repositories;
 // Relativ zur Laufzeit: Mit einem festen Datum wären die Dokumente nach Ablauf ihrer TTL (aktive Lobby 30 min) fällig,
 // und der TTL-Monitor löschte sie mitten im Test.
@@ -237,14 +239,32 @@ describe("questions", () => {
 });
 
 describe("questionReports + questionRatings", () => {
-  it("zählt verschiedene meldende Gäste im Zeitfenster und liefert die Prüf-Queue", async () => {
+  it("zählt unabhängige Quellen im Zeitfenster, speichert die Herkunft und liefert die Prüf-Queue", async () => {
     const [a, b] = [randomUUID(), randomUUID()];
-    await repos.reports.create({ questionId: "co-pool0002", reason: "falsch", guestId: a, lobbyCode: "ABC234" }, now);
-    await repos.reports.create({ questionId: "co-pool0002", reason: "veraltet", guestId: a, lobbyCode: null }, now);
-    await repos.reports.create({ questionId: "co-pool0002", reason: "tippfehler", guestId: b, lobbyCode: null }, now);
+    const ipA = "a".repeat(32);
+    await repos.reports.create(
+      { questionId: "co-pool0002", reason: "falsch", guestId: a, lobbyCode: "ABC234", ipKey: ipA },
+      now,
+    );
+    await repos.reports.create(
+      { questionId: "co-pool0002", reason: "veraltet", guestId: a, lobbyCode: null, ipKey: null },
+      now,
+    );
+    await repos.reports.create(
+      { questionId: "co-pool0002", reason: "tippfehler", guestId: b, lobbyCode: "QWE234", ipKey: "b".repeat(32) },
+      now,
+    );
     const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000);
-    expect(await repos.reports.countDistinctReporters("co-pool0002", since)).toBe(1);
-    expect(await repos.reports.countDistinctReporters("co-pool0002", since, ["tippfehler", "falsch"])).toBe(2);
+    expect(await repos.reports.countIndependentReporters("co-pool0002", since)).toBe(1);
+    expect(await repos.reports.countIndependentReporters("co-pool0002", since, ["tippfehler", "falsch"])).toBe(2);
+    expect(await t.collections.questionReports.findOne({ guestId: a, reason: "falsch" })).toMatchObject({ ipKey: ipA });
+    // Nur der HMAC-Schlüssel, nie eine IP (Injection- und Datenschutz, docs/06).
+    await expect(
+      repos.reports.create(
+        { questionId: "co-pool0002", reason: "falsch", guestId: b, lobbyCode: null, ipKey: "203.0.113.7" },
+        now,
+      ),
+    ).rejects.toThrow();
     const open = await repos.reports.listOpen(10);
     expect(open).toHaveLength(3);
     expect(await repos.reports.setStatus(open[0]?._id ?? "", "resolved")).toBe(true);
@@ -258,9 +278,9 @@ describe("questionReports + questionRatings", () => {
     const guest = randomUUID();
     expect(ratingDelta(null, 1)).toEqual({ likes: 1, dislikes: 0 });
     expect(ratingDelta(1, -1)).toEqual({ likes: -1, dislikes: 1 });
-    expect((await repos.ratings.rate("co-pool0002", guest, 1, now)).previous).toBeNull();
-    expect((await repos.ratings.rate("co-pool0002", guest, -1, now)).previous).toBe(1);
-    await repos.ratings.rate("co-pool0002", randomUUID(), -1, now);
+    expect((await repos.ratings.rate("co-pool0002", guest, 1, now, ORIGIN)).previous).toBeNull();
+    expect((await repos.ratings.rate("co-pool0002", guest, -1, now, ORIGIN)).previous).toBe(1);
+    await repos.ratings.rate("co-pool0002", randomUUID(), -1, now, ORIGIN);
     expect(await repos.ratings.summary("co-pool0002")).toEqual({ likes: 0, dislikes: 2 });
     expect((await repos.questions.findById("co-pool0002"))?.stats).toMatchObject({ likes: 0, dislikes: 2 });
     expect((await repos.ratings.findByGuest(guest, ["co-pool0002"])).get("co-pool0002")).toBe(-1);
