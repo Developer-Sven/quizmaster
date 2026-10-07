@@ -14,6 +14,26 @@ function toOpenQuestion(sim: Simulation): void {
 }
 
 describe("Netzaussetzer: Spiel einfrieren und auftauen (ADR-057)", () => {
+  it("Antwortzeiten bleiben über das Einfrieren gleich – vorher gegebene Antworten rücken mit (Spielarchiv)", () => {
+    const sim = lobbyWith(2);
+    const [host = "", ben = ""] = sim.guests;
+    toOpenQuestion(sim);
+    sim.advance(2_000);
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    // Rückwirkend nie vor die letzte Antwort einfrieren, auch wenn das gemeldete Lebenszeichen älter ist.
+    sim.ok({ type: "FREEZE", since: sim.now - 5_000 });
+    sim.advance(60_000);
+    sim.ok({ type: "THAW" });
+    sim.advance(1_000);
+    expect(sim.answer(host, sim.correct).ok).toBe(true);
+    sim.runUntil((state) => state.phase === "reveal");
+    const outcomes = currentQuestion(sim.state.game)?.outcomes ?? [];
+    const byGuest = (guestId: string) =>
+      outcomes.find((entry) => entry.playerId === sim.state.players.find((p) => p.guestId === guestId)?.playerId);
+    expect(byGuest(ben)?.ms).toBe(2_000);
+    expect(byGuest(host)?.ms).toBe(3_000);
+  });
+
   it("die Spielzeit steht; beim Auftauen rücken Frage, Phase und Timer um die Pause nach hinten", () => {
     const sim = lobbyWith(2);
     const ben = sim.guests[1] ?? "";

@@ -33,8 +33,13 @@ function freezePhase(state: LobbyState, since: number, from: number): LobbyState
 
 export function onFreeze(state: LobbyState, command: FreezeCommand, tx: Tx): LobbyState {
   if (state.frozen !== null || state.game === null || !isRunningPhase(state.phase)) return state;
-  // Rückwirkend ab dem letzten Lebenszeichen, aber nie vor die laufende Phase (eine frühere ist schon vorbei).
-  const since = Math.min(tx.now, Math.max(state.phaseStartedAt, command.since ?? tx.now));
+  // Rückwirkend ab dem letzten Lebenszeichen, aber nie vor die laufende Phase (eine frühere ist schon vorbei) und nie
+  // vor die letzte Antwort der laufenden Frage (sie ist ein Lebenszeichen, auch wenn die Shell ein älteres meldet).
+  const lastResponseAt =
+    state.phase === "question"
+      ? Math.max(Number.NEGATIVE_INFINITY, ...(currentQuestion(state.game)?.responses ?? []).map((entry) => entry.at))
+      : Number.NEGATIVE_INFINITY;
+  const since = Math.min(tx.now, Math.max(state.phaseStartedAt, lastResponseAt, command.since ?? tx.now));
   return freezePhase(state, since, since);
 }
 
@@ -122,10 +127,12 @@ export function onThaw(state: LobbyState, tx: Tx): LobbyState {
   if (next.phaseToken !== frozen.phaseToken) return next;
   const pausedMs = Math.max(0, tx.now - frozen.since);
   if (next.phase === "question" && currentQuestion(next.game)?.startsAt != null) {
+    // Antworten von vor dem Einfrieren rücken mit: Ihre Antwortzeit ab Fragebeginn (Spielarchiv) bleibt gleich.
     next = updateCurrentQuestion(next, (question) => ({
       ...question,
       startsAt: question.startsAt === null ? null : question.startsAt + pausedMs,
       deadline: question.deadline === null ? null : question.deadline + pausedMs,
+      responses: question.responses.map((entry) => ({ ...entry, at: entry.at + pausedMs })),
     }));
   }
   next = {
