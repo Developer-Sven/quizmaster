@@ -3,7 +3,7 @@
  *
  * | Watcher | Collection | Relevante Update-Felder | Reaktion |
  * |---|---|---|---|
- * | `questions` | questions | status, category, topic, difficulty, lang | Pool-Eintrag angleichen bzw. entfernen |
+ * | `questions` | questions | status, category, topic, difficulty, lang, contentHash | Pool-Eintrag samt Inhalt angleichen bzw. entfernen |
  * | `categories` | categories | name, icon, color, playable, active, order | spielbare Kategorie angleichen bzw. entfernen |
  *
  * Beide über `watchWithResume` (Resume-Token im Speicher, Backoff, `startAfter`); Updates liefern per
@@ -19,8 +19,12 @@ import { type Logger, toDbLogger } from "../logger.ts";
 import type { RealtimeMetrics } from "../metrics.ts";
 import { relevantChangesPipeline } from "./pipeline.ts";
 
-/** Felder einer Frage, die den Pool betreffen (Statistik-Felder gehören ausdrücklich nicht dazu). */
-export const QUESTION_POOL_FIELDS = ["status", "category", "topic", "difficulty", "lang"] as const;
+/**
+ * Felder einer Frage, die den Pool betreffen (Statistik-Felder gehören ausdrücklich nicht dazu). Seit ADR-057 hält
+ * der Speicher auch den Spielinhalt: `contentHash` ändert jeder Seed mit neuem Text, neuen Antworten oder neuer
+ * Erklärung – auch wenn der Status gleich bleibt (dann steht `status` nicht in `updatedFields`).
+ */
+export const QUESTION_POOL_FIELDS = ["status", "category", "topic", "difficulty", "lang", "contentHash"] as const;
 /** Felder einer Kategorie, die das Angebot betreffen (Zähler ändern `playable`, das reicht). */
 export const CATEGORY_OFFER_FIELDS = ["name", "icon", "color", "playable", "active", "order"] as const;
 

@@ -98,6 +98,47 @@ describe("Change Streams (Test-DB)", () => {
     await eventually(() => !service.hasQuestion(id));
   });
 
+  it("Fragen: geänderter Inhalt aus einem Seed kommt an, auch wenn der Status gleich bleibt (ADR-057)", async () => {
+    const service = runtimeOf(server).questions;
+    const questions = server.db.collections.questions;
+    const template = await questions.findOne({ category: "comics", status: "unverified" });
+    if (template === null) throw new Error("Fixture-Frage fehlt");
+    const id = newQuestionId("co");
+    const now = new Date();
+    await questions.insertOne({
+      ...template,
+      _id: id,
+      stats: { shown: 0, correct: 0, likes: 0, dislikes: 0, reports: 0 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await eventually(() => service.hasQuestion(id));
+    const others = (await questions.find({ category: "comics", _id: { $ne: id } }).toArray()).map((doc) => doc._id);
+    const load = async () =>
+      (await service.loadQuestions({ categoryId: "comics", count: 1, excludeQuestionIds: others, seen: new Map() }))
+        .questions[0];
+    expect((await load())?.prompt).toBe(template.prompt);
+    // Wie `content:seed` (packages/db/src/seed/apply.ts): Inhalt, gleicher Status, neuer Hash, Version + 1.
+    await questions.updateOne(
+      { _id: id },
+      {
+        $set: {
+          prompt: "Neu formuliert?",
+          explanation: "Neu erklärt.",
+          status: template.status,
+          autoRetired: null,
+          contentHash: "f".repeat(64),
+          updatedAt: new Date(),
+        },
+        $inc: { version: 1 },
+      },
+    );
+    await eventually(async () => (await load())?.prompt === "Neu formuliert?");
+    expect((await load())?.explanation).toBe("Neu erklärt.");
+    await questions.deleteOne({ _id: id });
+    await eventually(() => !service.hasQuestion(id));
+  });
+
   it("Kategorien: playable/Anzeigedaten kommen an, reine Zähler-Updates nicht", async () => {
     const service = runtimeOf(server).questions;
     const categories = server.db.collections.categories;
