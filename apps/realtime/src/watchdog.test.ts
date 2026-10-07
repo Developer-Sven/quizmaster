@@ -351,16 +351,27 @@ describe("Alarme", () => {
     expect(hooks[1]?.content).toContain("Entwarnung: Event-Loop");
   });
 
-  it("meldet wiederholte Change-Stream-Neustarts, Mongo-Verbindungsfehler und Neustart-Schleifen", async () => {
+  it("meldet anhaltende Change-Stream-Neustarts, Mongo-Verbindungsfehler und Neustart-Schleifen", async () => {
     const dog = makeWatchdog();
     await run(dog, 30_000);
-    await run(dog, 90_000, () => {
+    // Die Störung hält an: alle 30 s ein Neustart und ein Verbindungsfehler. Die Haltezeit beginnt, sobald die
+    // Schwelle (3 im Fenster) erreicht ist.
+    const failing = () => {
       state.counters.streamRestarts += 1;
       state.counters.mongo.heartbeat = (state.counters.mongo.heartbeat ?? 0) + 1;
-    });
-    const texts = hooks.map((hook) => hook.content);
-    expect(texts.some((text) => text.includes("Change Streams wiederholt neu gestartet: 3× in 15 min"))).toBe(true);
-    expect(texts.some((text) => text.includes("MongoDB-Fehler: 3 Fehler in 5 min, davon 3 Verbindungsfehler"))).toBe(
+    };
+    await run(dog, WATCHDOG_THRESHOLDS.mongoForMs, failing);
+    expect(hooks).toEqual([]);
+    expect(dog.status("mongo")).toBe("pending");
+    await run(dog, 90_000, failing);
+    let texts = hooks.map((hook) => hook.content);
+    expect(texts.some((text) => text.includes("ALARM MongoDB-Fehler seit 6 min: 10 Fehler in 5 min, davon 10"))).toBe(
+      true,
+    );
+    expect(texts.some((text) => text.includes("Change Streams"))).toBe(false);
+    await run(dog, WATCHDOG_THRESHOLDS.changeStreamForMs - WATCHDOG_THRESHOLDS.mongoForMs, failing);
+    texts = hooks.map((hook) => hook.content);
+    expect(texts.some((text) => text.includes("ALARM Change Streams wiederholt neu gestartet seit 16 min: 30×"))).toBe(
       true,
     );
     hooks.length = 0;
@@ -368,6 +379,24 @@ describe("Alarme", () => {
       state.startTime += 40;
     });
     expect(hooks.map((hook) => hook.content).join("\n")).toContain("Realtime startet wiederholt neu: 3 Neustarts");
+  });
+
+  it("ein kurzer Netzaussetzer (ein Fehlerschub, ADR-057) meldet weder Mongo noch Change Streams – auch keine Entwarnung", async () => {
+    const dog = makeWatchdog();
+    await run(dog, 60_000);
+    // Wie im Betrieb: 2 Heartbeat-Fehler, 1 pool_cleared und je Stream ein Neustart binnen einer Minute.
+    await run(dog, 60_000, () => {
+      state.counters.streamRestarts += 4;
+      state.counters.mongo.heartbeat = (state.counters.mongo.heartbeat ?? 0) + 1;
+      state.counters.mongo.pool_cleared = 1;
+    });
+    expect(dog.status("mongo")).toBe("pending");
+    expect(dog.status("change_stream")).toBe("pending");
+    await run(dog, WATCHDOG_THRESHOLDS.changeStreamWindowMs + 60_000);
+    expect(hooks).toEqual([]);
+    expect(dog.status("mongo")).toBe("ok");
+    expect(dog.status("change_stream")).toBe("ok");
+    expect(logLines.join("\n")).toContain("Störung vorbei – kein Alarm nötig");
   });
 
   it("meldet viele Rückzüge der Schutzautomatik in 15 min und jedes Zurückhalten durch das Tagesbudget", async () => {

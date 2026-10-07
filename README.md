@@ -464,8 +464,10 @@ pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle
 - **Watchdog** (`quizmaster-watchdog`, `dist/watchdog.mjs`, pm2): prüft alle 30 s `/api/health`, `/healthz` und
   `/metrics` (Bearer `METRICS_TOKEN`) über Loopback. Alarme: Health down > 2 min · Event-Loop p99 > 200 ms für 5 min ·
   Fehlerrate (`INTERNAL`-Acks) > 1 % in 5 min (ab 200 Events) · ≥ 200 Limit-Treffer in 5 min · ≥ 3 Change-Stream-
-  Neustarts in 15 min · ≥ 3 Mongo-Verbindungsfehler (oder ≥ 10 sonstige) in 5 min · ≥ 3 Realtime-Neustarts in 15 min ·
-  `/metrics` 5 min nicht lesbar. Höchstens ein Alarm je Regel in 15 min, Erinnerung stündlich, Entwarnung bei Erholung.
+  Neustarts in 15 min, länger als 16 min · ≥ 3 Mongo-Verbindungsfehler (oder ≥ 10 sonstige) in 5 min, länger als
+  6 min · ≥ 3 Realtime-Neustarts in 15 min · `/metrics` 5 min nicht lesbar. Mongo und Change Streams melden erst eine
+  Störung, die über ihr Fenster hinaus anhält – der Fehlerschub eines kurzen Netzaussetzers (ADR-057) ist kein Alarm.
+  Höchstens ein Alarm je Regel in 15 min, Erinnerung stündlich, Entwarnung bei Erholung.
   Nutzlast wie `ops:alert-test` (`{content, text}`, `@everyone` entschärft); ohne `ALERT_WEBHOOK_URL` nur im Log
   (`pm2 logs quizmaster-watchdog`). Die Cron-Health-Kontrolle bleibt als von pm2 unabhängige Prüfung.
 - **Wiederaufnahme nach Neustart:** Realtime übernimmt beim Start alle aktiven Lobby-Snapshots – laufende Fragen bzw.

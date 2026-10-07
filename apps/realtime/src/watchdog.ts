@@ -10,14 +10,17 @@
  * | `event_loop` | Event-Loop-p99 > 200 ms für 5 min (alle 5-s-Fenster laut `qm_event_loop_p99_seconds`) |
  * | `error_rate` | > 1 % der Client-Events mit `INTERNAL` in 5 min (ab 200 Events) |
  * | `limit_spike` | ≥ 200 Limit-Treffer in 5 min (`qm_rate_limit_hits_total`) – Angriff? |
- * | `change_stream` | ≥ 3 Change-Stream-Neustarts in 15 min |
- * | `mongo` | ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler in 5 min |
+ * | `change_stream` | ≥ 3 Change-Stream-Neustarts in 15 min – länger als 16 min (über ein Fenster hinaus) |
+ * | `mongo` | ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler in 5 min – länger als 6 min |
  * | `restart_loop` | ≥ 3 Neustarts von Realtime in 15 min (`qm_process_start_time_seconds`) |
  * | `auto_retire` | Schutzautomatik: ≥ 5 zurückgezogene Fragen in 15 min oder ≥ 1 vom Tagesbudget zurückgehaltene |
  * | `metrics` | `/metrics` 5 min lang nicht lesbar, obwohl `/healthz` antwortet (z. B. 401 → Token prüfen) |
  *
  * Entprellung: eine Regel meldet erst, wenn ihre Bedingung die Haltezeit erfüllt (Health 2 min, Event-Loop
- * 5 min); Zählerregeln werten ein gleitendes Fenster aus. Cooldown: höchstens ein Alarm je Regel in 15 min
+ * 5 min); Zählerregeln werten ein gleitendes Fenster aus. Mongo und Change Streams melden erst, wenn die Störung
+ * länger als ihr Fenster anhält: Ein kurzer Netzaussetzer (5–60 s, ADR-057) hält einen Fehlerschub nur ein Fenster
+ * lang im Zähler – das ist Alltag und kein Alarm; eine anhaltende Störung meldet weiter (Mongo nach 6 min, Change
+ * Streams nach 16 min). Cooldown: höchstens ein Alarm je Regel in 15 min
  * (ein unterdrückter Alarm bekommt auch keine Entwarnung; hält die Störung über den Cooldown hinaus an, wird sie
  * danach gemeldet); bei anhaltender Störung eine Erinnerung je Stunde.
  * Entwarnung, sobald die Bedingung nicht mehr gilt. Nutzlast wie `infra/ops/alert.sh` ({content, text},
@@ -61,10 +64,17 @@ export const WATCHDOG_THRESHOLDS = {
   /** Change-Stream-Neustarts im Fenster ab dieser Zahl = „wiederholt abgebrochen“. */
   changeStreamRestarts: 3,
   changeStreamWindowMs: 900_000,
+  /**
+   * Haltezeit: länger als ein Fenster plus zwei Abrufe. Ein einzelner Schub (Netzaussetzer, ADR-057) zählt nur ein
+   * Fenster lang und meldet nicht; erst Neustarts, die über das Fenster hinaus anhalten.
+   */
+  changeStreamForMs: 960_000,
   /** Mongo-Verbindungsfehler (`heartbeat`, `pool_cleared`) bzw. sonstige Mongo-Fehler im Fenster. */
   mongoConnectionErrors: 3,
   mongoOtherErrors: 10,
   mongoWindowMs: 300_000,
+  /** Haltezeit wie bei den Change Streams: ein Fehlerschub eines kurzen Aussetzers meldet nicht. */
+  mongoForMs: 360_000,
   /** Neustarts von Realtime im Fenster ab dieser Zahl = Neustart-Schleife. */
   restarts: 3,
   restartWindowMs: 900_000,
@@ -378,12 +388,12 @@ export function createWatchdog(options: WatchdogOptions): Watchdog {
       hint: "docs/06 Notfall-Runbook: Cloudflare-Regeln, turnstileOnJoin, pnpm admin:ban",
     },
     change_stream: {
-      forMs: 0,
+      forMs: limits.changeStreamForMs,
       title: "Change Streams wiederholt neu gestartet",
       hint: "Cluster-Status und Rechte prüfen; pm2 logs quizmaster-realtime",
     },
     mongo: {
-      forMs: 0,
+      forMs: limits.mongoForMs,
       title: "MongoDB-Fehler",
       hint: "Cluster/Netzwerk prüfen (laufende Spiele laufen im Speicher weiter); pnpm env:check prod --connect",
     },
