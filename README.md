@@ -2,8 +2,13 @@
 
 Live-Quiz-Duelle für 2–8 Personen im Browser – als installierbare PWA, ohne Konto. Eine Person erstellt eine
 Lobby, die anderen treten per Code oder Link bei. Gespielt wird nach Quizduell-Regeln: pro Runde wählt jede
-Person einmal aus drei Kategorien, je Frage 20 Sekunden und vier Antworten, ein Punkt pro richtiger Antwort.
-Der Server ist autoritativ – Antworten, Zeiten und Punkte werden nur dort ausgewertet.
+Person einmal aus drei Kategorien, je Frage vier Antworten und standardmäßig 20 Sekunden, ein Punkt pro richtiger
+Antwort. Runden, Fragen je Kategorie, Zeit pro Frage, Kategorien, Schwierigkeit und Tempo stellt der Host in der
+Lobby ein. Der Server ist autoritativ – Antworten, Zeiten und Punkte werden nur dort ausgewertet.
+
+Spezifikation, Architekturentscheidungen (ADRs) und der Fragenkatalog werden getrennt gepflegt und sind nicht
+öffentlich. Verweise im Code wie `docs/06` oder `ADR-042` beziehen sich darauf; dieses README fasst zusammen, was für
+Entwicklung und Betrieb nötig ist.
 
 ## Architektur
 
@@ -20,13 +25,14 @@ Der Server ist autoritativ – Antworten, Zeiten und Punkte werden nur dort ausg
 - Für den Betrieb: Linux-Server mit pm2, Caddy ≥ 2.7, Cloudflare als Proxy, MongoDB Database Tools
   (`mongodump`/`mongorestore`), GnuPG
 
-Auf dem Produktionsserver bleibt das System-Node unangetastet: Node 24, pnpm, Caches und Browser liegen isoliert
-in `.tooling/` (nicht im Repo) und werden pro Shell mit `source .tooling/activate.sh` aktiviert.
+Auf einem geteilten Server muss das System-Node nicht ersetzt werden: Node 24, pnpm, Caches und Browser können
+isoliert in `.tooling/` liegen (nicht im Repo) und werden pro Shell aktiviert. Die Betriebsskripte nehmen Node 24
+aus `QM_NODE`, sonst aus der Laufzeit des Deploys (`.deploy/runtime`), sonst aus `.tooling/`.
 
 ## Einrichten
 
 ```bash
-corepack enable pnpm                 # Server: source .tooling/activate.sh
+corepack enable pnpm                 # bzw. die isolierte Toolchain der Shell aktivieren
 pnpm install --frozen-lockfile
 pnpm setup:env dev                   # legt .env.dev mit frischen Secrets an (Rechte 600, überschreibt nie)
 # MONGODB_URI des Dev-Clusters in .env.dev eintragen
@@ -49,15 +55,16 @@ Env-Dateien werden nie committet und von den Werkzeugen nie ausgegeben.
 | `pnpm build` | Produktions-Build (Next standalone inkl. Service Worker, Realtime-Bundle) |
 
 Automatische Tests laufen nie gegen Dev- oder Produktionsdaten: lokal in `quizmaster_test` mit eigenem
-Collection-Präfix je Lauf, in der CI gegen `MongoMemoryReplSet` 8.0.32.
+Collection-Präfix je Lauf, in der CI gegen `MongoMemoryReplSet` 8.0.32 (Verbindung: `TEST_MONGODB_URI`, siehe
+„Test-Stack & E2E“).
 
 **CI** (GitHub Actions, `.github/workflows/ci.yml`): Lint (Biome, shellcheck für `infra/`), Typecheck, Tests,
 Content-Validierung, Build, E2E, `pnpm audit --prod` (hohe/kritische Befunde brechen ab) und Trivy: ein
 Secret-Scan über das Repo und ein Schwachstellen-Scan des Projekt-Lockfiles. pnpm ≥ 11 schreibt `pnpm-lock.yaml`
 als zwei YAML-Dokumente (zuerst nur pnpm selbst, dann das Projekt) und Trivy liest nur das erste – die CI
 extrahiert deshalb das Projekt-Dokument und scannt es separat. Actions sind per Commit-SHA gepinnt, Dependabot
-schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Nach dem ersten Push unter *Insights →
-Dependency graph* prüfen, dass dort die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm.
+schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Unter *Insights → Dependency graph* sollten
+die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm – sonst liest GitHub das Lockfile nicht.
 Täglich (05:17 UTC) und per *Run workflow* laufen nur Audit und Trivy gegen `main`: Neue Advisories zu unveränderten
 Abhängigkeiten fallen so auch ohne Push auf (ein roter Lauf benachrichtigt) – Dependabot unterstützt laut GitHub-Doku
 pnpm nur bis Version 10 und meldet für das pnpm-12-Lockfile womöglich nichts. GitHub pausiert Zeitpläne nach 60 Tagen
@@ -65,8 +72,8 @@ ohne Aktivität im Repo.
 
 ## Test-Stack & E2E
 
-`pnpm test:e2e` (= `pnpm --filter e2e test`) startet Playwright (`e2e/playwright.config.ts`, nur Chromium – auf dem
-Server aus `.tooling/ms-playwright`, ADR-026) mit Mobil-Viewports gegen zwei Test-Stacks. Beide startet Playwright
+`pnpm test:e2e` (= `pnpm --filter e2e test`) startet Playwright (`e2e/playwright.config.ts`, nur Chromium; Ablage der
+Browser wie üblich über `PLAYWRIGHT_BROWSERS_PATH`) mit Mobil-Viewports gegen zwei Test-Stacks. Beide startet Playwright
 selbst als `webServer` und beendet sie am Ende mit `SIGTERM`; sie räumen ihre Test-Collections dabei selbst ab.
 
 | Stack | Skript | Ports (Standard) | Timing | Szenarien (Projekte) |
@@ -108,15 +115,20 @@ Langtext-Variante (140 Zeichen Frage, 40 Zeichen je Antwort), damit Layout-Prüf
 Phasen laufen in Originallänge (`GAME_TIMING=normal`). Standard-Logs: `e2e/test-results/stack-logs-normal/`, Log-Level
 `warn`.
 
+Umgebungsvariablen für Tests, Test-Stacks und E2E:
+
 | Variable | Standard | Wirkung |
 |---|---|---|
+| `TEST_MONGODB_URI` | leer | Verbindung zur Test-Datenbank für `pnpm test`, die Test-Stacks (also auch E2E) und `pnpm loadtest`; nur aus der Prozessumgebung (Shell, CI), nie aus `.env.dev`. Leer: `MONGODB_URI` + `TEST_MONGODB_DB` aus `.env.dev`, ohne `.env.dev` (CI) ein `MongoMemoryReplSet` |
+| `TEST_MONGODB_DB` | `quizmaster_test` | Name der Test-Datenbank (mit `TEST_MONGODB_URI` aus der Shell, sonst aus `.env.dev`); muss auf `_test` enden, sonst bricht der Lauf ab. Jeder Lauf nutzt ein eigenes Collection-Präfix |
+| `RATE_LIMIT_MODE` | `normal` | `relaxed` multipliziert alle Rate-Limits und die Verbindungsgrenzen je Gast und IP mit 100; die Test-Stacks und der Lasttest setzen es selbst. Web und Realtime lehnen `relaxed` außerhalb einer `*_test`-Datenbank ab |
 | `E2E_WEB_PORT`, `E2E_REALTIME_PORT` | 3200, 4200 | Ports des Test-Stacks |
 | `E2E_NORMAL_WEB_PORT`, `E2E_NORMAL_REALTIME_PORT` | jeweils +1 (3201, 4201) | Ports des Normal-Stacks |
 | `E2E_WORKERS` | 2 | parallele Worker (1–2) |
 | `E2E_REUSE_STACK=1` | aus | laufende Stacks mit denselben Ports nutzen |
 | `E2E_NO_BUILD=1` | aus | Test-Stack mit `--no-build` (vorhandene Builds) |
 | `E2E_OUTPUT_DIR` | `e2e/test-results` | Ordner für Artefakte (relativ zu `e2e/`) |
-| `E2E_SCREENSHOT_DIR` | `docs/screenshots/w3`, ohne `docs/` `<Artefakte>/screenshots` | Phasen-Screenshots aus Szenario 9 |
+| `E2E_SCREENSHOT_DIR` | `docs/screenshots/w3`, falls ein lokales `docs/` existiert (nicht im Repo), sonst `<Artefakte>/screenshots` | Phasen-Screenshots aus Szenario 9 |
 
 **Artefakte:** `e2e/playwright-report/` (HTML-Bericht, öffnet nicht automatisch) und `e2e/test-results/` – Traces und
 Screenshots fehlgeschlagener Tests (`trace: retain-on-failure`, `screenshot: only-on-failure`) sowie die Stack-Logs in
@@ -126,8 +138,9 @@ wiederholt (Szenario 12: zweimal), Zeitlimit 150 s je Test.
 
 ## Fragenkatalog
 
-Der Katalog (über 22.000 Fragen in 19 Kategorien) ist nicht Teil dieses Repos: er liegt als eigenes, lokales
-Git-Repo in `content/`. Für CI und E2E enthält das Repo synthetische Fixtures in `test/fixtures/content/`.
+Der Katalog (über 22.000 Fragen in 19 Kategorien) ist nicht Teil dieses Repos und wird getrennt gepflegt; die
+Content-Befehle erwarten ihn unter `content/`. Für CI und E2E enthält das Repo synthetische Fixtures in
+`test/fixtures/content/`.
 
 | Befehl | Zweck |
 |---|---|
@@ -136,7 +149,9 @@ Git-Repo in `content/`. Für CI und E2E enthält das Repo synthetische Fixtures 
 | `pnpm content:seed --env dev` | Katalog idempotent in die Datenbank übernehmen |
 | `pnpm content:seed --env prod --confirm-prod` | dasselbe für Produktion (bricht bei auffällig vielen Rückzügen ab) |
 
-Änderungen am Katalog werden per Change Stream sofort live – ein Neustart ist nicht nötig.
+Änderungen am Katalog werden per Change Stream sofort live – ein Neustart ist nicht nötig. Fragen, die mehrere
+unabhängige Spielende melden oder schlecht bewerten, nimmt die Schutzautomatik selbst aus dem Pool (siehe
+„Schutzautomatik und Prüf-Queue“).
 
 ## Betrieb
 
@@ -153,10 +168,10 @@ Site ausschließlich über Cloudflare erreichbar ist (siehe Caddy).
 
 ### Systembenutzer
 
-Web, Realtime und Watchdog laufen nicht als root, sondern als Systembenutzer `quizmaster` (docs/12
-„Nicht-Root-User“). Eine Lücke in Next.js oder Socket.IO bleibt damit auf dessen Rechte beschränkt: er kann die
-Env-Dateien der Apps lesen und `.next/cache` beschreiben, aber weder Releases, Laufzeit oder Deploy-Zustand ändern
-noch Dateien lesen, die nur root lesen darf (z. B. Env-Dateien anderer Apps mit 600, Origin-Schlüssel, Backups).
+Web, Realtime und Watchdog laufen nicht als root, sondern als Systembenutzer `quizmaster`. Eine Lücke in Next.js
+oder Socket.IO bleibt damit auf dessen Rechte beschränkt: er kann die Env-Dateien der Apps lesen und `.next/cache`
+beschreiben, aber weder Releases, Laufzeit oder Deploy-Zustand ändern noch Dateien lesen, die nur root lesen darf
+(z. B. Env-Dateien anderer Apps mit 600, Origin-Schlüssel, Backups).
 
 ```bash
 pnpm ops:create-user --dry-run   # Vorschau, ändert nichts (geht auch ohne root)
@@ -165,8 +180,8 @@ pnpm deploy:restart              # bzw. das nächste pnpm deploy:prod – erst d
 pnpm deploy:status               # Benutzer je App und Rechte der Env-Dateien
 ```
 
-`infra/ops/create-user.sh` sichert zuerst `/etc/passwd`, `/etc/group`, `/etc/shadow` und `/etc/gshadow` nach
-`/root/backups/quizmaster/<zeit>/users/` und legt dann – nur, falls sie fehlen – die Systemgruppe und den
+`infra/ops/create-user.sh` sichert zuerst `/etc/passwd`, `/etc/group`, `/etc/shadow` und `/etc/gshadow` in ein nur
+für root lesbares Sicherungsverzeichnis und legt dann – nur, falls sie fehlen – die Systemgruppe und den
 Systembenutzer `quizmaster` an: ohne Home (`/nonexistent`), Shell `nologin`, gesperrtes Passwort. Vorhandene
 Einträge prüft es nur; uid/gid 0, eine Login-Shell, eine andere primäre Gruppe, eine zweite Kennung mit derselben uid
 oder weitere Konten in der Gruppe brechen ab, ohne etwas zu ändern.
@@ -191,15 +206,14 @@ darf `quizmaster` nicht ändern können – beides prüft der Deploy ebenfalls. 
 App. `pm2 status` nennt in der Spalte `user` nur den Aufrufer (root) und ist dafür nicht maßgeblich. Nach einem
 Neustart des Servers stellt `pm2 resurrect` die Apps mit derselben uid/gid wieder her (`dump.pm2`).
 
-**Ohne Dienstbenutzer** laufen die Apps wie vor der Umstellung als root (Env-Dateien 0600, `.deploy/env` und
-`.deploy/releases` 0700 root); Preflight und `pnpm deploy:status` warnen dann. Uneindeutige Einträge (uid/gid 0,
-Gruppe mit weiteren Konten, unlesbare `/etc/passwd`) brechen ab, statt still auf root zurückzufallen.
+**Ohne Dienstbenutzer** laufen die Apps als root (Env-Dateien 0600, `.deploy/env` und `.deploy/releases` 0700 root);
+Preflight und `pnpm deploy:status` warnen dann. Uneindeutige Einträge (uid/gid 0, Gruppe mit weiteren Konten,
+unlesbare `/etc/passwd`) brechen ab, statt still auf root zurückzufallen.
 
-**Rückweg** (zurück zu root), als root:
+**Rückweg** (zurück zu root), als root: zuerst `/etc/passwd`, `/etc/group`, `/etc/shadow` und `/etc/gshadow` in ein
+nur für root lesbares Verzeichnis sichern (wie es `pnpm ops:create-user` tut), dann:
 
 ```bash
-backup=/root/backups/quizmaster/$(date +%Y%m%d-%H%M%S)/users && install -d -m 700 "$backup"
-cp -p /etc/passwd /etc/group /etc/shadow /etc/gshadow "$backup"/
 userdel quizmaster && groupdel quizmaster     # kein Home zu löschen
 pnpm deploy:restart                           # startet alle Apps wieder als root
 ```
@@ -234,7 +248,7 @@ ihre Skripte tragen) und ein darin referenziertes `/_next/static`-Asset, `/healt
 ohne Ticket mit `UNAUTHORIZED` abgelehnt wird, dass `/metrics` ohne Token gesperrt ist und dass die Prozesse nur
 auf Loopback lauschen. Schlägt etwas fehl, geht der Deploy
 automatisch auf das vorherige Release zurück und endet mit Fehler. Bei Erfolg wird `dump.pm2` gesichert (die
-letzten 20 Sicherungen unter `/root/backups/quizmaster/<zeit>/dump.pm2`), `pm2 save` ausgeführt, danach über
+letzten 20 Sicherungen in einem nur für root lesbaren Verzeichnis), `pm2 save` ausgeführt, danach über
 den Host-Caddy `https://<domain>/api/health` kontrolliert (nur Warnung) und es bleiben die letzten drei Releases.
 Nicht abgedeckt sind ein vollständiger Lobby-Durchlauf (Session, Ticket, `lobby:create`) und die Bereitschaft von
 Mongo/Change Streams – das gehört in den Watchdog (siehe Monitoring).
@@ -262,9 +276,30 @@ ergänzen, Altes erst im übernächsten Release entfernen) – sonst scheitert a
 Validator-Änderung hinweg setzt den Validator auf den alten Stand zurück; ein umbenannter Index lässt den Start des
 alten Releases scheitern (`ensureIndexes`: Index-Konflikt) – dann die Sicherung einspielen (`pnpm ops:restore`).
 
+### Drill: Deploy im Testmodus
+
+Deploy, Rollback und Rückwege lassen sich proben, ohne die laufenden Apps zu berühren: mit einem eigenen pm2-Daemon
+(`PM2_HOME` auf ein eigenes Verzeichnis, nie `~/.pm2` – sonst bricht der Testmodus ab) und `--test-env <datei>` (eigene
+Quell-Env mit Test-Ports und `*_test`-Datenbank, eigenes Layout `.deploy/test`). `--test-env` gilt für alle
+`deploy:*`-Befehle.
+
+```bash
+node scripts/deploy/drill-env.ts create <datei>    # Test-DB mit eigenem Präfix, Ports 7490/7491, frische Secrets, 600
+PM2_HOME=<test-daemon> pnpm deploy:prod --test-env <datei> [--test-user nobody] [--simulate-failure realtime]
+PM2_HOME=<test-daemon> pnpm deploy:rollback --test-env <datei>
+node scripts/deploy/drill-env.ts cleanup <datei>   # nach dem Beenden der Test-Apps: Präfix droppen, Datei löschen
+```
+
+Lohnende Proben: Erst-Deploy (als Dienstbenutzer und als root), Deploy eines zweiten Releases, `deploy:rollback`,
+automatischer Rückweg nach `--simulate-failure web|realtime|watchdog` (auch beim Erst-Deploy), `kill -9` auf Realtime,
+`pm2 kill` + `pm2 resurrect` – nur mit gesetztem `PM2_HOME` des Test-Daemons, nie im gemeinsamen Daemon (uid/gid
+bleiben erhalten) –, Rückweg zu root, jeweils mit Smoke-Test inkl. Prozess-uid; dazu `ops:backup` →
+`ops:restore-test` und `ops:alert-test` mit Empfang. Mit `--test-user nobody` laufen die Test-Apps unter einem
+vorhandenen unprivilegierten Benutzer, ohne `quizmaster` anzulegen.
+
 ### Smoke-Test gegen eine laufende Instanz
 
-Produktionsabnahme von außen mit echtem Chromium (docs/11 §Manuelle Abnahme, automatisierbarer Teil; docs/12): ein
+Abnahme einer laufenden Instanz von außen mit echtem Chromium (der automatisierbare Teil der manuellen Abnahme): ein
 vollständiger Durchlauf über Session, Ticket, Lobby und Spiel, den der Smoke-Test des Deploys nicht abdeckt. Eigene
 Playwright-Konfiguration `e2e/playwright.smoke.config.ts` ohne `webServer` und mit eigenem `testDir` (`e2e/smoke/`) –
 nie Teil von `pnpm test:e2e` oder der CI.
@@ -290,22 +325,23 @@ SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm --filter e2e test:smoke \
 Prüfungen (ein Worker, keine Wiederholung – jede Wiederholung legte weitere Gäste und Lobbys an):
 
 1. **Kaltstart** (Pixel 7, frischer Kontext ohne Cache und ohne Service Worker, Slow 4G per CDP: 150 ms Latenz je
-   Anfrage, 1,6 Mbit/s down, 750 kbit/s up, CPU 4×): „Öffnen → Lobby erstellt und sichtbar“ unter 10 s (docs/01,
-   Erfolgskriterium – docs/07 hat dafür keine eigene Zeile) und LCP der Startseite unter 1,8 s (docs/07, hier als
-   Einzelmessung im Labor). Gemessen im Browser ab Navigationsbeginn bis zum ersten Frame mit Lobby-Code, ohne die
-   Tippzeit eines Menschen; Zwischenzeiten TTFB, FCP, „bedienbar“ (Namensfeld hydriert) und Klick → Lobby.
+   Anfrage, 1,6 Mbit/s down, 750 kbit/s up, CPU 4×): „Öffnen → Lobby erstellt und sichtbar“ unter 10 s
+   (Erfolgskriterium des Produkts) und LCP der Startseite unter 1,8 s (Performance-Ziel, hier als Einzelmessung im
+   Labor). Gemessen im Browser ab Navigationsbeginn bis zum ersten Frame mit Lobby-Code, ohne die Tippzeit eines
+   Menschen; Zwischenzeiten TTFB, FCP, „bedienbar“ (Namensfeld hydriert) und Klick → Lobby.
 2. **Spiel zu zweit:** ein zweiter Kontext (iPhone 15, Chromium) tritt per `/j/<code>` bei, der Host stellt
    1 Runde × 1 Frage je Kategorie ein und startet. Wer dran ist, wählt die erste Kategorie; beide antworten immer mit
    der ersten Antwort (der echte Katalog ist unbekannt), bis bei beiden das Spielende steht. Danach geht es
    automatisch zurück in die Lobby (Karte „Letztes Spiel“), und beide verlassen sie.
 3. **Browser:** über den ganzen Lauf 0 CSP-Verstöße (Event `securitypolicyviolation` und Konsole „Refused to …“),
    0 Konsolenfehler, 0 Seitenfehler.
-4. **axe** (WCAG 2.2 AA + Best Practices, dazu die Layout-Regeln aus docs/09 §13) auf Start, Beitreten, Lobby
-   (Host und Gast), Spielende (Host und Gast), Lobby nach dem Spiel und der Startseite danach – ohne Befunde jeder
-   Schwere.
+4. **axe** (WCAG 2.2 AA + Best Practices, dazu die Layout-Regeln des Designsystems: kein horizontales Scrollen,
+   höchstens eine Hauptaktion, keine Emojis, keine Klassen mit beliebigen Werten `[…]` oder Hex-Farben) auf Start,
+   Beitreten, Lobby (Host und Gast), Spielende (Host und Gast), Lobby nach dem Spiel und der Startseite danach – ohne
+   Befunde jeder Schwere.
 5. **Installierbarkeit** auf `/`: `Page.getInstallabilityErrors` leer, Manifest ohne Meldungen von Chromium,
    Manifest und Icons erreichbar, Service Worker `activated` und steuert die Seite.
-6. **Sicherheits-Header** der Startseite (docs/06): CSP mit Nonce und `'strict-dynamic'`, ohne `'unsafe-inline'`/
+6. **Sicherheits-Header** der Startseite: CSP mit Nonce und `'strict-dynamic'`, ohne `'unsafe-inline'`/
    `'unsafe-eval'`, `default-src`, `object-src`, `base-uri`, `frame-ancestors`, bei https `upgrade-insecure-requests`;
    die Nonce steht an den Skripten der Seite und ist je Anfrage neu (gleiche Nonce zweimal = ein Cache liefert das
    HTML aus); HSTS (bei https), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cache-Control`
@@ -317,7 +353,7 @@ Screenshots bei Fehlern, für den Standardordner: `pnpm --filter e2e exec playwr
 und `artifacts/` (Screenshots je axe-Screen). Exit-Code 0 nur, wenn alle Prüfungen bestanden sind. Der Kaltstart läuft
 als erster Test – nach einem Deploy trifft er also die noch kalte Instanz.
 
-**Spuren in der Zielinstanz:** je Lauf zwei neue Gast-Sessions (zählen gegen das Limit von 10 neuen Sessions je IP in
+**Spuren in der Zielinstanz:** je Lauf zwei neue Gast-Sessions (zählen gegen das Limit von 30 neuen Sessions je IP in
 10 min), eine Lobby und – mit Spiel – ein beendetes Spiel samt Statistik der gezeigten Fragen. Der Bericht nennt die
 Lobby-Codes mit dem passenden Befehl der Admin-CLI; zuerst die Wirkung ansehen, dann bereinigen:
 
@@ -361,7 +397,7 @@ und komprimiert nichts. Neustartlücken (Deploy, `max_memory_restart`, Absturz) 
 (`lb_try_duration`) – Anfragen warten, statt sofort mit 502 zu scheitern. Logs: keine Access-Logs; Fehler-
 antworten (z. B. 502, wenn ein Upstream länger fehlt) laufen über `handle_errors`, damit Caddys Standard-
 Fehlerlog – das den ganzen Request inkl. `Cf-Connecting-Ip` (echte Client-IP) ins Journal schreiben würde – nur
-auf Debug-Ebene loggt (docs/06: keine IPs in Logs). Ausfälle meldet die Health-Kontrolle (Monitoring), nicht das
+auf Debug-Ebene loggt (Grundsatz: keine IPs in Logs). Ausfälle meldet die Health-Kontrolle (Monitoring), nicht das
 Caddy-Log. Die Cloudflare-Liste steht in `infra/caddy/cloudflare-ips.txt` und wird wöchentlich per Cron
 aktualisiert (neu geladen wird nur bei Änderungen; die Datei dann committen). Ist sie zweimal in Folge nicht
 abrufbar oder unplausibel, kommt ein Alarm – die gespeicherte Liste bleibt aktiv, neue Cloudflare-Bereiche würden
@@ -392,7 +428,7 @@ pnpm deploy:restart --apps web                     # Env neu aufteilen, nur web 
 | Schalter | Werte | Neu starten |
 |---|---|---|
 | `TURNSTILE_ENABLED` | `true` \| `false` | `web` (Site- und Secret-Key müssen eingetragen sein) |
-| `SEARCH_INDEXING` | `true` \| `false` | `web` (`false` = `robots.txt` sperrt alles, Seiten mit `noindex`, ADR-030) |
+| `SEARCH_INDEXING` | `true` \| `false` | `web` (`false` = `robots.txt` sperrt alles, Seiten mit `noindex`) |
 | `LOG_LEVEL` | `fatal` … `trace`, `silent` | betroffene Apps |
 
 ### Secrets rotieren
@@ -415,7 +451,7 @@ pnpm deploy:restart --apps <apps>            # neue Env-Dateien erzeugen und die
 ### Backups, Restore-Test und Wiederherstellung
 
 ```bash
-pnpm ops:backup          # mongodump → gzip → AES256 (gpg) nach /var/backups/quizmaster, dazu content/ und docs/
+pnpm ops:backup          # mongodump → gzip → AES256 (gpg) ins Backup-Verzeichnis (--out-dir), dazu content/ und docs/
 pnpm ops:check-backup    # neuestes Backup höchstens 26 h alt, Manifest vorhanden (Cron täglich 09:00)
 pnpm ops:restore-test    # neuestes Backup (≤ 36 h) in die Test-Datenbank, Dokumente je Collection vergleichen
 pnpm ops:restore         # Ernstfall: Plan für die Wiederherstellung der Produktionsdatenbank (ändert nichts)
@@ -423,9 +459,10 @@ pnpm ops:install-cron    # als root, siehe Monitoring
 ```
 
 Die Zugangsdaten liest ein Helfer direkt aus der Env-Datei; sie erscheinen weder auf der Kommandozeile noch im
-Log. Backups sind mit `BACKUP_PASSPHRASE` verschlüsselt (Passphrase zusätzlich im Passwortmanager sichern), werden
-14 Tage aufbewahrt (die neuesten drei immer) und nach dem Schreiben probeweise entschlüsselt. Fehler lösen einen
-Alarm aus; bleibt das nächtliche Backup ganz aus (Cron oder Skript startet nicht), meldet es `ops:check-backup`.
+Log. Backups sind mit `BACKUP_PASSPHRASE` verschlüsselt (Passphrase zusätzlich getrennt vom Server aufbewahren –
+ohne sie ist jedes Backup wertlos), werden 14 Tage aufbewahrt (die neuesten drei immer) und nach dem Schreiben
+probeweise entschlüsselt. Fehler lösen einen Alarm aus; bleibt das nächtliche Backup ganz aus (Cron oder Skript
+startet nicht), meldet es `ops:check-backup`.
 Cron-Läufe (`QM_UNATTENDED=1`) führen Backup, Restore-Test und Caddy-Refresh nur mit committeten
 Betriebswerkzeugen aus – ein halbfertiger Stand von `infra/`, `scripts/ops/` oder `packages/shared/` im
 Arbeitsbaum bricht den Lauf mit Alarm ab, statt ungeprüften Code als root auszuführen. Protokolle:
@@ -435,8 +472,8 @@ Arbeitsbaum bricht den Lauf mit Alarm ab, statt ungeprüften Code als root auszu
 
 ```bash
 pnpm ops:restore                                         # Plan: neuestes Archiv, Alter, Dokumente, Ziel
-pnpm ops:restore --archive /var/backups/quizmaster/quizmaster-<ts>.archive.gz.gpg --confirm-prod
-pnpm ops:restore --confirm-prod --passphrase-file <datei> # Passphrase aus dem Passwortmanager (Datei 600)
+pnpm ops:restore --archive <backup-verzeichnis>/quizmaster-<ts>.archive.gz.gpg --confirm-prod
+pnpm ops:restore --confirm-prod --passphrase-file <datei> # Passphrase aus einer Datei (600) statt BACKUP_PASSPHRASE
 ```
 
 Ablauf: Archiv vollständig prüfen (Passphrase, Integrität) → Sicherheitskopie des jetzigen Stands → Deploy-Sperre →
@@ -444,17 +481,15 @@ Apps stoppen → `mongorestore --drop --nsInclude "<db>.*"` (URI über `--config
 → Apps mit frischer Env und Smoke-Test starten. Scheitert das Einspielen, werden die Apps trotzdem wieder
 gestartet und es kommt ein Alarm; die Sicherheitskopie lässt sich mit `--archive` erneut einspielen.
 
-**Offen (Go-live-Blocker):** Alle Backups liegen auf demselben Server und Datenträger wie die Datenbank-
-Zugangsdaten, `content/` (einzige Quelle der Fragen, kein Remote) und `docs/`. Vor dem Go-live: Offsite-Kopie der
-bereits verschlüsselten `.gpg`-Dateien (z. B. restic/rclone zu Objektspeicher oder einem zweiten Host, ≥ 30 Tage,
-Fehler → Alarm), privates Git-Remote für `content/` und `docs/`, Snapshots beim Provider bzw. Cluster-Backups
-aktivieren, Passphrase nachweislich außerhalb des Servers ablegen und einen Restore-Test gegen die Offsite-Kopie
-fahren. Das braucht Zugangsdaten und eine Anbieter-Entscheidung des Betreibers.
+**Außerhalb des Servers:** `ops:backup` schreibt auf den Server selbst und schützt damit nicht vor dessen Verlust.
+Empfohlen sind zusätzlich eine Kopie der bereits verschlüsselten `.gpg`-Dateien außerhalb des Servers (z. B.
+restic/rclone zu Objektspeicher oder einem zweiten Host, ≥ 30 Tage aufbewahrt, Fehler → Alarm), Snapshots bzw.
+Backups beim Datenbank-Anbieter, die Passphrase getrennt vom Server und ein Restore-Test auch gegen diese Kopie.
 
 ### Monitoring und Alarme
 
 ```bash
-pnpm ops:alert-test      # Testalarm an ALERT_WEBHOOK_URL (Discord oder Slack) – Go-live-Gate
+pnpm ops:alert-test      # Testalarm an ALERT_WEBHOOK_URL (Discord oder Slack) – vor der Inbetriebnahme prüfen
 pnpm ops:healthcheck     # Health-Kontrolle einmal ausführen (sonst Cron jede Minute)
 pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle 09:00, Restore-Test quartalsweise,
                          # Cloudflare-Liste montags – verweigert ohne ALERT_WEBHOOK_URL (bewusst: --allow-no-webhook)
@@ -466,21 +501,34 @@ pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle
   meldet nicht antwortende Apps auch dann, wenn pm2 selbst ausgefallen ist (ein Watchdog unter pm2 könnte das
   nicht). Protokoll: `journalctl -t quizmaster-healthcheck`.
 - **Watchdog** (`quizmaster-watchdog`, `dist/watchdog.mjs`, pm2): prüft alle 30 s `/api/health`, `/healthz` und
-  `/metrics` (Bearer `METRICS_TOKEN`) über Loopback. Alarme: Health down > 2 min · Event-Loop p99 > 200 ms für 5 min ·
-  Fehlerrate (`INTERNAL`-Acks) > 1 % in 5 min (ab 200 Events) · ≥ 200 Limit-Treffer in 5 min · ≥ 3 Change-Stream-
-  Neustarts in 15 min, länger als 16 min · ≥ 3 Mongo-Verbindungsfehler (oder ≥ 10 sonstige) in 5 min, länger als
-  6 min · ≥ 3 Realtime-Neustarts in 15 min · `/metrics` 5 min nicht lesbar. Mongo und Change Streams melden erst eine
-  Störung, die über ihr Fenster hinaus anhält – der Fehlerschub eines kurzen Netzaussetzers (ADR-057) ist kein Alarm.
-  Höchstens ein Alarm je Regel in 15 min, Erinnerung stündlich, Entwarnung bei Erholung.
-  Nutzlast wie `ops:alert-test` (`{content, text}`, `@everyone` entschärft); ohne `ALERT_WEBHOOK_URL` nur im Log
-  (`pm2 logs quizmaster-watchdog`). Die Cron-Health-Kontrolle bleibt als von pm2 unabhängige Prüfung.
+  `/metrics` (Bearer `METRICS_TOKEN`) über Loopback und alarmiert nach den Regeln unten. Höchstens ein Alarm je
+  Regel in 15 min, Erinnerung stündlich, solange die Störung anhält, Entwarnung bei Erholung. Jeder Alarm nennt
+  Befund und ersten Handgriff. Nutzlast wie `ops:alert-test` (`{content, text}`, `@everyone` entschärft); ohne
+  `ALERT_WEBHOOK_URL` nur im Log (`pm2 logs quizmaster-watchdog`, Feld `rule`). Die Cron-Health-Kontrolle bleibt
+  als von pm2 unabhängige Prüfung.
 - **Wiederaufnahme nach Neustart:** Realtime übernimmt beim Start alle aktiven Lobby-Snapshots – laufende Fragen bzw.
   Kategoriewahlen beginnen neu (5 s Aufschub zum Wiederverbinden), Punkte bleiben; nicht wiederherstellbare Snapshots
   werden geschlossen. Metrik `qm_lobbies_resumed_total{outcome}`.
-- **Extern:** Ein Ausfall des ganzen Servers oder des Cron-Dienstes fällt keiner lokalen Kontrolle auf – zusätzlich
-  einen Uptime-Check von außen auf `https://<domain>/api/health` einrichten (docs/12: z. B. Uptime Kuma auf einem
+- **Extern:** Ein Ausfall des ganzen Servers oder des Cron-Dienstes fällt keiner lokalen Kontrolle auf – dafür
+  zusätzlich einen Uptime-Check von außen auf `https://<domain>/api/health` einrichten (z. B. Uptime Kuma auf einem
   anderen Host).
 - `/metrics` (Prometheus-Format) ist nur lokal mit `METRICS_TOKEN` erreichbar.
+
+| Watchdog-Regel | Alarm, wenn … |
+|---|---|
+| `web_health`, `realtime_health` | `/api/health` bzw. `/healthz` länger als 2 min gestört ist (`ok: false`, 5xx, keine Antwort; 429 gilt als „lebt“) |
+| `event_loop` | der Event-Loop-p99 von Realtime 5 min lang über 200 ms liegt |
+| `error_rate` | mehr als 1 % der Client-Events in 5 min mit `INTERNAL` enden (ab 200 Events) |
+| `limit_spike` | in 5 min ≥ 200 Rate-Limit-Treffer anfallen (Angriff?) |
+| `change_stream` | Change Streams in 15 min ≥ 3-mal neu starten – und das länger als 16 min anhält |
+| `mongo` | in 5 min ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler auftreten – und das länger als 6 min anhält |
+| `restart_loop` | Realtime in 15 min ≥ 3-mal neu startet |
+| `auto_retire` | die Schutzautomatik in 15 min ≥ 5 Fragen zurückzieht oder einen fälligen Rückzug wegen ihres Tagesbudgets zurückhält |
+| `metrics` | `/metrics` 5 min lang nicht lesbar ist, obwohl `/healthz` antwortet (z. B. falscher `METRICS_TOKEN`) |
+
+`change_stream` und `mongo` melden nur eine Störung, die länger als ihr Zählfenster anhält: Der Fehlerschub eines
+kurzen Netzaussetzers (5–60 s) bleibt nur ein Fenster lang im Zähler und ist kein Alarm; eine anhaltende Störung meldet
+weiter.
 
 ### Performance und Last
 
@@ -491,20 +539,21 @@ pnpm perf:lighthouse --url https://<domain> --resolve <domain>=127.0.0.1 --insec
 pnpm loadtest --lobbies 375 --players 8 --duration 4m --ramp 90s --catalog content     # 3.000 Sockets, Bericht --report
 ```
 
-Budgets laut docs/07 bzw. ADR-037 (Startseite ≤ 165 KB, Lobby ≤ 180 KB gzip). Ergebnisse landen in `reports/`
-(lokal, gitignored); der Lasttest läuft nur gegen die Test-Datenbank.
+Budgets für das initiale JS (gzip): Startseite ≤ 165 KB, Lobby ≤ 180 KB (Werte in `scripts/perf/lib/bundle.ts`).
+Ergebnisse landen in `reports/` (lokal, gitignored); der Lasttest läuft nur gegen die Test-Datenbank.
 
 ### Admin-Werkzeuge (Kill-Switches, Sperren)
 
 Realtime übernimmt Änderungen per Change Stream sofort, ein Neustart ist nicht nötig. Verbindung aus `.env.prod`
-(`--env dev` für die Entwicklung); Schreiben in die Produktionsdatenbank nur mit `--confirm-prod`.
+(`--env dev` für die Entwicklung); Schreiben in die Produktionsdatenbank nur mit `--confirm-prod`. Die Prüf-Queue
+(`admin:reports`) verhält sich anders, siehe „Schutzautomatik und Prüf-Queue“.
 
 ```bash
 pnpm admin:config show
 pnpm admin:config set lobbyCreationEnabled=false --confirm-prod             # Lobby-Erstellung pausieren
 pnpm admin:config set turnstileOnJoin=true maxActiveLobbies=500 --confirm-prod
 pnpm admin:config set maintenance=on "maintenanceMessage=Kurze Wartung" --confirm-prod   # …=off beendet sie
-pnpm admin:config set minClientProtocol=2 --confirm-prod                     # erst, wenn das neue Web live ist
+pnpm admin:config set minClientProtocol=<n> --confirm-prod                   # <n> = neue PROTOCOL_VERSION, erst wenn live
 pnpm admin:config block-term add <begriff …> --confirm-prod                  # Blockliste (Namen), remove entfernt
 pnpm admin:ban add --ip 203.0.113.7 --reason "Bot-Welle" --hours 24 --confirm-prod   # IPv6: ganzes /64
 pnpm admin:ban add --guest <guestId> --reason "Beleidigende Namen" --confirm-prod     # ohne --hours: dauerhaft
@@ -525,6 +574,47 @@ sie an keinem anderen Spiel beteiligt waren; laufende Lobbys bleiben unberührt 
 
 IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`IP_HASH_SECRET`), nie die IP.
 
+### Schutzautomatik und Prüf-Queue
+
+Spielende können Fragen bewerten (Daumen hoch/runter) und melden (Falsch, Mehrdeutig, Veraltet, Tippfehler,
+Unpassend). Nach jeder Meldung und Bewertung prüft Realtime, ob die Frage sofort aus dem Pool muss (Status `retired`,
+vermerkt als automatisch zurückgezogen):
+
+- Meldungen „Falsch“, „Veraltet“ oder „Mehrdeutig“ aus mindestens 3 unabhängigen Quellen in 7 Tagen oder
+- mindestens 20 Bewertungen mit weniger als 30 % Daumen hoch, wobei die Daumen-runter aus mindestens 3 unabhängigen
+  Quellen stammen.
+
+**Unabhängige Quellen:** Gast-Sessions kosten nichts. Gäste, die über dieselbe IP (nur als HMAC-Schlüssel, IPv6 als
+/64) oder dieselbe Lobby verbunden sind – auch über Zwischenschritte –, zählen deshalb zusammen als eine Quelle. Eine
+Person mit mehreren Sessions oder eine Gruppe in einer Lobby zieht so keine Frage allein zurück; ihre Meldungen stehen
+trotzdem in der Prüf-Queue. Gezählt wird ab der letzten Inhalts- oder Statusänderung der Frage, Rückmeldungen zu einer
+schon geprüften Fassung zählen nicht erneut.
+
+**Tagesbudget:** höchstens 5 automatische Rückzüge je Kategorie und 20 insgesamt in 24 h. Darüber bleibt eine fällige
+Frage im Pool, der Vorgang wird gezählt (`qm_questions_auto_retire_suppressed_total`) und der Watchdog alarmiert
+(`auto_retire`). Kategorien, die durch Rückzüge unter die Mindestmenge spielbarer Fragen fallen, werden nicht mehr
+angeboten.
+
+Die **Prüf-Queue** zeigt offene Meldungen je Frage (Gründe, Anzahl, Zeitraum, unabhängige Quellen), automatisch
+zurückgezogene Fragen, schlecht bewertete Fragen (unter 50 % ab 10 Bewertungen) und Fragen mit einer Trefferquote
+unter 10 % (ab 30 Anzeigen) – ohne guestIds und Lobby-Codes. Anders als die übrigen Admin-Werkzeuge verbindet
+`admin:reports` standardmäßig mit `.env.dev`; mit `--env prod` braucht jeder Aufruf `--confirm-prod`, auch zum Lesen
+und mit `--dry-run`.
+
+```bash
+pnpm admin:reports --env prod --confirm-prod                       # Prüf-Queue lesen (--json mit Meldungs-IDs)
+pnpm admin:reports --resolve <id> --env prod --confirm-prod         # Meldungen erledigt (Frage im Katalog korrigiert)
+pnpm admin:reports --dismiss <id> --env prod --confirm-prod         # Meldungen verworfen (Frage ist korrekt)
+pnpm admin:reports --restore <frage-id> --env prod --confirm-prod   # zurückgezogene Frage nach Prüfung zurück in den Pool
+pnpm admin:reports --restore-auto --since <iso> --dry-run --env prod --confirm-prod   # Massen-Wiederherstellung: Vorschau
+pnpm admin:reports --restore-auto --since <iso> --env prod --confirm-prod             # … ausführen (--reason reports|rating)
+```
+
+`<id>` ist eine Fragen-ID (alle offenen Meldungen der Frage) oder eine Meldungs-ID. `--restore` und `--restore-auto`
+übernehmen den Status aus dem Katalog (`content/`, sonst `--content-dir`) – nur für Fragen, die dort unverändert und
+spielbar sind – und berechnen danach die Live-Zähler der Kategorien neu. Offene Meldungen bleiben in der Queue,
+zählen nach der Wiederherstellung aber nicht mehr für die Schutzautomatik.
+
 ### Runbooks
 
 | Lage | Vorgehen |
@@ -539,6 +629,7 @@ IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`
 | DDoS | Cloudflare „Under Attack Mode“, `pnpm admin:config set maxActiveLobbies=<n> --confirm-prod`, Caddy-Allowlist prüfen (`pnpm caddy:dry-run`) |
 | Beleidigende Namen | `pnpm admin:config block-term add <begriff> --confirm-prod` (wirkt beim nächsten Beitritt), betroffene Gäste `pnpm admin:ban add --guest <guestId> …` |
 | Falsche Frage verbreitet sich | Frage im Katalog auf `retired` setzen oder korrigieren → Seed → Change Stream nimmt sie sofort aus dem Pool |
+| Schutzautomatik/Prüf-Queue: Alarm „Schutzautomatik zieht ungewöhnlich viele Fragen zurück“ oder offene Meldungen | `pnpm admin:reports --env prod --confirm-prod` (Gründe, Quellen, Zeitraum). Missbrauch → Gäste hinter den Meldungen sperren (`pnpm admin:ban add --report <meldungs-id> …`, IDs aus `--json`), ggf. `pnpm admin:config set turnstileOnJoin=true --confirm-prod`; zu Unrecht zurückgezogene Fragen erst ansehen (`pnpm admin:reports --restore-auto --since <iso> --dry-run --env prod --confirm-prod`), dann ohne `--dry-run` zurückholen. Einzelne Frage: berechtigte Meldungen → Frage im Katalog korrigieren → Seed → `--resolve <id>`; unberechtigte → `--dismiss <id>` und eine zurückgezogene Frage per `--restore <frage-id>` zurück in den Pool (jeweils `--env prod --confirm-prod`) |
 | Antwort-Leak entdeckt | Hotfix + Release, `pnpm admin:config set minClientProtocol=<n> --confirm-prod`, Test ergänzen |
 | Secret kompromittiert | rotieren (siehe oben), betroffene Apps neu starten, Vorfall dokumentieren |
 | Alarm „Backup fehlgeschlagen“ / „Backup-Kontrolle“ | `journalctl -t quizmaster-backup -t quizmaster-check-backup`, Ursache beheben (z. B. nicht committete Betriebswerkzeuge), `pnpm ops:backup` erneut |
@@ -546,32 +637,17 @@ IP-Sperren speichern wie Web und Realtime nur den HMAC-Schlüssel der Adresse (`
 | Deploy bricht mit `SERVICE_USER` oder `SERVICE_ACCESS` ab | nichts wurde umgeschaltet; die Meldung nennt Eintrag bzw. Pfad mit Rechten → `pnpm ops:create-user --dry-run` bzw. Rechte korrigieren, erneut deployen (siehe Systembenutzer) |
 | Smoke-Test meldet `APP_IDENTITY` | App lief nicht mit uid/gid `quizmaster` → der Deploy ist schon zurückgegangen; `pnpm deploy:status` (Benutzer je App) und `getent passwd quizmaster` prüfen |
 
-### Vor dem Go-live offen
+## Sicherheitslücken melden
 
-- **Systembenutzer anlegen** (siehe Systembenutzer): `pnpm ops:create-user` als root *vor* dem ersten
-  `pnpm deploy:prod`; ohne ihn laufen die Apps als root (Preflight-Warnung).
-- **Drill** mit eigenem pm2-Daemon (`PM2_HOME=…/.tooling/pm2-test`, nie `~/.pm2`) und `--test-env` (Test-Ports,
-  `*_test`-Datenbank): Erst-Deploy, `--simulate-failure web|realtime|watchdog` (auch beim Erst-Deploy),
-  `deploy:rollback`, `kill -9` auf Realtime, `pm2 kill` + `pm2 resurrect` im Test-Daemon; danach
-  `ops:backup` → `ops:restore-test` (Entschlüsselung mit der Passphrase aus dem Passwortmanager) und
-  `ops:alert-test` mit Empfang – Ergebnisse in `docs/13` protokollieren. Die Quell-Env für `--test-env` erzeugt
-  `node scripts/deploy/drill-env.ts create <datei>` (Test-Datenbank der automatischen Tests mit eigenem
-  Collection-Präfix, Ports 7490/7491, frische Secrets, 600); danach `… cleanup <datei>` (droppt das Präfix, löscht die
-  Datei). Mit `--test-user nobody` laufen die Test-Apps unter einem vorhandenen unprivilegierten Benutzer, ohne
-  `quizmaster` anzulegen. Bereits durchgespielt (01.10.2026, Test-Daemon, `nobody`): Erst-Deploy direkt als
-  Dienstbenutzer, Erst-Deploy als root (Rückfall) mit anschließender Umstellung per `deploy:restart`, Deploy eines
-  zweiten Releases, `deploy:rollback`, automatischer Rückweg nach `--simulate-failure realtime`, `pm2 kill` +
-  `pm2 resurrect` (uid/gid bleiben), Rückweg zu root – jeweils mit Smoke-Test inkl. Prozess-uid; dazu Zugriffsproben
-  (Dienstbenutzer liest Env und Release, schreibt nur `.next/cache`; ein drittes Konto erreicht weder Env noch
-  Releases). Offen sind die übrigen Punkte oben.
-- **Offsite-Backups** (siehe oben).
-- **Externer Uptime-Check** (siehe Monitoring).
+Bitte Sicherheitslücken nicht öffentlich melden – also nicht als Issue, Pull Request oder Diskussion –, sondern
+vertraulich über GitHubs *Private vulnerability reporting*: im Repository unter **Security → Report a
+vulnerability**. Die Meldung sehen nur die meldende Person und die Maintainer; Rückfragen, Behebung und eine spätere
+Veröffentlichung als Security Advisory laufen über denselben Vorgang.
 
-## Sicherheit
-
-Sicherheitslücken bitte nicht öffentlich melden, sondern über „Report a vulnerability“ (GitHub Security
-Advisories) dieses Repositorys.
+Hilfreich sind die betroffene Komponente bzw. der Commit, Schritte zum Nachstellen (am besten gegen einen lokalen
+Test-Stack, `pnpm stack:test`), erwartetes und tatsächliches Verhalten sowie die Auswirkung. Bitte nichts gegen die
+öffentliche Instanz ausprobieren, das andere Spielende stört, Last erzeugt oder Daten Dritter berührt.
 
 ## Lizenz
 
-MIT
+MIT, siehe [LICENSE](LICENSE).
