@@ -58,6 +58,10 @@ als zwei YAML-Dokumente (zuerst nur pnpm selbst, dann das Projekt) und Trivy lie
 extrahiert deshalb das Projekt-Dokument und scannt es separat. Actions sind per Commit-SHA gepinnt, Dependabot
 schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Nach dem ersten Push unter *Insights →
 Dependency graph* prüfen, dass dort die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm.
+Täglich (05:17 UTC) und per *Run workflow* laufen nur Audit und Trivy gegen `main`: Neue Advisories zu unveränderten
+Abhängigkeiten fallen so auch ohne Push auf (ein roter Lauf benachrichtigt) – Dependabot unterstützt laut GitHub-Doku
+pnpm nur bis Version 10 und meldet für das pnpm-12-Lockfile womöglich nichts. GitHub pausiert Zeitpläne nach 60 Tagen
+ohne Aktivität im Repo.
 
 ## Test-Stack & E2E
 
