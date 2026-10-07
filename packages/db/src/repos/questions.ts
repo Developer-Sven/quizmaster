@@ -267,6 +267,11 @@ export function calibrateQuestion(row: CalibrationRow, minShown: number = CALIBR
 export interface QuestionsRepo {
   /** Spielbarer Pool mit Projektion `{ _id, category, topic, difficulty }`. */
   loadPool(pool: QuestionPool): Promise<PoolEntry[]>;
+  /**
+   * Spielbarer Pool mit Spielinhalt (`PLAY_PROJECTION`) – der Realtime-Server hält ihn im Speicher, damit ein
+   * Zugwechsel keine Datenbank braucht (ADR-057).
+   */
+  loadPlayPool(pool: QuestionPool): Promise<PlayQuestion[]>;
   /** Voll-Dokumente (Spiel-Projektion) per `$in`; unbekannte IDs fehlen im Ergebnis. */
   findForPlay(questionIds: readonly string[]): Promise<PlayQuestion[]>;
   findById(questionId: string): Promise<QuestionDoc | null>;
@@ -338,6 +343,15 @@ export function createQuestionsRepo(questions: Collection<QuestionDoc>): Questio
         .find<PoolEntry>(
           { status: { $in: playableStatuses(pool) } },
           { projection: POOL_PROJECTION, timeoutMS: POOL_LOAD_TIMEOUT_MS },
+        )
+        .toArray();
+    },
+
+    async loadPlayPool(pool) {
+      return questions
+        .find<PlayQuestion>(
+          { status: { $in: playableStatuses(pool) } },
+          { projection: PLAY_PROJECTION, timeoutMS: POOL_LOAD_TIMEOUT_MS },
         )
         .toArray();
     },

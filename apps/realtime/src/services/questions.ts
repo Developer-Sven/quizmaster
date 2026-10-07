@@ -2,9 +2,11 @@
  * Fragen-Service (docs/04 §Fragenauswahl 1–5, §Change-Stream-Watcher): Fragenpool und spielbare Kategorien im
  * Speicher des Realtime-Servers, Kategorien anbieten, Fragen ziehen und laden.
  *
- * 1. Pool: `questions.loadPool(QUESTION_POOL)` (Projektion `{ _id, category, topic, difficulty }`, `all` =
- *    unverified + approved, `approved` = nur belegte) und `categories.listPlayable()`; Schwierigkeitsmix live
- *    aus `appConfig.catalog.difficultyMix` (ADR-021, Realtime liest nie `content/`).
+ * 1. Pool: `questions.loadPlayPool(QUESTION_POOL)` (spielbare Fragen MIT Spielinhalt, `all` = unverified +
+ *    approved, `approved` = nur belegte) und `categories.listPlayable()`; Schwierigkeitsmix live aus
+ *    `appConfig.catalog.difficultyMix` (ADR-021, Realtime liest nie `content/`). Der ganze Pool liegt geprüft im
+ *    Speicher (ADR-057, wenige MB): Ein Zugwechsel braucht so keine Datenbank – ein Netzaussetzer beendet kein Spiel.
+ *    Das Prüfen beim Reload gibt den Event-Loop regelmäßig frei, laufende Spiele ruckeln nicht.
  * 2. Live: Die Katalog-Watcher (`src/watchers/catalog.ts`) melden relevante Änderungen (`syncQuestion`,
  *    `syncCategory`, …). Reihenfolge beim Start wie von `watchWithResume` verlangt: Streams öffnen → `ready`
  *    abwarten → Anfangsbestand laden. Vollreload bei `onReset` und als Sicherheitsnetz alle 30 min; Änderungen,
@@ -12,10 +14,8 @@
  *    Reload-Stand sie). Läuft schon ein Reload, folgt genau einer danach.
  * 3./4. `offerCategories` und `drawQuestions` sind die reinen Auswahlfunktionen der Engine (Kategorien mit genug
  *    ungesehenen Fragen zuerst, Schwierigkeit nach Katalog-Mix, verschiedene Themen …).
- * 5. `loadQuestions` zieht, lädt die Volldokumente (`findForPlay`, `$in`, Frist je Versuch, ein zweiter Versuch
- *    nach DB-Fehler oder Zeitüberschreitung, Gesamtfrist deutlich unter der Engine-Frist
- *    `SHELL_REQUEST_TIMEOUT_MS`), prüft sie (spielbarer Status, Kategorie, Schema der Engine) und zieht einmal
- *    nach, falls eine Frage inzwischen fehlt oder nicht mehr spielbar ist (sie fliegt dann auch aus dem Pool).
+ * 5. `loadQuestions` zieht und nimmt die schon geprüften Spielinhalte aus dem Speicher (ohne Datenbank); fehlt
+ *    eine gezogene Frage dort (sollte nie vorkommen), fliegt sie aus dem Pool und es wird einmal nachgezogen.
  *
  * Katalog-Zustand (`catalog()`): brauchbar erst mit `MIN_USABLE_CATEGORIES` spielbaren Kategorien, die Fragen im
  * Pool haben – sonst endet jedes Spiel sofort (LOAD_FAILED). Ein unbrauchbarer Reload ersetzt einen brauchbaren
@@ -50,17 +50,8 @@ import type { AppConfigService } from "./app-config.ts";
 export const CATALOG_RELOAD_INTERVAL_MS = 30 * 60_000;
 /** Frist eines Vollreloads (Pool + Kategorien). */
 export const CATALOG_RELOAD_TIMEOUT_MS = 30_000;
-/** Frist je Versuch für das Laden der Volldokumente eines Zuges. */
-export const QUESTION_FETCH_TIMEOUT_MS = 5_000;
-/** Versuche je Abruf der Volldokumente (DB-Fehler oder Zeitüberschreitung → ein zweiter Versuch). */
-export const QUESTION_FETCH_ATTEMPTS = 2;
-/** Pause vor dem zweiten Versuch. */
-export const QUESTION_FETCH_RETRY_DELAY_MS = 250;
-/**
- * Gesamtfrist von `loadQuestions` (alle Abrufe, Wiederholung und Nachziehen) – klar unter der Engine-Frist
- * `SHELL_REQUEST_TIMEOUT_MS` (20 s), damit die Antwort vor deren Timer ankommt.
- */
-export const LOAD_QUESTIONS_BUDGET_MS = 15_000;
+/** Beim Prüfen des Pools gibt der Reload den Event-Loop nach so vielen Fragen frei (laufende Spiele). */
+const RELOAD_YIELD_EVERY = 500;
 /**
  * So viele spielbare Kategorien mit Fragen im Pool braucht ein Spiel mindestens: drei Angebote je Zug, und nie
  * die Kategorie des letzten Zuges.
@@ -68,7 +59,7 @@ export const LOAD_QUESTIONS_BUDGET_MS = 15_000;
 export const MIN_USABLE_CATEGORIES = 4;
 /** So lange wartet der Start höchstens darauf, dass die Change Streams offen sind. */
 export const WATCH_READY_TIMEOUT_MS = 10_000;
-/** Ziehungen je Zug: die erste und höchstens eine Nachziehung für fehlende/nicht mehr spielbare Fragen. */
+/** Ziehungen je Zug: die erste und höchstens eine Nachziehung für fehlende Fragen. */
 const DRAW_ROUNDS = 2;
 
 /** Pool-relevante Felder einer Frage (Watcher-Dokumente werden damit geprüft, alles andere verworfen). */
@@ -79,7 +70,6 @@ const questionStateSchema = questionDocSchema.pick({
   difficulty: true,
   status: true,
 });
-const poolEntrySchema = questionDocSchema.pick({ _id: true, category: true, topic: true, difficulty: true });
 const categoryStateSchema = categoryDocSchema.pick({
   _id: true,
   name: true,
@@ -136,7 +126,7 @@ export interface QuestionService extends CatalogChangeTarget {
   stop(): Promise<void>;
   /** 3 Kategorien für den nächsten Zug oder `null` (→ LOAD_FAILED). */
   offerCategories(turn: TurnRef, seen: SeenQuestions): CategoryOffer | null;
-  /** Fragen eines Zuges ziehen und laden (Frist, Prüfung, einmal nachziehen). */
+  /** Fragen eines Zuges ziehen – aus dem Speicher, ohne Datenbank (ADR-057). */
   loadQuestions(request: LoadQuestionsRequest): Promise<LoadedQuestions>;
   /** Spielbare Kategorien in Anzeigereihenfolge. */
   playableCategories(): CategoryOption[];
@@ -161,9 +151,6 @@ export interface QuestionServiceDeps {
   /** Change Streams starten (Standard true; Unit-Tests ohne Replica Set: false). */
   watch?: boolean;
   reloadIntervalMs?: number;
-  fetchTimeoutMs?: number;
-  /** Gesamtfrist von `loadQuestions` (Standard `LOAD_QUESTIONS_BUDGET_MS`). */
-  loadBudgetMs?: number;
   /** Produktion: `start()` bricht ab, wenn der Katalog danach unbrauchbar ist (Exit 1 statt grünem Start). */
   requireUsableCatalog?: boolean;
   /** Nur Tests: kürzere Pausen der Watcher beim Neustart. */
@@ -180,13 +167,25 @@ const sleep = (ms: number) =>
     setTimeout(resolve, ms).unref();
   });
 
+/** Gibt den Event-Loop frei (anstehende Socket-Ereignisse und Timer laufen zuerst). */
+const yieldToEventLoop = () =>
+  new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+
+/** Spielbare Frage: Pool-Eintrag und geprüfte Engine-Eingabe. */
+interface PlayableQuestion {
+  entry: PoolQuestion;
+  input: QuestionInput;
+}
+
 export function createQuestionService(deps: QuestionServiceDeps): QuestionService {
   const log = deps.logger.child({ component: "questions" });
-  const fetchTimeoutMs = deps.fetchTimeoutMs ?? QUESTION_FETCH_TIMEOUT_MS;
-  const loadBudgetMs = deps.loadBudgetMs ?? LOAD_QUESTIONS_BUDGET_MS;
 
   // Pool: id → Eintrag und Kategorie → (id → Eintrag); Arrays je Kategorie für die Engine werden gecacht.
   let entries = new Map<string, PoolQuestion>();
+  /** Geprüfte Spielinhalte je Frage (ADR-057) – immer dieselben IDs wie `entries`. */
+  let inputs = new Map<string, QuestionInput>();
   let byCategory = new Map<string, Map<string, PoolQuestion>>();
   let views = new Map<string, PoolQuestion[]>();
   let categories = new Map<string, CategoryEntry>();
@@ -236,10 +235,24 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
   };
 
   const removeEntry = (questionId: string) => {
+    inputs.delete(questionId);
     const previous = entries.get(questionId);
     if (previous === undefined) return;
     entries.delete(questionId);
     removeFromCategory(previous);
+  };
+
+  /** Prüft ein Dokument (Status, Pool-Felder, Schema der Engine); `null` = nicht spielbar. */
+  const toPlayable = (doc: unknown): PlayableQuestion | null => {
+    const state = questionStateSchema.safeParse(doc);
+    if (!state.success || !isPlayableStatus(state.data.status, deps.pool)) return null;
+    const input = questionInputSchema.safeParse(doc);
+    if (!input.success) return null;
+    const question = state.data;
+    return {
+      entry: { id: question._id, category: question.category, topic: question.topic, difficulty: question.difficulty },
+      input: input.data,
+    };
   };
 
   const poolView = (): Map<string, PoolQuestion[]> => {
@@ -319,23 +332,23 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         removeEntry(questionId);
         return;
       }
-      const parsed = questionStateSchema.safeParse(doc);
-      if (!parsed.success || parsed.data._id !== questionId) {
+      const state = questionStateSchema.safeParse(doc);
+      if (!state.success || state.data._id !== questionId) {
         log.warn({ question: questionId }, "Frage aus dem Change Stream ungültig – aus dem Pool entfernt");
         removeEntry(questionId);
         return;
       }
-      const question = parsed.data;
-      if (!isPlayableStatus(question.status, deps.pool)) {
+      const playable = toPlayable(doc);
+      if (playable === null) {
+        if (isPlayableStatus(state.data.status, deps.pool)) {
+          log.warn({ question: questionId }, "Frage aus dem Change Stream nicht spielbar – aus dem Pool entfernt");
+        }
         removeEntry(questionId);
         return;
       }
-      putEntry({
-        id: question._id,
-        category: question.category,
-        topic: question.topic,
-        difficulty: question.difficulty,
-      });
+      // Auch bei gleichem Pool-Eintrag: Text, Antworten oder Erklärung können sich geändert haben.
+      inputs.set(questionId, playable.input);
+      putEntry(playable.entry);
     });
   };
 
@@ -371,26 +384,25 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
     const startedAt = performance.now();
     try {
       const [rawPool, rawCategories] = await withTimeout(
-        Promise.all([deps.repos.questions.loadPool(deps.pool), deps.repos.categories.listPlayable()]),
+        Promise.all([deps.repos.questions.loadPlayPool(deps.pool), deps.repos.categories.listPlayable()]),
         CATALOG_RELOAD_TIMEOUT_MS,
         "Katalog-Reload",
       );
       const nextEntries = new Map<string, PoolQuestion>();
       const nextByCategory = new Map<string, Map<string, PoolQuestion>>();
+      const nextInputs = new Map<string, QuestionInput>();
       let invalidQuestions = 0;
-      for (const raw of rawPool) {
-        const parsed = poolEntrySchema.safeParse(raw);
-        if (!parsed.success) {
+      for (const [index, raw] of rawPool.entries()) {
+        // Zehntausende Prüfungen am Stück blockierten laufende Spiele spürbar – zwischendurch freigeben.
+        if (index > 0 && index % RELOAD_YIELD_EVERY === 0) await yieldToEventLoop();
+        const playable = toPlayable(raw);
+        if (playable === null) {
           invalidQuestions += 1;
           continue;
         }
-        const entry: PoolQuestion = {
-          id: parsed.data._id,
-          category: parsed.data.category,
-          topic: parsed.data.topic,
-          difficulty: parsed.data.difficulty,
-        };
+        const entry = playable.entry;
         nextEntries.set(entry.id, entry);
+        nextInputs.set(entry.id, playable.input);
         let bucket = nextByCategory.get(entry.category);
         if (bucket === undefined) {
           bucket = new Map();
@@ -408,8 +420,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
       const nextUsableCategories = countUsableCategories(nextCategories, nextByCategory);
       if (nextUsableCategories < MIN_USABLE_CATEGORIES && catalog().usable) {
         // Ein unbrauchbarer Stand (z. B. gelesen mitten in einem Seed) ersetzt keinen brauchbaren. Änderungen aus
-        // den Streams sind im bisherigen Stand schon angewendet; gelöschte/gesperrte Fragen fallen beim Laden
-        // ohnehin heraus (`checkForPlay`).
+        // den Streams sind im bisherigen Stand schon angewendet.
         reloads += 1;
         rejectedReloads += 1;
         lastReloadAt = deps.clock.now();
@@ -428,6 +439,7 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
       // Tausch und erneutes Anwenden der zwischenzeitlichen Änderungen ohne Unterbrechung (ein Tick).
       entries = nextEntries;
       byCategory = nextByCategory;
+      inputs = nextInputs;
       views = new Map();
       categories = nextCategories;
       categoryList = null;
@@ -474,41 +486,6 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
         return reload(reason);
       });
     return queued;
-  };
-
-  /**
-   * Volldokumente laden: Frist je Versuch (höchstens die Restzeit der Gesamtfrist), nach DB-Fehler oder
-   * Zeitüberschreitung genau ein weiterer Versuch – ein einzelner Aussetzer beendet so kein Spiel.
-   */
-  const fetchForPlay = async (ids: string[], deadline: number): Promise<unknown[]> => {
-    for (let attempt = 1; ; attempt++) {
-      const remaining = Math.floor(deadline - performance.now());
-      if (remaining <= 0) throw new Error("Fragen laden: Gesamtfrist abgelaufen");
-      try {
-        return await withTimeout(
-          deps.repos.questions.findForPlay(ids),
-          Math.min(fetchTimeoutMs, remaining),
-          "Fragen laden",
-        );
-      } catch (error) {
-        deps.metrics.recordMongoError("question_fetch");
-        const retry =
-          attempt < QUESTION_FETCH_ATTEMPTS && !stopped && deadline - performance.now() > QUESTION_FETCH_RETRY_DELAY_MS;
-        if (!retry) throw error;
-        log.warn({ err: error, attempt, questions: ids.length }, "Fragen laden fehlgeschlagen – neuer Versuch");
-        await sleep(QUESTION_FETCH_RETRY_DELAY_MS);
-      }
-    }
-  };
-
-  /** Prüft ein geladenes Volldokument für den Zug; `null` = nicht (mehr) spielbar. */
-  const checkForPlay = (doc: unknown, categoryId: string): QuestionInput | null => {
-    const state = questionStateSchema.safeParse(doc);
-    if (!state.success || !isPlayableStatus(state.data.status, deps.pool) || state.data.category !== categoryId) {
-      return null;
-    }
-    const input = questionInputSchema.safeParse(doc);
-    return input.success ? input.data : null;
   };
 
   const service: QuestionService = {
@@ -573,7 +550,6 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
 
     async loadQuestions(request) {
       if (stopped) throw new Error("Fragen-Service ist gestoppt");
-      const deadline = performance.now() + loadBudgetMs;
       const exclude = new Set(request.excludeQuestionIds);
       const questions: QuestionInput[] = [];
       let refilledSeen = 0;
@@ -589,33 +565,16 @@ export function createQuestionService(deps: QuestionServiceDeps): QuestionServic
           rng: deps.rng,
         });
         if (drawn.length === 0) break;
-        for (const entry of drawn) exclude.add(entry.id);
-        let docs: unknown[];
-        try {
-          docs = await fetchForPlay(
-            drawn.map((entry) => entry.id),
-            deadline,
-          );
-        } catch (error) {
-          // Nachziehen gescheitert: mit den schon geladenen Fragen spielen (der Zug hat dann weniger Fragen).
-          if (questions.length === 0) throw error;
-          log.warn({ err: error, loaded: questions.length }, "Nachziehen fehlgeschlagen – Zug mit weniger Fragen");
-          break;
-        }
-        const byId = new Map<string, unknown>();
-        for (const doc of docs) {
-          const id = (doc as { _id?: unknown })._id;
-          if (typeof id === "string") byId.set(id, doc);
-        }
         for (const entry of drawn) {
-          const checked = checkForPlay(byId.get(entry.id), request.categoryId);
-          if (checked === null) {
-            // Inzwischen gelöscht oder nicht mehr spielbar – der Watcher meldet das gleich ohnehin.
+          exclude.add(entry.id);
+          const input = inputs.get(entry.id);
+          if (input === undefined || input.category !== request.categoryId) {
+            // Pool und Inhalte laufen nie auseinander (siehe `removeEntry`/`syncQuestion`) – falls doch: raus.
             removeEntry(entry.id);
-            log.warn({ question: entry.id }, "Gezogene Frage nicht mehr spielbar – nachgezogen");
+            log.warn({ question: entry.id }, "Gezogene Frage ohne Spielinhalt – nachgezogen");
             continue;
           }
-          questions.push(checked);
+          questions.push(input);
           if (entry.seen) refilledSeen += 1;
         }
       }

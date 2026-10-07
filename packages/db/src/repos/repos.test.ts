@@ -192,6 +192,16 @@ describe("questions", () => {
     expect(playableStatuses("all")).toEqual(["unverified", "approved"]);
   });
 
+  it("lädt den spielbaren Pool samt Spielinhalt, ohne Statistik (ADR-057)", async () => {
+    const all = await repos.questions.loadPlayPool("all");
+    expect(all.map((q) => q._id).sort()).toEqual(["co-pool0001", "co-pool0002"]);
+    const first = all.find((q) => q._id === "co-pool0001");
+    expect(first).toMatchObject({ prompt: expect.any(String), answers: expect.any(Array), status: "unverified" });
+    expect(first).not.toHaveProperty("stats");
+    expect(first).not.toHaveProperty("contentHash");
+    expect((await repos.questions.loadPlayPool("approved")).map((q) => q._id)).toEqual(["co-pool0002"]);
+  });
+
   it("lädt gezogene Fragen per $in ohne Statistik und zählt Statistik per bulkWrite", async () => {
     const found = await repos.questions.findForPlay(["co-pool0001", "co-pool0002", "co-pool0001", "co-missing1"]);
     expect(found).toHaveLength(2);

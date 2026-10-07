@@ -97,8 +97,10 @@ describe("CSOT-Fristen der Hot-Path-Zugriffe", () => {
     const { collection, calls } = fakeCollection<QuestionDoc>();
     const repo = createQuestionsRepo(collection);
     await repo.loadPool("all");
+    await repo.loadPlayPool("all");
     await repo.findForPlay(["co-aaaaaaa1", "co-aaaaaaa2"]);
     expect(calls.map((call) => [call.method, call.options?.timeoutMS])).toEqual([
+      ["find", POOL_LOAD_TIMEOUT_MS],
       ["find", POOL_LOAD_TIMEOUT_MS],
       ["find", HOT_PATH_TIMEOUT_MS],
     ]);

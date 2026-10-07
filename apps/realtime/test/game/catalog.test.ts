@@ -10,17 +10,12 @@
 import { randomInt } from "node:crypto";
 import { Writable } from "node:stream";
 import type { Repositories } from "@quizmaster/db";
-import { createSeededRng, SHELL_REQUEST_TIMEOUT_MS, type TurnRef } from "@quizmaster/game-engine";
+import { createSeededRng, type TurnRef } from "@quizmaster/game-engine";
 import { defaultAppConfig, type QuestionDoc } from "@quizmaster/shared/documents";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createLogger, createSilentLogger } from "../../src/logger.ts";
 import { createMetrics } from "../../src/metrics.ts";
-import {
-  createQuestionService,
-  LOAD_QUESTIONS_BUDGET_MS,
-  QUESTION_FETCH_ATTEMPTS,
-  type QuestionServiceDeps,
-} from "../../src/services/questions.ts";
+import { createQuestionService, type QuestionServiceDeps } from "../../src/services/questions.ts";
 import { eventually, metricValue, type TestServer } from "../helpers/index.ts";
 import {
   actorOf,
@@ -223,11 +218,10 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     pool: () => Promise<PoolRow[]>;
     docs?: Map<string, PlayDoc>;
     categories?: string[] | (() => string[]);
-    /** Ersetzt das Laden der Volldokumente (Standard: aus `docs`). */
-    findForPlay?: (ids: readonly string[], fromDocs: () => PlayDoc[]) => Promise<PlayDoc[]>;
+    /** Ersetzt das Laden einzelner Volldokumente (Standard: aus `docs`) – der Spielbetrieb braucht es nicht mehr. */
+    findForPlay?: (ids: readonly string[]) => Promise<PlayDoc[]>;
     metrics?: ReturnType<typeof createMetrics>;
     logger?: QuestionServiceDeps["logger"];
-    fetchTimeoutMs?: number;
     requireUsableCatalog?: boolean;
   }
 
@@ -241,11 +235,17 @@ describe("Fragen-Service (ohne Change Streams)", () => {
         const doc = options.docs?.get(id);
         return doc === undefined ? [] : [doc];
       });
+    // Wie die Datenbank: nur spielbare Fragen, mit Spielinhalt (Dokument aus `docs` oder ein erzeugtes).
+    const playPool = async () =>
+      (await options.pool())
+        .map((row) => options.docs?.get(row._id) ?? questionDoc(row._id, row.category, row.difficulty))
+        .filter((doc) => doc.status === "unverified" || doc.status === "approved");
     const repos = {
       questions: {
         loadPool: () => options.pool(),
+        loadPlayPool: playPool,
         findForPlay: async (ids: readonly string[]) =>
-          options.findForPlay === undefined ? fromDocs(ids) : options.findForPlay(ids, () => fromDocs(ids)),
+          options.findForPlay === undefined ? fromDocs(ids) : options.findForPlay(ids),
       },
       categories: {
         listPlayable: async () =>
@@ -269,7 +269,6 @@ describe("Fragen-Service (ohne Change Streams)", () => {
       logger: options.logger ?? createSilentLogger(),
       metrics: options.metrics ?? createMetrics({ socketCount: () => 0 }),
       watch: false,
-      ...(options.fetchTimeoutMs === undefined ? {} : { fetchTimeoutMs: options.fetchTimeoutMs }),
       ...(options.requireUsableCatalog === undefined ? {} : { requireUsableCatalog: options.requireUsableCatalog }),
     };
     return createQuestionService(deps);
@@ -395,43 +394,16 @@ describe("Fragen-Service (ohne Change Streams)", () => {
     expect(few.offerCategories(turn(2), new Map())).toBeNull();
   });
 
-  it("loadQuestions: ein DB-Fehler beim Laden wird einmal wiederholt (Gesamtfrist unter der Engine-Frist)", async () => {
-    expect(LOAD_QUESTIONS_BUDGET_MS).toBeLessThan(SHELL_REQUEST_TIMEOUT_MS);
-    const rows = poolRows(FOUR);
-    const metrics = createMetrics({ socketCount: () => 0 });
-    let calls = 0;
-    const service = setup({
-      pool: async () => rows,
-      docs: docsFor(rows),
-      metrics,
-      findForPlay: async (_ids, fromDocs) => {
-        calls += 1;
-        if (calls === 1) throw new Error("connection pool cleared");
-        return fromDocs();
-      },
-    });
-    await service.reload("test");
-    const loaded = await service.loadQuestions({
-      categoryId: "comics",
-      count: 2,
-      excludeQuestionIds: [],
-      seen: new Map(),
-    });
-    expect(loaded.questions).toHaveLength(2);
-    expect(calls).toBe(2);
-    expect(await metricValue(metrics, "qm_mongo_errors_total", { operation: "question_fetch" })).toBe(1);
-  });
-
-  it("loadQuestions: hängender erster Abruf → Zeitüberschreitung, zweiter Versuch lädt", async () => {
+  it("loadQuestions braucht keine Datenbank: die Fragen liegen im Speicher (ADR-057)", async () => {
     const rows = poolRows(FOUR);
     let calls = 0;
     const service = setup({
       pool: async () => rows,
       docs: docsFor(rows),
-      fetchTimeoutMs: 50,
-      findForPlay: (_ids, fromDocs) => {
+      // Netzaussetzer: jeder Datenbank-Abruf schlägt fehl – ein Zugwechsel darf davon nichts merken.
+      findForPlay: async () => {
         calls += 1;
-        return calls === 1 ? new Promise<PlayDoc[]>(() => undefined) : Promise.resolve(fromDocs());
+        throw new Error("Datenbank weg");
       },
     });
     await service.reload("test");
@@ -443,25 +415,31 @@ describe("Fragen-Service (ohne Change Streams)", () => {
       seen: new Map(),
     });
     expect(loaded.questions).toHaveLength(3);
-    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(loaded.questions.every((question) => question.category === "comics")).toBe(true);
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(calls).toBe(0);
   });
 
-  it("loadQuestions: zwei Fehler in Folge → Fehler (das Spiel endet dann über LOAD_FAILED)", async () => {
-    const rows = poolRows(FOUR);
-    let calls = 0;
-    const service = setup({
-      pool: async () => rows,
-      docs: docsFor(rows),
-      findForPlay: async () => {
-        calls += 1;
-        throw new Error("Datenbank weg");
-      },
-    });
+  it("Inhalte bleiben aktuell: geänderter Text aus dem Change Stream, gesperrte Frage fällt heraus (ADR-057)", async () => {
+    const rows = poolRows(["comics"], 1);
+    const service = setup({ pool: async () => rows, docs: docsFor(rows), categories: ["comics"] });
     await service.reload("test");
-    await expect(
-      service.loadQuestions({ categoryId: "comics", count: 2, excludeQuestionIds: [], seen: new Map() }),
-    ).rejects.toThrow("Datenbank weg");
-    expect(calls).toBe(QUESTION_FETCH_ATTEMPTS);
+    const [row] = rows;
+    if (!row) throw new Error("Fixture");
+    service.syncQuestion(row._id, { ...questionDoc(row._id, "comics", row.difficulty), prompt: "Neu formuliert?" });
+    const loaded = await service.loadQuestions({
+      categoryId: "comics",
+      count: 1,
+      excludeQuestionIds: [],
+      seen: new Map(),
+    });
+    expect(loaded.questions[0]?.prompt).toBe("Neu formuliert?");
+    service.syncQuestion(row._id, questionDoc(row._id, "comics", row.difficulty, "retired"));
+    expect(service.hasQuestion(row._id)).toBe(false);
+    expect(
+      (await service.loadQuestions({ categoryId: "comics", count: 1, excludeQuestionIds: [], seen: new Map() }))
+        .questions,
+    ).toEqual([]);
   });
 
   it("Katalog-Zustand: brauchbar erst ab vier Kategorien mit Fragen; Gauges zeigen den Stand", async () => {
