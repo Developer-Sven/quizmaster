@@ -16,7 +16,7 @@
     "@quizmaster/shared": "workspace:*",
     "jose": "6.2.12",
     "jsqr": "1.4.0",
-    "lucide-react": "1.48.0",
+    "lucide-react": "1.49.0",
     "mongodb": "7.7.0",
     "motion": "13.4.6",
     "next": "16.3.8",
@@ -25,7 +25,7 @@
     "rate-limiter-flexible": "11.2.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "serwist": "9.5.12",
+    "serwist": "9.5.13",
     "socket.io-client": "4.8.4",
     "zod": "4.6.5",
     "zustand": "5.0.15"
