@@ -251,14 +251,41 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
   /** Letztes Paket je Socket (auch die Antwort auf den Ping alle 5 s). */
   const heardAt = new WeakMap<AppSocket, number>();
   const packetListeners = new WeakMap<AppSocket, () => void>();
+  /**
+   * Letztes Kommando je Gast – auch über einen Socket, der (noch) nicht an die Lobby gebunden ist (z. B. eine Antwort
+   * direkt nach dem Reconnect vor `lobby:resume`). Die Engine taut dafür selbst auf; ohne diesen Eintrag hielte die
+   * sekündliche Prüfung die Lobby weiter für still und fröre sofort wieder ein.
+   */
+  const commandHeardAt = new Map<string, number>();
 
-  const lastHeardOf = (guestId: string): number | null => {
+  /** Letztes Paket über die an die Lobby gebundenen Sockets des Gasts. */
+  const lastPacketOf = (guestId: string): number | null => {
     let latest: number | null = null;
     for (const socket of sockets.get(guestId) ?? []) {
       const at = heardAt.get(socket);
       if (at !== undefined && (latest === null || at > latest)) latest = at;
     }
     return latest;
+  };
+
+  /** Für die Stille-Prüfung zählt auch ein Kommando als Lebenszeichen. */
+  const lastHeardOf = (guestId: string): number | null => {
+    const packet = lastPacketOf(guestId);
+    const command = commandHeardAt.get(guestId) ?? null;
+    if (packet === null) return command;
+    return command === null ? packet : Math.max(packet, command);
+  };
+
+  /** Merkt das Kommando einer Person als Lebenszeichen (Trennungen erzeugt der Server selbst). */
+  const noteCommandFrom = (command: Command) => {
+    if (!("guestId" in command) || command.type === "DISCONNECT") return;
+    commandHeardAt.set(command.guestId, deps.clock.now());
+    // Nur Mitglieder dieser Lobby (höchstens die 8 Plätze plus Ausgeschiedene bis zur Revanche).
+    if (commandHeardAt.size > state.players.length + 1) {
+      for (const guestId of commandHeardAt.keys()) {
+        if (!state.players.some((player) => player.guestId === guestId)) commandHeardAt.delete(guestId);
+      }
+    }
   };
 
   const activeHumanGuestIds = () =>
@@ -268,11 +295,15 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
 
   const silent = () => isLobbySilent(activeHumanGuestIds(), lastHeardOf, deps.clock.now(), SILENCE_MS);
 
-  /** Letztes Lebenszeichen irgendeiner aktiven Person (rückwirkendes Einfrieren). */
+  /**
+   * Letztes Paket irgendeiner aktiven Person über ihre gebundenen Sockets (rückwirkendes Einfrieren). Kommandos zählen
+   * hier nicht: Das Kommando eines Gasts ist oft älter als die Pings seiner inzwischen getrennten Sockets – es würde
+   * zu weit zurück einfrieren.
+   */
   const lastHeardOfActive = (): number | undefined => {
     let latest: number | undefined;
     for (const guestId of activeHumanGuestIds()) {
-      const heard = lastHeardOf(guestId);
+      const heard = lastPacketOf(guestId);
       if (heard !== null && (latest === undefined || heard > latest)) latest = heard;
     }
     return latest;
@@ -584,6 +615,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
       log.error({ err: error }, "Command nicht erzeugbar");
       return rejection("INTERNAL", "Interner Fehler");
     }
+    noteCommandFrom(command);
     const socket = options.attach;
     const newlyAttached = socket !== undefined && !hasSocket(socket);
     if (socket !== undefined && newlyAttached) await addSocket(socket);

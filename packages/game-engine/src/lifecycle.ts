@@ -12,6 +12,7 @@
 import { GAME_RULES, LOBBY_LIFETIME } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import { finishGame, onPhaseTimeout, onRequestTimeout } from "./flow.ts";
+import { keepFrozen } from "./freeze.ts";
 import { removeFromLobby } from "./lobby.ts";
 import { reschedulePhaseEnd } from "./phases.ts";
 import {
@@ -69,9 +70,13 @@ export function onTimerFired(state: LobbyState, timer: PendingTimer, tx: Tx): Lo
   }
 }
 
-/** Frühe Auflösung (+400 ms), sobald alle verbundenen aktiven Teilnehmer:innen geantwortet haben. */
+/**
+ * Frühe Auflösung (+400 ms), sobald alle verbundenen aktiven Teilnehmer:innen geantwortet haben. Nie eingefroren
+ * (ADR-057): Bei einem Aussetzer trennt Socket.IO die Geräte gestaffelt – wer zuerst getrennt wird, verlöre sonst
+ * die Frage an die Leitung. Nach dem Auftauen prüft `normalize` mit dem verschobenen Antwortschluss erneut.
+ */
 function ensureEarlyReveal(state: LobbyState, tx: Tx): LobbyState {
-  if (state.phase !== "question") return state;
+  if (state.phase !== "question" || state.frozen !== null) return state;
   const turn = currentTurn(state.game);
   const question = currentQuestion(state.game);
   if (!turn || !question || question.deadline === null) return state;
@@ -196,8 +201,10 @@ export function normalize(state: LobbyState, tx: Tx): LobbyState {
   next = ensureEarlyReveal(next, tx);
   next = ensureHost(next, tx);
   next = pruneSuggestions(next);
-  // Eingefroren gibt es nur im laufenden Spiel (ADR-057) – Spielende oder Lobby hebt es auf.
+  // Eingefroren gibt es nur im laufenden Spiel (ADR-057) – Spielende oder Lobby hebt es auf; eine im Einfrieren
+  // begonnene Phase steht ab ihrem Beginn.
   if (next.frozen !== null && !isRunningPhase(next.phase)) next = { ...next, frozen: null };
+  next = keepFrozen(next, tx);
   next = syncReconnectTimers(next, tx);
   next = syncHostTimer(next, tx);
   next = syncEmptyTimer(next, tx);

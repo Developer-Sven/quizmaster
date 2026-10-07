@@ -69,7 +69,13 @@ export function reschedulePhaseEnd(state: LobbyState, endsAt: number, timerAt: n
   };
 }
 
-/** Entfernt den Phasen-Timer (z. B. nach der Kategoriewahl, während Fragen geladen werden). */
+/**
+ * Entfernt den Phasen-Timer (z. B. nach der Kategoriewahl, während Fragen geladen werden) – eingefroren (ADR-057)
+ * auch den angehaltenen, damit ihn das Auftauen nicht wieder plant.
+ */
 export function clearPhaseTimer(state: LobbyState): LobbyState {
-  return removeTimers(state, (timer) => timer.kind === "phase");
+  const cleared = removeTimers(state, (timer) => timer.kind === "phase");
+  const frozen = cleared.frozen;
+  if (frozen === null || frozen.phaseTimerAt === null) return cleared;
+  return { ...cleared, frozen: { ...frozen, phaseTimerAt: null } };
 }

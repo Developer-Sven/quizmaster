@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eventually, type TestServer } from "../helpers/index.ts";
-import { connectGuest, createLobby, joinLobby, runtimeOf, startGameServer, waitForPhase } from "./support.ts";
+import { actorOf, connectGuest, createLobby, joinLobby, runtimeOf, startGameServer, waitForPhase } from "./support.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
 
@@ -54,5 +54,47 @@ describe("Netzaussetzer (ADR-057)", () => {
     await waitForPhase(ben, "game_over", 30_000);
     host.close();
     ben.close();
+  });
+});
+
+describe("Netzaussetzer: Kommando über einen noch nicht gebundenen Socket (ADR-057)", () => {
+  it("taut vor dem Kommando auf und hält die Lobby wach – die sekündliche Prüfung friert nicht gleich wieder ein", async () => {
+    // Normales Timing: Reconnect-Frist 90 s – im Testmodus schieden die Getrennten schon nach 5 s aus.
+    const normal = await startGameServer({ timing: "normal" });
+    try {
+      const host = await connectGuest(normal, { guestDoc: true });
+      const code = await createLobby(host);
+      const ben = await connectGuest(normal, { guestDoc: true });
+      await joinLobby(ben, code, "Ben");
+      const [only] = runtimeOf(normal).questions.playableCategories();
+      if (!only) throw new Error("Keine spielbare Kategorie");
+      const settings = { answerSec: 0, rounds: 1, questionsPerCategory: 1, categoryIds: [only.id] };
+      expect((await host.emit("lobby:update-settings", settings)).ok).toBe(true);
+      expect((await host.emit("lobby:start", {})).ok).toBe(true);
+      const open = await ben.waitFor(
+        "lobby:state",
+        (state) => state.phase === "question" && state.question !== null,
+        30_000,
+      );
+      await eventually(() => (open.question?.startsAt ?? 0) <= Date.now(), 15_000);
+      const actor = actorOf(normal, code);
+
+      // Ein zweiter Socket von Ben ohne `lobby:resume` (etwa direkt nach einem Reconnect) – dann reißen beide
+      // gebundenen Verbindungen ab: Von keiner aktiven Person kommt mehr etwas, die Lobby friert ein.
+      const benAgain = await connectGuest(normal, { guestId: ben.guestId });
+      host.close();
+      ben.close();
+      await eventually(() => actor.state.frozen !== null, 10_000);
+
+      const answer = await benAgain.emit("game:answer", { questionId: open.question?.id ?? "", choice: 0 });
+      expect(answer).toEqual({ ok: true, data: { accepted: true } });
+      expect(actor.state.frozen).toBeNull();
+      // Ben ist zu hören: Die nächsten Prüfungen (jede Sekunde) frieren nicht sofort wieder ein.
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      expect(actor.state.frozen).toBeNull();
+      benAgain.close();
+    } finally {
+      await normal.cleanup();
+    }
   });
 });

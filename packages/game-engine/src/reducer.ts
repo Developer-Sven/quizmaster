@@ -13,7 +13,7 @@ import { type ErrorCode, ProtocolError } from "@quizmaster/shared";
 import { type Command, type CreateLobbyInput, isShellCommand } from "./commands.ts";
 import { assertNow, createTx, type EngineContext, type Tx } from "./context.ts";
 import { EFFECT_ORDER, type Effect } from "./effects.ts";
-import { onFreeze, onThaw } from "./freeze.ts";
+import { onFreeze, onThaw, thawsBefore } from "./freeze.ts";
 import { onAnswer, onLoadFailed, onOptionsReady, onPick, onQuestionsReady } from "./game-commands.ts";
 import { normalize, onTimerFired } from "./lifecycle.ts";
 import {
@@ -209,7 +209,8 @@ export function reduce(state: LobbyState, command: Command, ctx: EngineContext):
   const tx = createTx(state.timing, now, ctx.rng);
   let next: LobbyState;
   try {
-    next = dispatch(state, command, tx, timer);
+    // Eingefroren: Ein Kommando einer aktiven Person taut zuerst auf (ADR-057) – es zählt gegen die verschobenen Zeiten.
+    next = dispatch(thawsBefore(state, command) ? onThaw(state, tx) : state, command, tx, timer);
     if (!isShellCommand(command) && next !== state) next = { ...next, lastActivityAt: tx.now };
     next = normalize(next, tx);
   } catch (error) {

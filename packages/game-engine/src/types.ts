@@ -227,9 +227,10 @@ export interface LobbyState {
   /**
    * Eingefroren (ADR-057): Die Shell hört von keiner aktiven Person mehr etwas (Netzaussetzer) – die Spielzeit
    * steht, der Phasen-Timer ist angehalten (`phaseTimerAt` = sein Zeitpunkt beim Einfrieren). Beim Auftauen rücken
-   * Phase, Frage und Timer um die Pause nach hinten. Nicht im Snapshot.
+   * Phase, Frage und Timer um die Pause nach hinten. `phaseToken` = die angehaltene Phase: Beginnt im Einfrieren
+   * eine neue (Shell-Antwort, Aufgeben), friert `normalize` sie ab ihrem Beginn mit ein. Nicht im Snapshot.
    */
-  frozen: { since: number; phaseTimerAt: number | null } | null;
+  frozen: { since: number; phaseTimerAt: number | null; phaseToken: number } | null;
   /** Zuletzt vergebenes Token (Timer, Anfragen, Phasen). */
   seq: number;
   timers: PendingTimer[];

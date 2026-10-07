@@ -73,15 +73,113 @@ describe("Netzaussetzer: Spiel einfrieren und auftauen (ADR-057)", () => {
   });
 
   it("eingefroren kein „Weiter“; Spielende hebt das Einfrieren auf; zählt nicht als Aktivität", () => {
-    const sim = lobbyWith(2);
-    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { answerSec: 0 } });
+    // Anzeigender Host (ADR-046): Er zählt nicht zu den Aktiven, sein Paket taut also nicht auf.
+    const sim = lobbyWith(3);
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { answerSec: 0, hostPlays: false } });
     toOpenQuestion(sim);
     const activity = sim.state.lastActivityAt;
     sim.ok({ type: "FREEZE" });
     expect(sim.state.lastActivityAt).toBe(activity);
     expect(errorCode(sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: "question" }))).toBe("INVALID_PHASE");
+    expect(sim.state.frozen).not.toBeNull();
     sim.ok({ type: "END_GAME", guestId: sim.host });
     expect(sim.state.phase).toBe("game_over");
     expect(sim.state.frozen).toBeNull();
+  });
+
+  it("ein Kommando einer aktiven Person taut zuerst auf – ihre Antwort zählt gegen die verschobene Frist", () => {
+    // Auch über einen Socket, der (noch) nicht an die Lobby gebunden ist: Wer etwas schickt, ist zu hören.
+    const sim = lobbyWith(2);
+    const ben = sim.guests[1] ?? "";
+    toOpenQuestion(sim);
+    const deadline = currentQuestion(sim.state.game)?.deadline ?? 0;
+    sim.ok({ type: "FREEZE" });
+    sim.advance(45_000);
+    expect(sim.now).toBeGreaterThan(deadline);
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    expect(sim.state.frozen).toBeNull();
+    expect(currentQuestion(sim.state.game)?.deadline).toBe(deadline + 45_000);
+    // Der aktive Host darf danach auflösen lassen wie gewohnt – sein Paket hätte ebenso aufgetaut.
+    sim.ok({ type: "FREEZE" });
+    expect(sim.answer(sim.host, sim.correct).ok).toBe(true);
+    expect(sim.state.frozen).toBeNull();
+  });
+
+  it("eine Trennung im Einfrieren löst die Frage nicht vorzeitig auf (gestaffelte Ping-Timeouts)", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    const lea = sim.guests[2] ?? "";
+    toOpenQuestion(sim);
+    expect(sim.answer(sim.host, sim.correct).ok).toBe(true);
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    sim.ok({ type: "FREEZE" });
+    // Socket.IO trennt Lea gut 20 s nach dem letzten Pong – alle anderen haben schon geantwortet.
+    sim.advance(20_000);
+    sim.ok({ type: "DISCONNECT", guestId: lea });
+    sim.advance(30_000);
+    expect(sim.state.phase).toBe("question");
+    expect(currentQuestion(sim.state.game)?.outcomes).toBeNull();
+    expect(sim.state.frozen).not.toBeNull();
+    expect([...sim.timers.values()].filter((timer) => timer.kind === "phase")).toEqual([]);
+    // Lea kommt zurück (ihr Paket taut auf) und beantwortet die Frage noch.
+    sim.ok({ type: "RECONNECT", guestId: lea });
+    expect(sim.state.frozen).toBeNull();
+    expect(sim.answer(lea, sim.correct).ok).toBe(true);
+    sim.runUntil((state) => state.phase === "reveal");
+    const outcomes = currentQuestion(sim.state.game)?.outcomes ?? [];
+    expect(outcomes.find((entry) => entry.playerId === sim.playerId(lea))?.correct).toBe(true);
+  });
+
+  it("eine im Einfrieren begonnene Phase startet angehalten; nach dem Auftauen genau ein Phasen-Timer", () => {
+    // Die Reconnect-Frist läuft weiter (ADR-057): Die wählende Person scheidet aus, die Zufallswahl lädt die Fragen.
+    const sim = lobbyWith(3);
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.runUntil((state) => state.phase === "category_pick");
+    const pickerId = sim.state.game?.turns.at(-1)?.pickerId ?? "";
+    sim.ok({ type: "FREEZE" });
+    sim.ok({ type: "DISCONNECT", guestId: sim.guestOf(pickerId) });
+    sim.advance(90_001);
+    expect(sim.state.phase).toBe("question");
+    expect(sim.state.frozen).not.toBeNull();
+    expect(sim.state.frozen?.since).toBe(sim.state.phaseStartedAt);
+    expect([...sim.timers.values()].filter((timer) => timer.kind === "phase")).toEqual([]);
+    const presented = currentQuestion(sim.state.game);
+    const { phaseStartedAt } = sim.state;
+    sim.advance(10_000);
+    expect(sim.state.phase).toBe("question");
+    sim.ok({ type: "THAW" });
+    // Die Frage rückt um die Zeit seit ihrem Beginn nach hinten, nicht um die ganze Pause.
+    const pausedMs = sim.now - phaseStartedAt;
+    expect(pausedMs).toBeLessThan(11_000);
+    const question = currentQuestion(sim.state.game);
+    expect(question?.startsAt).toBe((presented?.startsAt ?? 0) + pausedMs);
+    expect(question?.deadline).toBe((presented?.deadline ?? 0) + pausedMs);
+    expect(sim.state.phaseStartedAt).toBe(phaseStartedAt + pausedMs);
+    const phaseTimers = [...sim.timers.values()].filter((timer) => timer.kind === "phase");
+    expect(phaseTimers).toHaveLength(1);
+    expect(phaseTimers[0]?.at).toBeGreaterThan(question?.deadline ?? 0);
+    // Die ganze Frage bleibt: Vorlauf, dann volle Antwortzeit.
+    sim.toQuestionStart();
+    const someone = sim.state.players.find((player) => player.status === "active" && !player.isBot);
+    expect(sim.answer(someone?.guestId ?? "", sim.correct).ok).toBe(true);
+  });
+
+  it("eine Kategoriewahl im Einfrieren lässt keinen angehaltenen Wahl-Timer zurück", () => {
+    const sim = lobbyWith(3, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.runUntil(() => sim.requests.length > 0);
+    sim.respond();
+    expect(sim.state.phase).toBe("category_pick");
+    const pickerId = sim.state.game?.turns.at(-1)?.pickerId ?? "";
+    sim.ok({ type: "FREEZE" });
+    expect(sim.state.frozen?.phaseTimerAt).not.toBeNull();
+    // Die wählende Person scheidet im Einfrieren aus (Reconnect-Frist) → Zufallswahl, Fragen werden geladen.
+    sim.ok({ type: "DISCONNECT", guestId: sim.guestOf(pickerId) });
+    sim.advance(90_001);
+    expect(sim.state.game?.turns.at(-1)?.categoryId).not.toBeNull();
+    expect(sim.state.frozen).not.toBeNull();
+    expect(sim.state.frozen?.phaseTimerAt).toBeNull();
+    sim.ok({ type: "THAW" });
+    expect([...sim.timers.values()].filter((timer) => timer.kind === "phase")).toEqual([]);
   });
 });
