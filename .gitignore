@@ -16,6 +16,20 @@
 /.tooling/
 /.deploy/
 
+# Schlüssel, Zertifikate, Backups, Zugangsdaten – Schutz vor versehentlichem `git add`
+*.pem
+*.key
+*.p12
+*.pfx
+*.gpg
+*.archive.gz
+dump.pm2
+dump.pm2.bak
+secrets/
+.secrets/
+credentials.json
+service-account*.json
+
 # Abhängigkeiten & Build-Ausgaben
 node_modules/
 .next/
