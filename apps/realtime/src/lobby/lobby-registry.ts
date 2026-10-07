@@ -7,8 +7,10 @@
  *    EINE aktive gehostete Lobby je Gast“ ein, auch parallele Erstellungen zählen) → `RATE_LIMITED` (Festlegung
  *    `QUOTAS.maxActiveHostedLobbiesPerGuest` in shared). Mitglied heißt: nicht verlassen/entfernt in einer offenen
  *    Lobby – auch getrennt innerhalb der Reconnect-Frist. So bleibt die Zuordnung „einzige Lobby des Gasts“
- *    (`lobbyOfSocket`) eindeutig. Zulassung (`admission.lobbyCreation`: Shutdown, `lobbyCreationEnabled` →
- *    LOBBY_CREATION_DISABLED, Lastabwurf, `maxActiveLobbies` → SERVER_BUSY).
+ *    (`lobbyOfSocket`) eindeutig. Mit `leavePrevious` (Handler `lobby:create`, ADR-042/059) zählen bestehende
+ *    Mitgliedschaften nicht: Sie werden erst nach dem Anlegen verlassen (Schritt 3). Zulassung
+ *    (`admission.lobbyCreation`: Shutdown, `lobbyCreationEnabled` → LOBBY_CREATION_DISABLED, Lastabwurf,
+ *    `maxActiveLobbies` → SERVER_BUSY).
  * 2. Code: `generateLobbyCode(crypto.randomInt, isTaken, { isAcceptable: isCodeAcceptable })` – belegt, wenn ein
  *    Actor im Speicher ODER eine aktive Lobby in der Datenbank ihn hat; nach 5 Versuchen → SERVER_BUSY.
  * 3. `createLobby` (Engine) → `lobbies.insert` (partieller Unique-Index auf aktive Codes; Kollision → neuer

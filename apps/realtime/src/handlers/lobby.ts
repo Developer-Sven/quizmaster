@@ -3,7 +3,7 @@
  *
  * | Event | Command | Fehlercodes (neben VALIDATION_FAILED/RATE_LIMITED aus der Pipeline) |
  * |---|---|---|
- * | `lobby:create` | LEAVE in bisherigen Lobbys (ADR-042), dann `createLobby` | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (paralleles Erstellen), LOBBY_CREATION_DISABLED, SERVER_BUSY |
+ * | `lobby:create` | `createLobby`, danach LEAVE in bisherigen Lobbys (ADR-042/059) | TURNSTILE_REQUIRED, NAME_REJECTED, RATE_LIMITED (paralleles Erstellen), LOBBY_CREATION_DISABLED, SERVER_BUSY |
  * | `lobby:join` | JOIN (Mitglied → wie RECONNECT) | LOBBY_NOT_FOUND, TURNSTILE_REQUIRED, NAME_REJECTED, KICKED, GAME_IN_PROGRESS, LOBBY_FULL |
  * | `lobby:resume` | RECONNECT | LOBBY_NOT_FOUND, KICKED, RESIGNED |
  * | `lobby:leave` | LEAVE (im Spiel = Aufgeben) | LOBBY_NOT_FOUND, KICKED, RESIGNED |

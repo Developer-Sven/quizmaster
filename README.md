@@ -65,7 +65,8 @@ als zwei YAML-Dokumente (zuerst nur pnpm selbst, dann das Projekt) und Trivy lie
 extrahiert deshalb das Projekt-Dokument und scannt es separat. Actions sind per Commit-SHA gepinnt, Dependabot
 schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Unter *Insights → Dependency graph* sollten
 die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm – sonst liest GitHub das Lockfile nicht.
-Täglich (05:17 UTC) und per *Run workflow* laufen nur Audit und Trivy gegen `main`: Neue Advisories zu unveränderten
+Täglich (05:17 UTC) laufen nur Audit und Trivy gegen `main` (per *Run workflow* läuft die ganze CI für den gewählten
+Branch): Neue Advisories zu unveränderten
 Abhängigkeiten fallen so auch ohne Push auf (ein roter Lauf benachrichtigt) – Dependabot unterstützt laut GitHub-Doku
 pnpm nur bis Version 10 und meldet für das pnpm-12-Lockfile womöglich nichts. GitHub pausiert Zeitpläne nach 60 Tagen
 ohne Aktivität im Repo.
@@ -524,6 +525,7 @@ pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle
 | `mongo` | in 5 min ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler auftreten – und das länger als 6 min anhält |
 | `restart_loop` | Realtime in 15 min ≥ 3-mal neu startet |
 | `auto_retire` | die Schutzautomatik in 15 min ≥ 5 Fragen zurückzieht oder einen fälligen Rückzug wegen ihres Tagesbudgets zurückhält |
+| `origin_retention` | die 30-Tage-Löschung der IP-Schlüssel an Meldungen und Bewertungen seit über 3 h nicht erfolgreich lief (ohne Erfolg: seit dem Start von Realtime) – Logs und die Teilindizes `createdAt_origin`/`updatedAt_origin` prüfen |
 | `metrics` | `/metrics` 5 min lang nicht lesbar ist, obwohl `/healthz` antwortet (z. B. falscher `METRICS_TOKEN`) |
 
 `change_stream` und `mongo` melden nur eine Störung, die länger als ihr Zählfenster anhält: Der Fehlerschub eines
@@ -608,6 +610,7 @@ pnpm admin:reports --dismiss <id> --env prod --confirm-prod         # Meldungen 
 pnpm admin:reports --restore <frage-id> --env prod --confirm-prod   # zurückgezogene Frage nach Prüfung zurück in den Pool
 pnpm admin:reports --restore-auto --since <iso> --dry-run --env prod --confirm-prod   # Massen-Wiederherstellung: Vorschau
 pnpm admin:reports --restore-auto --since <iso> --env prod --confirm-prod             # … ausführen (--reason reports|rating)
+pnpm admin:reports --recount <kategorie> --env prod --confirm-prod  # Live-Zähler einer Kategorie neu berechnen (nach einem Abbruch)
 ```
 
 `<id>` ist eine Fragen-ID (alle offenen Meldungen der Frage) oder eine Meldungs-ID. `--restore` und `--restore-auto`
