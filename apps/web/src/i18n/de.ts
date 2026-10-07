@@ -399,8 +399,8 @@ export const de = {
       iosShareOther: "Tippe auf „Teilen“ – in der Adresszeile oder im Menü des Browsers.",
       iosAdd: "Wähle „Zum Home-Bildschirm“ – eventuell weiter unten in der Liste.",
       iosConfirm: "Tippe oben rechts auf „Hinzufügen“.",
-      androidMenu: "Öffne das Menü des Browsers (⋮ oben rechts).",
-      androidMenuFirefox: "Öffne das Menü des Browsers (⋮).",
+      androidMenu: "Öffne das Menü des Browsers (oben rechts).",
+      androidMenuFirefox: "Öffne das Menü des Browsers.",
       androidMenuSamsung: "Öffne das Menü des Browsers (unten rechts).",
       androidAdd: "Tippe auf „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
       androidAddFirefox: "Tippe auf „Installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
@@ -410,6 +410,8 @@ export const de = {
     updateAvailable: "Neue Version verfügbar",
     update: "Aktualisieren",
     offline: "Du bist offline.",
+    /** Anleitung ließ sich nicht laden (offline) – die Startseite bleibt stehen */
+    installUnavailable: "Die Anleitung lädt nur mit Internet. Versuch es gleich noch mal.",
     /** Web-App-Manifest (docs/10): Name, Beschreibung, Screenshot-Beschriftungen, Kurzbefehle */
     manifest: {
       name: "quizmaster – Das Live-Quiz",

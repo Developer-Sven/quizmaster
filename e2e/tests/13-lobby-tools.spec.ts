@@ -6,6 +6,7 @@
 
 import { expect, test } from "./support/fixtures.ts";
 import { stageOverlay } from "./support/game.ts";
+import { CHUNK_FAILURE_ERRORS, failLazyChunks } from "./support/network.ts";
 import { playQuicklyUntil, waitForOverlay } from "./support/phases.ts";
 
 test("Startseite: Name, dann erstellen · Code · QR-Code mit „oder“ dazwischen; Code-Hinweis nur für Screenreader", async ({
@@ -176,4 +177,27 @@ test("Startseite am Handy: „Als App installieren“ ist immer da, auf dem iPho
   await expect(steps.first()).toContainText(method === "ios" ? "„Teilen“" : "Menü");
   await sheet.getByTestId("install-sheet-close").click();
   await expect(sheet).toBeHidden();
+});
+
+test("Installieren offline: die Startseite bleibt stehen, Hinweis statt Fehlerseite – online klappt es wieder", async ({
+  players,
+}, testInfo) => {
+  test.skip(
+    !testInfo.project.name.startsWith("iphone"),
+    "Anleitung (ohne Dialog des Browsers) gibt es fest nur am iPhone",
+  );
+  const mia = await players.create("Mia", { serviceWorkers: "block", expectedConsoleErrors: CHUNK_FAILURE_ERRORS });
+  const restoreNetwork = await failLazyChunks(mia.page, "/");
+  await mia.openStart();
+  await mia.page.getByTestId("install-app").click();
+  await expect(mia.page.getByTestId("install-unavailable")).toHaveText(
+    "Die Anleitung lädt nur mit Internet. Versuch es gleich noch mal.",
+  );
+  await expect(mia.page.getByTestId("error-page")).toHaveCount(0);
+  await expect(mia.page.getByTestId("install-row")).toBeVisible();
+  await restoreNetwork();
+  await mia.page.getByTestId("install-app").click();
+  const sheet = mia.page.getByRole("dialog", { name: "App installieren" });
+  await expect(sheet).toBeVisible();
+  await expect(mia.page.getByTestId("install-unavailable")).toHaveCount(0);
 });

@@ -107,6 +107,12 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
     else if (focus === "create") nameRef.current?.focus();
   }, [focus]);
 
+  // Nach einem Fehler beim Beitritt zurück ins Code-Feld: Es war währenddessen gesperrt, der Fokus lag danach auf der
+  // Seite selbst (WCAG 2.4.3). Hat die Person inzwischen woanders hingetippt, bleibt der Fokus dort.
+  useEffect(() => {
+    if (busy === null && codeError !== null && document.activeElement === document.body) codeRef.current?.focus();
+  }, [busy, codeError]);
+
   const showError = (errorCode: ClientErrorCode, placement: ErrorPlacement, at: "create" | "join") => {
     if (placement === "name") {
       setNameError(errorText(errorCode));

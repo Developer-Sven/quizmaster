@@ -7,7 +7,7 @@ import {
   type PrivatePlayerState,
   type PublicLobbyState,
 } from "@quizmaster/shared";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ActionBar, ActionBarNote } from "@/components/app/action-bar";
 import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
@@ -225,6 +225,14 @@ function GameScreenContent({
   };
 
   // Host-Aktion in der Zone des Spielerstreifens (ADR-045/049, Lage ADR-060) – die einzige orange Aktion.
+  // Lag der Fokus auf ihr, bekommt ihn die nächste wieder (die Platzierung wechselt, der Knopf wird neu eingehängt).
+  const continueFocus = useRef(false);
+  const continueFocusMemory: FocusMemory = {
+    remember: (focused) => {
+      continueFocus.current = focused;
+    },
+    wasFocused: () => continueFocus.current,
+  };
   let stripAction: StripAction | null = null;
   if (untimedQuestion !== null && isSelfHost) {
     stripAction = {
@@ -235,6 +243,7 @@ function GameScreenContent({
           block
           disabled={!questionOpen}
           busy={busy.continue === true}
+          focusMemory={continueFocusMemory}
           onContinue={() => handlers.onContinue("question")}
         />
       ),
@@ -247,6 +256,7 @@ function GameScreenContent({
           label={de.actions.next}
           block={stackedAction}
           busy={busy.continue === true}
+          focusMemory={continueFocusMemory}
           onContinue={() => handlers.onContinue(advancePhase)}
         />
       ) : (
@@ -373,16 +383,45 @@ interface ContinueButtonProps {
   /** noch nicht bedienbar (Frage noch im Vorlauf) */
   disabled?: boolean;
   busy: boolean;
+  /** Lag der Fokus zuletzt auf einer Host-Aktion? (überdauert das Neu-Einhängen beim Platzierungswechsel) */
+  focusMemory: FocusMemory;
   onContinue: () => void;
+}
+
+/** Fokus-Erinnerung der Host-Aktion; der Ref gehört dem Spielbildschirm. */
+interface FocusMemory {
+  remember(focused: boolean): void;
+  wasFocused(): boolean;
 }
 
 /**
  * Host-Aktion „Weiter“ (ADR-045) bzw. „Auflösen (2/3 Antworten)“ (ADR-049): die einzige orange Aktion, kompakt
- * (44 px, Trefferfläche 48), damit sie in der Zone des Spielerstreifens steht (ADR-060).
+ * (44 px, Trefferfläche 48), damit sie in der Zone des Spielerstreifens steht (ADR-060). Wechselt die Platzierung
+ * (Frage → Auflösung), hängt der Knopf neu ein: Hatte die vorige Host-Aktion den Fokus und liegt er jetzt auf der
+ * Seite selbst, übernimmt ihn die neue (WCAG 2.4.3) – sonst müsste man per Tab durch HUD und Antworten zurück.
  */
-function ContinueButton({ label, block = false, disabled = false, busy, onContinue }: ContinueButtonProps) {
+function ContinueButton({
+  label,
+  block = false,
+  disabled = false,
+  busy,
+  focusMemory,
+  onContinue,
+}: ContinueButtonProps) {
+  const button = useRef<HTMLButtonElement>(null);
+  // Nur beim Einhängen: Hatte die vorige Host-Aktion den Fokus und liegt er jetzt auf der Seite, übernimmt diese.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: absichtlich nur beim Einhängen
+  useEffect(() => {
+    if (focusMemory.wasFocused() && document.activeElement === document.body) button.current?.focus();
+  }, []);
   return (
     <Button
+      ref={button}
+      onFocus={() => focusMemory.remember(true)}
+      onBlur={(event) => {
+        // Ohne neues Ziel verschwindet der Knopf gerade (Platzierungswechsel) – dann bleibt die Erinnerung.
+        if (event.relatedTarget !== null) focusMemory.remember(false);
+      }}
       variant="primary"
       size="compact"
       block={block}

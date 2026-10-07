@@ -199,6 +199,29 @@ test("Zeit pro Frage „Host“: kein Countdown, der Host löst mit Stand der An
   for (const player of [host, ben]) await waitForOverlay(player, "answer-reveal");
 });
 
+test("Tastatur: Nach „Auflösen“ bleibt der Fokus auf der Host-Aktion („Weiter“), nicht auf der Seite (WCAG 2.4.3)", async ({
+  players,
+}) => {
+  const host = await players.create("Mia");
+  const ben = await players.create("Ben");
+  const code = await host.createLobby();
+  await ben.joinByCode(code);
+  await host.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1, "Zeit pro Frage": 0, "Nach jeder Frage": 0 });
+  await host.startGame();
+  const { picker } = await pickRoles([host, ben]);
+  await pickFirstCategory(picker);
+  await waitForOverlay(host, "question");
+  const reveal = host.page.getByTestId("game-continue");
+  await expect(reveal).toHaveText("Auflösen (0/2 Antworten)");
+  await expect(reveal).not.toHaveAttribute("aria-disabled", "true");
+  await reveal.focus();
+  await host.page.keyboard.press("Enter");
+  await waitForOverlay(host, "answer-reveal");
+  const next = host.page.getByTestId("game-continue");
+  await expect(next).toHaveText("Weiter");
+  await expect(next).toBeFocused();
+});
+
 test("Host beendet das Spiel: Ergebnis für alle, Hinweis, dann zurück in die Lobby (ADR-051)", async ({ players }) => {
   const host = await players.create("Mia");
   const ben = await players.create("Ben");

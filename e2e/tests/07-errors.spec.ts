@@ -13,6 +13,8 @@ test("falscher Code: Hinweis unter dem Code, ungültige Links zeigen „Lobby ni
   await guest.typeCodeOnStart(UNKNOWN_CODE);
   await expect(guest.page.getByRole("alert").filter({ hasText: "Lobby nicht gefunden." })).toBeVisible();
   await expect(guest.page).toHaveURL((url) => url.pathname === "/");
+  // Das Feld war während des Beitritts gesperrt – danach steht der Fokus wieder darin (WCAG 2.4.3).
+  await expect(guest.page.getByLabel("Lobby-Code")).toBeFocused();
 
   // Kurzlink mit gültigem Format, aber ohne Lobby: Fehler unter dem Code.
   await guest.openJoinLink(`/j/${UNKNOWN_CODE}`);

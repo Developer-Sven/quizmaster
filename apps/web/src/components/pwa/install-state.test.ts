@@ -90,6 +90,14 @@ describe("installMethod auf dem Handy (ADR-054)", () => {
     expect(steps[0]?.text).toBe("Öffne das Menü des Browsers (unten rechts).");
     expect(steps[0]?.text).not.toMatch(/[≡⋮]/);
   });
+
+  it("kein Menü-Zeichen im Text – das Symbol steht daneben (alle Browser)", () => {
+    for (const method of ["ios", "android"] as const) {
+      for (const browser of ["safari", "chrome", "firefox", "samsung", "edge", "other"] as const) {
+        for (const step of installSteps(method, browser)) expect(step.text, `${method}/${browser}`).not.toMatch(/[≡⋮]/);
+      }
+    }
+  });
 });
 
 describe("Plattform-Erkennung", () => {
@@ -280,8 +288,10 @@ describe("InstallRow", () => {
   it("lädt das Anleitungs-Sheet erst beim ersten Tipp – Sheet und motion bleiben aus der Startseite (ADR-037)", () => {
     // Ein statischer Import zog Sheet + motion (≈ 42 KB gzip) in das initiale JS von `/` (205 statt ≤ 165 KB).
     const source = readFileSync(new URL("./install-row.tsx", import.meta.url), "utf8");
-    expect(source).not.toMatch(/^import[^;]*from\s+["']\.\/install-sheet["']/m);
-    expect(source).toMatch(/dynamic\(\s*\(\)\s*=>\s*import\("\.\/install-sheet"\)/);
-    expect(source).toMatch(/\{guideMounted && method !== "prompt" \?/);
+    expect(source).not.toMatch(/^import(?!\s+type)[^;]*from\s+["']\.\/install-sheet["']/m);
+    expect(source).toMatch(/import\("\.\/install-sheet"\)/);
+    // Ein gescheiterter Download wird nicht gemerkt (der nächste Tipp lädt neu) und ersetzt nie die Startseite.
+    expect(source).toMatch(/sheetModule = null;\s*throw error;/);
+    expect(source).toMatch(/\(\) => setUnavailable\(true\)/);
   });
 });
