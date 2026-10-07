@@ -231,7 +231,7 @@ export function banTargetKind(options: BanTargetOptions): "guest" | "ip" | "lobb
 
 /**
  * `--lobby <code> --name <name>`: Gast aus dem Lobby-Snapshot (aktive Lobby zuerst, sonst die zuletzt geänderte
- * mit diesem Code – Snapshots leben bis 2 h nach Spielende). Name exakt oder ohne Groß-/Kleinschreibung.
+ * mit diesem Code – Snapshots leben bis 2 h nach dem Schließen der Lobby). Name exakt oder ohne Groß-/Kleinschreibung.
  */
 export async function findGuestInLobby(
   collections: GuestLookupCollections,
@@ -247,7 +247,7 @@ export async function findGuestInLobby(
     .limit(1)
     .next();
   if (lobby === null)
-    throw new AdminUsageError(`Lobby ${display} nicht gefunden (Snapshots leben bis 2 h nach Spielende)`);
+    throw new AdminUsageError(`Lobby ${display} nicht gefunden (Snapshots leben bis 2 h nach dem Schließen der Lobby)`);
   const players = lobby.players;
   const exact = players.filter((player) => player.name === name);
   const matches = exact.length > 0 ? exact : players.filter((player) => nameKey(player.name) === nameKey(name));

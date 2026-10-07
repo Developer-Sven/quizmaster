@@ -12,7 +12,7 @@
 //
 // „Initial“ = Skripte im HTML ohne noModule = Framework (rootMainFiles) + Layout/Fehlergrenze/Seite der Route.
 // Zusätzlich ausgewiesen: dynamische Importe der Seite; bei /lobby/[code] lädt LobbyEntry LobbyScreen sofort
-// („beim Öffnen“) – das zählt nicht zum Budget, zeigt aber Ausreißer wie den zod-Locale-Chunk (W3-Review).
+// („beim Öffnen“) – das zählt nicht zum Budget, zeigt aber Ausreißer wie den zod-Locale-Chunk.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";

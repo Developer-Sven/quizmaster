@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Richtet /etc/cron.d/quizmaster ein (Betrieb, nur als root – Go-live durch den Orchestrator):
+# Richtet /etc/cron.d/quizmaster ein (Betrieb, nur als root – einmalig beim Einrichten des Servers):
 #   jede Minute                      Health-Kontrolle Web/Realtime (infra/ops/healthcheck.sh)
 #   täglich 03:30                    Backup (infra/ops/backup.sh)
 #   täglich 09:00                    Backup-Kontrolle: Alarm, wenn kein frisches Backup existiert (check-backup.sh)

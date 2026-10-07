@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Legt den Systembenutzer „quizmaster“ für die pm2-Apps an (docs/12 „Nicht-Root-User“, README „Systembenutzer“) –
-# nur als root (Go-live durch den Orchestrator), idempotent:
+# nur als root (einmalig beim Einrichten des Servers), idempotent:
 #   1. Gruppe quizmaster (groupadd --system), falls sie fehlt
 #   2. Benutzer quizmaster (useradd --system): primäre Gruppe quizmaster, kein Home (/nonexistent, wird nicht
 #      angelegt), Shell nologin, gesperrtes Passwort, kein lastlog-Eintrag – falls er fehlt

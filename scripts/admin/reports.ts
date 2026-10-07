@@ -1,10 +1,11 @@
 // pnpm admin:reports [--json] [--env dev|prod --confirm-prod] [--resolve <id> | --dismiss <id> | --restore <frage-id>
-//                    | --restore-auto --since <iso> [--reason reports|rating] [--dry-run]] [--content-dir <pfad>]
+//                    | --restore-auto --since <iso> [--reason reports|rating] [--dry-run] | --recount <kategorie>]
+//                    [--content-dir <pfad>]
 //
 // Prüf-Queue der Fragenqualität (docs/08 §5, §8): offene Meldungen je Frage (Gründe, Anzahl, Zeitraum),
 // automatisch zurückgezogene Fragen (Schutzautomatik), schlecht bewertete Fragen und Fragen mit Trefferquote < 10 %,
-// priorisiert wie /faktencheck sie abarbeitet. `--json` ist die Eingabe für /faktencheck. Ausgaben enthalten nie
-// guestIds oder Lobby-Codes. Lesen mit `secondaryPreferred` (docs/07).
+// priorisiert wie der Faktencheck sie abarbeitet. `--json` ist die Eingabe für den Faktencheck. Ausgaben enthalten
+// nie guestIds oder Lobby-Codes. Lesen mit `secondaryPreferred` (docs/07).
 //
 // Aktionen (schreiben – in Produktion wie alles hier nur mit --confirm-prod):
 //   --resolve <id>      offene Meldungen erledigt (Frage korrigiert): <id> = Fragen-ID (alle offenen Meldungen der
@@ -15,9 +16,13 @@
 //   --restore-auto --since <iso> [--reason reports|rating] [--dry-run]
 //                       Massen-Wiederherstellung (z. B. nach Missbrauch der Meldungen, Watchdog-Alarm `auto_retire`):
 //                       alle seit <iso> automatisch zurückgezogenen Fragen wie --restore (gleiche Prüfungen, im Repo
-//                       geänderte oder nicht spielbare werden übersprungen), Live-Zähler je Kategorie einmal am Ende;
+//                       geänderte oder nicht spielbare werden übersprungen), Live-Zähler je Kategorie einmal am Ende –
+//                       auch nach einem Abbruch mitten im Lauf (z. B. Datenbank weg: ein neuer Lauf fände die schon
+//                       wiederhergestellten nicht mehr). Abbruch oder gescheiterte Neuberechnung → Exit-Code 1;
 //                       --dry-run zeigt nur, was passieren würde. Offene Meldungen bleiben in der Queue (zählen nach
 //                       der Wiederherstellung nicht mehr für die Schutzautomatik).
+//   --recount <kat>     Live-Zähler einer Kategorie neu berechnen (playableCount, approvedCount, playable) – z. B.
+//                       wenn die Neuberechnung nach --restore-auto scheiterte
 //
 // Verbindung aus .env.<env> (Standard dev); Zugangsdaten werden nie ausgegeben.
 import { existsSync, readFileSync } from "node:fs";
@@ -57,9 +62,9 @@ import { ISO_INSTANT_HINT, parseIsoInstant } from "../ops/lib/iso-time.ts";
 export const USAGE =
   "pnpm admin:reports [--json] [--env dev|prod --confirm-prod] " +
   "[--resolve <id> | --dismiss <id> | --restore <frage-id> | " +
-  "--restore-auto --since <iso> [--reason reports|rating] [--dry-run]] [--content-dir <pfad>]";
+  "--restore-auto --since <iso> [--reason reports|rating] [--dry-run] | --recount <kategorie>] [--content-dir <pfad>]";
 
-/** Version des JSON-Formats für /faktencheck (bei inkompatiblen Änderungen erhöhen). */
+/** Version des JSON-Formats für den Faktencheck (bei inkompatiblen Änderungen erhöhen). */
 export const REVIEW_QUEUE_SCHEMA_VERSION = 1;
 
 const REPORT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -85,7 +90,8 @@ export type ReportsAction =
   | { kind: "list" }
   | { kind: "resolve" | "dismiss"; target: ReportTarget }
   | { kind: "restore"; questionId: string }
-  | { kind: "restore-auto"; since: Date; reason: AutoRetireReason | null; dryRun: boolean };
+  | { kind: "restore-auto"; since: Date; reason: AutoRetireReason | null; dryRun: boolean }
+  | { kind: "recount"; category: string };
 
 export interface ReportsCommand {
   env: "dev" | "prod";
@@ -115,6 +121,7 @@ const OPTIONS = {
   since: { type: "string" },
   reason: { type: "string" },
   "dry-run": { type: "boolean", default: false },
+  recount: { type: "string" },
   "content-dir": { type: "string" },
   help: { type: "boolean", short: "h", default: false },
 } as const;
@@ -133,9 +140,9 @@ export function parseReportsArgs(args: readonly string[]): ReportsCommand {
   const { values, positionals } = parsed;
   if (positionals.length > 0) throw new ReportsUsageError(`Unerwartete Argumente: ${positionals.join(" ")}`);
   if (values.env !== "dev" && values.env !== "prod") throw new ReportsUsageError("--env muss dev oder prod sein");
-  const chosen = (["resolve", "dismiss", "restore"] as const).filter((key) => values[key] !== undefined);
+  const chosen = (["resolve", "dismiss", "restore", "recount"] as const).filter((key) => values[key] !== undefined);
   if (chosen.length + (values["restore-auto"] ? 1 : 0) > 1) {
-    throw new ReportsUsageError("Nur eine Aktion: --resolve, --dismiss, --restore oder --restore-auto");
+    throw new ReportsUsageError("Nur eine Aktion: --resolve, --dismiss, --restore, --restore-auto oder --recount");
   }
   let action: ReportsAction = { kind: "list" };
   if (values.resolve !== undefined) action = { kind: "resolve", target: parseReportTarget(values.resolve) };
@@ -146,6 +153,13 @@ export function parseReportsArgs(args: readonly string[]): ReportsCommand {
       throw new ReportsUsageError(`--restore erwartet eine Fragen-ID (z. B. rw-8f3k2m1q), nicht „${values.restore}“`);
     }
     action = { kind: "restore", questionId };
+  }
+  if (values.recount !== undefined) {
+    const category = categoryIdSchema.safeParse(values.recount.trim());
+    if (!category.success) {
+      throw new ReportsUsageError(`--recount erwartet eine Kategorie (z. B. kinofilme), nicht „${values.recount}“`);
+    }
+    action = { kind: "recount", category: category.data };
   }
   if (values["restore-auto"]) {
     if (values.since === undefined) {
@@ -204,7 +218,7 @@ function reasonSummary(byReason: Partial<Record<ReportReason, number>>): string 
     .join(", ");
 }
 
-/** Hinweise für den Prüfer (`fakten-pruefer`) – ohne personenbezogene Daten. */
+/** Hinweise für den Faktencheck – ohne personenbezogene Daten. */
 export function reviewHints(item: ReviewQueueItem): string[] {
   const hints: string[] = [];
   if (item.autoRetired !== null) {
@@ -242,7 +256,7 @@ export function reviewHints(item: ReviewQueueItem): string[] {
   return hints;
 }
 
-/** JSON-Dokument der Prüf-Queue für /faktencheck (stabil, `schemaVersion`). */
+/** JSON-Dokument der Prüf-Queue für den Faktencheck (stabil, `schemaVersion`). */
 export function queueToJson(queue: ReviewQueue, context: QueueContext) {
   return {
     schemaVersion: REVIEW_QUEUE_SCHEMA_VERSION,
@@ -351,7 +365,7 @@ export function formatQueueText(queue: ReviewQueue, context: QueueContext): stri
     "",
     "Aktionen: --resolve <frage-id|meldungs-id> (korrigiert) · --dismiss <…> (unbegründet) · " +
       "--restore <frage-id> (zurückgezogene Frage wieder in den Pool) · --restore-auto --since <iso> [--dry-run] " +
-      "(alle seit dann zurückgezogenen) · --json für /faktencheck",
+      "(alle seit dann zurückgezogenen) · --recount <kategorie> (Live-Zähler neu) · --json für den Faktencheck",
   );
   return lines;
 }
@@ -427,7 +441,7 @@ async function planRestore(
   const status = toDbQuestionStatus(entry.status);
   if (status === "retired") {
     throw new ReportsActionError(
-      `${questionId} ist im Repo ${entry.status} – erst korrigieren (/faktencheck), dann seeden`,
+      `${questionId} ist im Repo ${entry.status} – erst korrigieren (Faktencheck), dann seeden`,
     );
   }
   return { status, category, contentHash: doc.contentHash, autoRetired: doc.autoRetired };
@@ -489,16 +503,51 @@ export interface BulkRestoreResult {
   }>;
   /** Nicht wiederhergestellt – mit Grund (im Repo geändert, needs_fix, Datei fehlt, parallel geändert). */
   skipped: Array<{ questionId: string; problem: string }>;
-  /** Live-Zähler je betroffener Kategorie (nicht im Dry-Run). */
-  categories: Array<{ category: string; playable: boolean | null; playableCount: number | null }>;
+  /** Live-Zähler je Kategorie der wiederhergestellten Fragen (nicht im Dry-Run) – auch nach einem Abbruch. */
+  categories: CategoryRecountResult[];
+  /**
+   * Abbruch mitten im Lauf (z. B. Datenbank weg): ab `questionId` wurde nichts mehr versucht; `null` = vollständig.
+   * Die schon wiederhergestellten Fragen sind im Pool und ihre Kategorien neu gezählt – ein neuer Lauf setzt fort.
+   */
+  aborted: { questionId: string; problem: string } | null;
   /** Mehr Kandidaten als die Höchstzahl je Lauf – danach erneut ausführen. */
   truncated: boolean;
+}
+
+/** Live-Zähler einer Kategorie nach `--restore-auto`. */
+export interface CategoryRecountResult {
+  category: string;
+  /** `null`: Kategorie nicht gefunden – oder die Neuberechnung ist gescheitert (`problem`). */
+  playable: boolean | null;
+  playableCount: number | null;
+  /** Neuberechnung gescheitert (nachholen mit `--recount <kategorie>`), sonst `null`. */
+  problem: string | null;
+}
+
+/** Neuberechnung je Kategorie der wiederhergestellten Fragen – einzeln: Ein Fehler hält die übrigen nicht auf. */
+async function recountCategories(
+  repos: Repositories,
+  restored: BulkRestoreResult["restored"],
+  options: { pool: QuestionPool; now: Date },
+): Promise<CategoryRecountResult[]> {
+  const results: CategoryRecountResult[] = [];
+  for (const category of [...new Set(restored.map((entry) => entry.category))].sort()) {
+    try {
+      results.push({ category, ...(await recountAfterRestore(repos, category, options)), problem: null });
+    } catch (error) {
+      results.push({ category, playable: null, playableCount: null, problem: sanitize(describeError(error)) });
+    }
+  }
+  return results;
 }
 
 /**
  * Massen-Wiederherstellung: alle seit `since` automatisch zurückgezogenen Fragen (optional nur eines Grunds) mit
  * denselben Prüfungen wie `--restore`. Gelesen wird vom Primary (danach wird geschrieben); die Live-Zähler laufen je
- * Kategorie einmal am Ende.
+ * Kategorie einmal am Ende – auch wenn ein Fehler ohne fachlichen Grund (z. B. Datenbank weg) den Lauf abbricht:
+ * Sonst blieben die Kategorien der schon wiederhergestellten Fragen auf dem Stand der Rückzüge (ggf. `playable: false`),
+ * und ein neuer Lauf fände diese Fragen nicht mehr (`autoRetired` ist zurückgesetzt). Ergebnis mit `aborted` bzw.
+ * `problem` je Kategorie → `reportsActionFailed` (Exit-Code 1).
  */
 export async function restoreAutoRetiredSince(
   repos: Repositories,
@@ -513,6 +562,7 @@ export async function restoreAutoRetiredSince(
   const files = new Map<string, ParsedQuestionFile>();
   const restored: BulkRestoreResult["restored"] = [];
   const skipped: BulkRestoreResult["skipped"] = [];
+  let aborted: BulkRestoreResult["aborted"] = null;
   for (const question of questions) {
     try {
       const plan = await planRestore(repos, question._id, options.contentDir, files);
@@ -534,16 +584,16 @@ export async function restoreAutoRetiredSince(
         autoRetired: plan.autoRetired,
       });
     } catch (error) {
-      if (!(error instanceof ReportsActionError)) throw error;
-      skipped.push({ questionId: question._id, problem: error.message });
+      if (error instanceof ReportsActionError) {
+        skipped.push({ questionId: question._id, problem: error.message });
+        continue;
+      }
+      // Ohne fachlichen Grund (Datenbank, Netz): abbrechen – die Live-Zähler folgen trotzdem (unten).
+      aborted = { questionId: question._id, problem: sanitize(describeError(error)) };
+      break;
     }
   }
-  const categories: BulkRestoreResult["categories"] = [];
-  if (!action.dryRun) {
-    for (const category of [...new Set(restored.map((entry) => entry.category))].sort()) {
-      categories.push({ category, ...(await recountAfterRestore(repos, category, options)) });
-    }
-  }
+  const categories = action.dryRun ? [] : await recountCategories(repos, restored, options);
   return {
     since: action.since,
     reason: action.reason,
@@ -552,14 +602,38 @@ export async function restoreAutoRetiredSince(
     restored,
     skipped,
     categories,
+    aborted,
     truncated,
   };
+}
+
+/** `--recount`: Live-Zähler einer Kategorie neu berechnen; fehlt sie, bricht die Aktion fachlich ab. */
+async function recountOnly(
+  repos: Repositories,
+  category: string,
+  options: { pool: QuestionPool; now: Date },
+): Promise<{ category: string; playable: boolean; playableCount: number }> {
+  const counts = await recountAfterRestore(repos, category, options);
+  if (counts.playable === null || counts.playableCount === null) {
+    throw new ReportsActionError(`Kategorie ${category} gibt es in der Datenbank nicht`);
+  }
+  return { category, playable: counts.playable, playableCount: counts.playableCount };
 }
 
 export type ActionResult =
   | { action: "resolve" | "dismiss"; target: ReportTarget; changed: number }
   | ({ action: "restore" } & RestoreResult)
-  | ({ action: "restore-auto" } & BulkRestoreResult);
+  | ({ action: "restore-auto" } & BulkRestoreResult)
+  | { action: "recount"; category: string; playable: boolean; playableCount: number };
+
+/**
+ * Liegt ein Ergebnis vor, ist aber etwas gescheitert (Abbruch mitten in `--restore-auto` oder eine Neuberechnung
+ * der Live-Zähler)? Dann endet das Werkzeug mit Exit-Code 1.
+ */
+export function reportsActionFailed(result: ActionResult): boolean {
+  if (result.action !== "restore-auto") return false;
+  return result.aborted !== null || result.categories.some((entry) => entry.problem !== null);
+}
 
 /** Führt eine schreibende Aktion aus (Liste: `buildReviewQueue`). */
 export async function runReportsAction(
@@ -572,6 +646,7 @@ export async function runReportsAction(
   if (action.kind === "restore-auto") {
     return { action: "restore-auto", ...(await restoreAutoRetiredSince(repos, action, options)) };
   }
+  if (action.kind === "recount") return { action: "recount", ...(await recountOnly(repos, action.category, options)) };
   const changed = await repos.reports.resolveOpen(action.target, action.kind === "resolve" ? "resolved" : "dismissed");
   return { action: action.kind, target: action.target, changed };
 }
@@ -589,7 +664,20 @@ function describeBulkRestore(result: BulkRestoreResult): string {
     );
   }
   for (const entry of result.skipped) lines.push(`  übersprungen: ${entry.questionId} – ${entry.problem}`);
+  if (result.aborted !== null) {
+    lines.push(
+      `  ABGEBROCHEN bei ${result.aborted.questionId}: ${result.aborted.problem} – die übrigen bleiben zurückgezogen ` +
+        "(erneut ausführen setzt fort); Live-Zähler der schon wiederhergestellten: Kategorien unten",
+    );
+  }
   for (const entry of result.categories) {
+    if (entry.problem !== null) {
+      lines.push(
+        `  Kategorie ${entry.category}: Live-Zähler NICHT neu berechnet (${entry.problem}) – nachholen: ` +
+          `pnpm admin:reports --recount ${entry.category} (mit denselben --env/--confirm-prod)`,
+      );
+      continue;
+    }
     lines.push(
       entry.playable === null
         ? `  Kategorie ${entry.category} nicht gefunden`
@@ -607,6 +695,9 @@ function describeBulkRestore(result: BulkRestoreResult): string {
 
 export function describeActionResult(result: ActionResult): string {
   if (result.action === "restore-auto") return describeBulkRestore(result);
+  if (result.action === "recount") {
+    return `Kategorie ${result.category} neu gezählt: ${result.playableCount} spielbare Fragen, ${result.playable ? "spielbar" : "NICHT spielbar"}`;
+  }
   if (result.action === "restore") {
     const category =
       result.categoryPlayable === null
@@ -671,6 +762,8 @@ async function main(args: readonly string[]): Promise<void> {
     });
     if (command.json) console.info(JSON.stringify(result, null, 2));
     else log(describeActionResult(result));
+    // Teilweise gescheitert (Abbruch, Neuberechnung): Ergebnis steht oben, der Exit-Code meldet es.
+    if (reportsActionFailed(result)) process.exitCode = 1;
   } finally {
     await closeMongoClient(client);
   }

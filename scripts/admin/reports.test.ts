@@ -1,6 +1,6 @@
 /**
  * `pnpm admin:reports` (docs/08 §5, §8): Argumente, Prod-Schutz vor jedem Dateizugriff, Ausgabe der Prüf-Queue
- * (Text und JSON für /faktencheck) ohne guestIds/Lobby-Codes, Aktionen --resolve/--dismiss/--restore gegen die
+ * (Text und JSON für den Faktencheck) ohne guestIds/Lobby-Codes, Aktionen --resolve/--dismiss/--restore gegen die
  * Test-DB (Fixtures-Katalog aus einer Kopie in einem temporären Content-Ordner).
  */
 import { execFile } from "node:child_process";
@@ -24,6 +24,7 @@ import {
   queueToJson,
   ReportsActionError,
   ReportsUsageError,
+  reportsActionFailed,
   restoreQuestion,
   runReportsAction,
 } from "./reports.ts";
@@ -118,7 +119,7 @@ describe("Argumente und Prod-Schutz", () => {
 describe("Prüf-Queue: Ausgabe ohne guestIds", () => {
   const guests = Array.from({ length: 5 }, () => randomUUID());
 
-  it("Text und JSON: gruppiert je Frage, priorisiert, mit Datei und Hinweisen für /faktencheck", async () => {
+  it("Text und JSON: gruppiert je Frage, priorisiert, mit Datei und Hinweisen für den Faktencheck", async () => {
     const [reported, retired] = await questionsOf("musik-hits", 2);
     if (reported === undefined || retired === undefined) throw new Error("Fixtures fehlen");
     const reasons = ["falsch", "veraltet", "tippfehler"] as const;
@@ -417,5 +418,147 @@ describe("Massen-Wiederherstellung (--restore-auto, z. B. nach Missbrauch der Me
       });
     }
     expect(await repos.questions.findQualityState(changed._id)).toMatchObject({ status: "retired" });
+  });
+
+  /** Zurückgezogen `hoursAgo` Stunden vor einem eigenen Zeitfenster (60 Tage nach `now`, getrennt von den anderen Tests). */
+  const late = (hoursAgo: number) => new Date(now.getTime() + 60 * DAY_MS - hoursAgo * 3_600_000);
+
+  /** Live-Zähler einer Kategorie, wie sie in `categories` gespeichert sind. */
+  async function storedCounts(category: string) {
+    const doc = await t.collections.categories.findOne({ _id: category });
+    return { playable: doc?.playable, playableCount: doc?.playableCount };
+  }
+
+  it("Abbruch mitten im Lauf: die schon wiederhergestellten Kategorien werden trotzdem neu gezählt (Exit 1)", async () => {
+    const [newest, middle] = await questionsOf("comics", 2);
+    const [oldest] = await questionsOf("tv-serien", 1);
+    if (newest === undefined || middle === undefined || oldest === undefined) throw new Error("Fixtures fehlen");
+    const comics = await repos.questions.countPlayable("comics");
+    const tv = await repos.questions.countPlayable("tv-serien");
+    // Neueste zuerst: newest (comics), middle (comics), oldest (tv-serien).
+    expect(await repos.questions.autoRetire(oldest._id, "reports", late(3))).toBe(true);
+    expect(await repos.questions.autoRetire(middle._id, "reports", late(2))).toBe(true);
+    expect(await repos.questions.autoRetire(newest._id, "rating", late(1))).toBe(true);
+    // Die Zähler stehen noch auf dem Stand vor den Rückzügen (die Schutzautomatik zählt sie im Betrieb neu).
+    await repos.categories.applyCounts(
+      "comics",
+      { playableCount: 0, approvedCount: 0 },
+      { minPlayable: 1, pool: "all" },
+      now,
+    );
+    expect(await storedCounts("comics")).toEqual({ playable: false, playableCount: 0 });
+
+    // Die Datenbank fällt beim zweiten Wiederherstellen weg (z. B. Netzaussetzer während des Alarms).
+    let restoreCalls = 0;
+    const flaky: Repositories = {
+      ...repos,
+      questions: {
+        ...repos.questions,
+        restoreAutoRetired: async (...args: Parameters<Repositories["questions"]["restoreAutoRetired"]>) => {
+          restoreCalls += 1;
+          if (restoreCalls === 2) throw new Error("Verbindung zur Datenbank verloren");
+          return repos.questions.restoreAutoRetired(...args);
+        },
+      },
+    };
+    const options = { contentDir, pool: "all" as const, now: late(0) };
+    const action = { kind: "restore-auto" as const, since: late(4), reason: null, dryRun: false };
+    const aborted = await runReportsAction(flaky, action, options);
+    expect(aborted).toMatchObject({
+      action: "restore-auto",
+      candidates: 3,
+      restored: [{ questionId: newest._id, category: "comics" }],
+      skipped: [],
+      aborted: { questionId: middle._id, problem: expect.stringContaining("Verbindung zur Datenbank verloren") },
+      categories: [{ category: "comics", playable: true, playableCount: comics.playableCount - 1, problem: null }],
+    });
+    expect(reportsActionFailed(aborted)).toBe(true);
+    expect(await storedCounts("comics")).toEqual({ playable: true, playableCount: comics.playableCount - 1 });
+    const text = describeActionResult(aborted);
+    expect(text).toContain(`ABGEBROCHEN bei ${middle._id}: `);
+    expect(text).toContain("Verbindung zur Datenbank verloren");
+
+    // Ein neuer Lauf findet nur noch die übrigen – und zählt deren Kategorien neu.
+    const rest = await runReportsAction(repos, action, options);
+    expect(rest).toMatchObject({
+      candidates: 2,
+      restored: [{ questionId: middle._id }, { questionId: oldest._id }],
+      aborted: null,
+      categories: [
+        { category: "comics", playableCount: comics.playableCount, problem: null },
+        { category: "tv-serien", playableCount: tv.playableCount, problem: null },
+      ],
+    });
+    expect(reportsActionFailed(rest)).toBe(false);
+  });
+
+  it("scheitert die Neuberechnung einer Kategorie, laufen die übrigen weiter – mit Hinweis auf --recount (Exit 1)", async () => {
+    const [comic] = await questionsOf("comics", 1);
+    const [sport] = await questionsOf("sport-freizeit", 1);
+    if (comic === undefined || sport === undefined) throw new Error("Fixtures fehlen");
+    expect(await repos.questions.autoRetire(comic._id, "reports", late(2))).toBe(true);
+    expect(await repos.questions.autoRetire(sport._id, "reports", late(1))).toBe(true);
+    const flaky: Repositories = {
+      ...repos,
+      categories: {
+        ...repos.categories,
+        applyCounts: async (...args: Parameters<Repositories["categories"]["applyCounts"]>) => {
+          if (args[0] === "comics") throw new Error("Zeitüberschreitung");
+          return repos.categories.applyCounts(...args);
+        },
+      },
+    };
+    const options = { contentDir, pool: "all" as const, now: late(0) };
+    const result = await runReportsAction(
+      flaky,
+      { kind: "restore-auto", since: late(3), reason: null, dryRun: false },
+      options,
+    );
+    expect(result).toMatchObject({
+      restored: [{ questionId: sport._id }, { questionId: comic._id }],
+      aborted: null,
+      categories: [
+        {
+          category: "comics",
+          playable: null,
+          playableCount: null,
+          problem: expect.stringContaining("Zeitüberschreitung"),
+        },
+        { category: "sport-freizeit", playable: true, problem: null },
+      ],
+    });
+    expect(reportsActionFailed(result)).toBe(true);
+    const text = describeActionResult(result);
+    expect(text).toContain("Kategorie comics: Live-Zähler NICHT neu berechnet");
+    expect(text).toContain("pnpm admin:reports --recount comics");
+
+    // Nachholen: --recount zählt die Kategorie neu und schreibt die Live-Zähler.
+    const expected = await repos.questions.countPlayable("comics");
+    const recount = await runReportsAction(repos, { kind: "recount", category: "comics" }, options);
+    expect(recount).toEqual({
+      action: "recount",
+      category: "comics",
+      playable: true,
+      playableCount: expected.playableCount,
+    });
+    expect(reportsActionFailed(recount)).toBe(false);
+    expect(await storedCounts("comics")).toEqual({ playable: true, playableCount: expected.playableCount });
+    expect(describeActionResult(recount)).toBe(
+      `Kategorie comics neu gezählt: ${expected.playableCount} spielbare Fragen, spielbar`,
+    );
+    await expect(
+      runReportsAction(repos, { kind: "recount", category: "gibt-es-nicht" }, options),
+    ).rejects.toBeInstanceOf(ReportsActionError);
+  });
+
+  it("--recount <kategorie>: Argumente", () => {
+    expect(parseReportsArgs(["--recount", "comics"]).action).toEqual({ kind: "recount", category: "comics" });
+    for (const bad of [
+      ["--recount", "Comics!"],
+      ["--recount", "comics", "--restore", "rw-8f3k2m1q"],
+      ["--recount", "comics", "--restore-auto", "--since", "2026-10-01"],
+    ]) {
+      expect(() => parseReportsArgs(bad), bad.join(" ")).toThrow(ReportsUsageError);
+    }
   });
 });

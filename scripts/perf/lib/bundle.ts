@@ -11,7 +11,7 @@
  *
  * Zusätzlich die dynamischen Importe der Seite (`import()`/`next/dynamic`, im Chunk als Liste von Chunk-Pfaden):
  * `/lobby/[code]` lädt LobbyScreen sofort nach dem Hydrieren nach – das zählt nicht zu „initial“, wird aber als
- * „beim Öffnen“ ausgewiesen (dort steckte der zod-Ausreißer aus dem W3-Review).
+ * „beim Öffnen“ ausgewiesen (dort steckte einmal der zod-Locale-Ausreißer).
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
