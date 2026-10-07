@@ -4,7 +4,7 @@
  * übergebenen RNG (Produktion: `crypto.randomInt`). Ausnahme `displayOrder: "asc"`: Zahlen/Jahreszahlen
  * aufsteigend nach Zahlenwert; gleiche Werte bleiben in zufälliger Reihenfolge (nie die Repo-Reihenfolge).
  */
-import type { AnswerIndex } from "@quizmaster/shared";
+import { ANSWER_INDEXES, type AnswerIndex } from "@quizmaster/shared";
 import type { DisplayOrder } from "@quizmaster/shared/content";
 import { type Rng, shuffle } from "./rng.ts";
 import type { ShownAnswers, ShownOrder } from "./types.ts";
@@ -60,7 +60,7 @@ export function arrangeAnswers(
   displayOrder: DisplayOrder,
   rng: Rng,
 ): ArrangedAnswers {
-  const shuffled = shuffle<AnswerIndex>([0, 1, 2, 3], rng);
+  const shuffled = shuffle<AnswerIndex>(ANSWER_INDEXES, rng);
   const permutation = displayOrder === "asc" ? sortAscending(shuffled, repoAnswers) : shuffled;
   const [p0, p1, p2, p3] = permutation as [AnswerIndex, AnswerIndex, AnswerIndex, AnswerIndex];
   const correct = permutation.indexOf(0);

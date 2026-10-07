@@ -11,7 +11,7 @@
  *   `kick` (kicked senden, Socket aus dem Raum) · `broadcast` (`toPublicState`) · `sendPrivate`
  *   (`toPrivateState` an die Sockets der guestId) · `notice` · `cancelTimer`/`scheduleTimer` (bei Fälligkeit
  *   `TIMEOUT { token }` einreihen) · `offerCategories` (`offerCategories()` → OPTIONS_READY, sonst LOAD_FAILED)
- *   · `loadQuestions` (`drawQuestions()`, Volldokumente per `$in` laden → QUESTIONS_READY, endgültiger Fehler →
+ *   · `loadQuestions` (`drawQuestions()`, Spielinhalte liefern → QUESTIONS_READY, endgültiger Fehler →
  *   LOAD_FAILED) · `gameFinished` (games + Statistik in einer Transaktion) · `persist` (`toLobbySnapshot`,
  *   entprellt) · `closeLobby` (Timer löschen, aus der Registry entfernen).
  * - Folge-Commands (TIMEOUT, OPTIONS_READY, QUESTIONS_READY, LOAD_FAILED) in dieselbe Warteschlange einreihen;

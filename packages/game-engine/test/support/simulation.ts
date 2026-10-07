@@ -185,7 +185,7 @@ export class Simulation {
       : { type: "LOAD_FAILED", token: effect.token, reason: "keine 3 Kategorien" };
   }
 
-  /** Antwort der Shell auf `loadQuestions`: ziehen, „Volldokumente laden“ (in beliebiger Reihenfolge). */
+  /** Antwort der Shell auf `loadQuestions`: ziehen und die Spielinhalte liefern (in beliebiger Reihenfolge). */
   answerQuestions(effect: Extract<Effect, { type: "loadQuestions" }>): Command {
     const drawn = drawQuestions({
       categoryId: effect.categoryId,

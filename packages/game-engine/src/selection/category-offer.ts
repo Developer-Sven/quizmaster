@@ -11,8 +11,9 @@
  * 5. Auswahl des Hosts (`turn.categoryIds`, ADR-048): nur diese Kategorien; reicht sie nicht für 3 ohne die des
  *    letzten Zuges, ist diese dabei, und es dürfen 1–2 Optionen sein (genau 1 = feste Kategorie).
  * 6. Schwierigkeitsbereich (`turn.difficulty`, ADR-055): gezählt werden nur Fragen darin.
+ * Die Anzahl 3 ist `GAME_RULES.categoryOptionsPerTurn` (eine Quelle für Angebot, Engine und Schemas).
  */
-import type { CategoryOption } from "@quizmaster/shared";
+import { type CategoryOption, GAME_RULES } from "@quizmaster/shared";
 import type { TurnRef } from "../effects.ts";
 import { type Rng, shuffle } from "../rng.ts";
 import type { QuestionPool, SeenQuestions } from "./pool.ts";
@@ -94,16 +95,17 @@ function candidatesOf(input: CategoryOfferInput, categories: readonly CategoryOp
  */
 export function offerCategories(input: CategoryOfferInput): CategoryOffer | null {
   const { turn, rng } = input;
+  const perTurn = GAME_RULES.categoryOptionsPerTurn;
   const allowed = turn.categoryIds ?? null;
   const limited = allowed !== null;
   const allowedIds = new Set(allowed ?? []);
   const categories = limited ? input.categories.filter((option) => allowedIds.has(option.id)) : input.categories;
   let candidates = candidatesOf(input, categories, true);
-  if (limited && candidates.length < 3) candidates = candidatesOf(input, categories, false);
+  if (limited && candidates.length < perTurn) candidates = candidatesOf(input, categories, false);
 
   const full = candidates.filter((candidate) => candidate.unseen >= turn.questionsPerTurn);
   const partial = candidates.filter((candidate) => candidate.unseen < turn.questionsPerTurn);
-  const chosen = [...rank(full, rng), ...rank(partial, rng)].slice(0, 3);
-  if (chosen.length < (limited ? 1 : 3)) return null;
+  const chosen = [...rank(full, rng), ...rank(partial, rng)].slice(0, perTurn);
+  if (chosen.length < (limited ? 1 : perTurn)) return null;
   return shuffle(chosen, rng).map((candidate) => ({ ...candidate.option }));
 }

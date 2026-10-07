@@ -63,6 +63,41 @@ describe("Vorschläge für die Einstellungen (ADR-053)", () => {
     expect(suggestions(sim).map((entry) => entry.status)).toEqual(["accepted", "declined"]);
   });
 
+  it("der Reihe nach (ADR-056): die Reihenfolge der Kategorien gilt als Änderung und wird so übernommen", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    sim.ok({
+      type: "UPDATE_SETTINGS",
+      guestId: sim.host,
+      update: { categoryIds: ["sport", "musik", "kunst"], categoryMode: "sequence" },
+    });
+    expect(sim.state.settings).toMatchObject({ categoryMode: "sequence", rounds: 3 });
+    // Nur die Reihenfolge – Runde 1 spielt dann Kunst statt Sport.
+    sim.ok({ type: "SUGGEST_SETTINGS", guestId: ben, changes: { categoryIds: ["kunst", "sport", "musik"] } });
+    expect(suggestionOf(sim, ben).changes).toEqual({ categoryIds: ["kunst", "sport", "musik"] });
+    // Zusammen mit einer anderen Änderung bleibt die Reihenfolge im Vorschlag.
+    sim.ok({
+      type: "SUGGEST_SETTINGS",
+      guestId: ben,
+      changes: { categoryIds: ["musik", "kunst", "sport"], answerSec: 10 },
+    });
+    const suggestion = suggestionOf(sim, ben);
+    expect(suggestion.changes).toEqual({ categoryIds: ["musik", "kunst", "sport"], answerSec: 10 });
+    sim.ok({ type: "ACCEPT_SUGGESTION", guestId: sim.host, suggestionId: suggestion.id });
+    expect(sim.state.settings).toMatchObject({
+      categoryIds: ["musik", "kunst", "sport"],
+      categoryMode: "sequence",
+      answerSec: 10,
+    });
+    // Bei der Wahl (pick) ist die Reihenfolge bedeutungslos – ein reiner Reihenfolge-Vorschlag ändert nichts.
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { categoryMode: "pick" } });
+    expect(
+      errorCode(
+        sim.dispatch({ type: "SUGGEST_SETTINGS", guestId: ben, changes: { categoryIds: ["sport", "musik", "kunst"] } }),
+      ),
+    ).toBe("INVALID_OPTION");
+  });
+
   it("je Person ein Vorschlag: ein neuer ersetzt den alten (neue ID), Zurückziehen entfernt ihn", () => {
     const sim = lobbyWith(3);
     const ben = sim.guests[1] ?? "";

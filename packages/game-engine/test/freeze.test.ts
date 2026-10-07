@@ -1,3 +1,4 @@
+import { TIMINGS } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import { currentQuestion, toPublicState } from "../src/index.ts";
 import { lobbyWith, type Simulation } from "./support/simulation.ts";
@@ -181,5 +182,152 @@ describe("Netzaussetzer: Spiel einfrieren und auftauen (ADR-057)", () => {
     expect(sim.state.frozen?.phaseTimerAt).toBeNull();
     sim.ok({ type: "THAW" });
     expect([...sim.timers.values()].filter((timer) => timer.kind === "phase")).toEqual([]);
+  });
+});
+
+/**
+ * Gestaffelte Rückkehr nach einem Aussetzer (ADR-060): Dauert er länger als das Ping-Timeout, trennt der Server
+ * alle Geräte. Kommt das Netz zurück, verbinden sie sich nacheinander (Backoff je Gerät 1–5 s, dazu Ticket und
+ * Handshake). Wer im Aussetzer getrennt wurde, gilt nach dem Auftauen noch `reconnectHoldMs` lang als „gleich wieder
+ * da“: Die erste zurückkehrende Person löst die Frage nicht für alle auf und wird nicht an Stelle des Hosts Host.
+ */
+describe("Schonfrist nach dem Auftauen (ADR-060)", () => {
+  const holdMs = TIMINGS.normal.reconnectHoldMs;
+
+  /** Frage offen, Host und Ben haben geantwortet, Lea nicht; dann Aussetzer: eingefroren, alle getrennt. */
+  function outageAfterAnswers(): { sim: Simulation; ben: string; lea: string } {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    const lea = sim.guests[2] ?? "";
+    toOpenQuestion(sim);
+    expect(sim.answer(sim.host, sim.correct).ok).toBe(true);
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    sim.ok({ type: "FREEZE" });
+    // Ping-Timeout: Socket.IO trennt alle Geräte gut 20 s nach dem letzten Lebenszeichen.
+    sim.advance(20_000);
+    for (const guest of [sim.host, ben, lea]) sim.ok({ type: "DISCONNECT", guestId: guest });
+    sim.advance(20_000);
+    return { sim, ben, lea };
+  }
+
+  it("die erste zurückkehrende Person löst nicht für alle auf – wer gleich nachkommt, beantwortet die Frage noch", () => {
+    const { sim, ben, lea } = outageAfterAnswers();
+    // Das Netz ist zurück: Der Host verbindet sich als Erster, sein Kommando taut auf.
+    sim.ok({ type: "RECONNECT", guestId: sim.host });
+    expect(sim.state.frozen).toBeNull();
+    sim.advance(1_500);
+    expect(sim.state.phase).toBe("question");
+    sim.ok({ type: "RECONNECT", guestId: ben });
+    sim.advance(1_500);
+    expect(sim.state.phase).toBe("question");
+    sim.ok({ type: "RECONNECT", guestId: lea });
+    expect(sim.answer(lea, sim.correct).ok).toBe(true);
+    // Jetzt haben alle geantwortet: frühe Auflösung wie gewohnt.
+    const answeredAt = sim.now;
+    sim.runUntil((state) => state.phase === "reveal");
+    expect(sim.now).toBeLessThanOrEqual(answeredAt + TIMINGS.normal.earlyRevealMs);
+    const outcomes = currentQuestion(sim.state.game)?.outcomes ?? [];
+    expect(outcomes.find((entry) => entry.playerId === sim.playerId(lea))?.correct).toBe(true);
+    expect(sim.state.reconnectHold).toBeNull();
+  });
+
+  it("wer in der Schonfrist nicht zurückkommt, zählt danach wieder als getrennt – Auflösung ohne sie", () => {
+    const { sim, ben } = outageAfterAnswers();
+    sim.ok({ type: "RECONNECT", guestId: sim.host });
+    const thawedAt = sim.now;
+    const deadline = currentQuestion(sim.state.game)?.deadline ?? 0;
+    sim.ok({ type: "RECONNECT", guestId: ben });
+    // Lea bleibt weg: Die Frage wartet die Schonfrist ab, nicht bis zum (verschobenen) Antwortschluss.
+    sim.runUntil((state) => state.phase === "reveal");
+    expect(sim.now).toBeGreaterThanOrEqual(thawedAt + holdMs);
+    expect(sim.now).toBeLessThanOrEqual(thawedAt + holdMs + TIMINGS.normal.earlyRevealMs);
+    expect(sim.now).toBeLessThan(deadline);
+    expect(sim.state.reconnectHold).toBeNull();
+  });
+
+  it("nur wer im Aussetzer getrennt wurde: Wer schon vorher weg war, hält die Frage nicht auf", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    const lea = sim.guests[2] ?? "";
+    toOpenQuestion(sim);
+    expect(sim.answer(ben, sim.correct).ok).toBe(true);
+    // Lea schließt die App vor dem Aussetzer (eigene Trennung, wie ohne Aussetzer).
+    sim.ok({ type: "DISCONNECT", guestId: lea });
+    sim.advance(2_000);
+    sim.ok({ type: "FREEZE" });
+    sim.advance(20_000);
+    for (const guest of [sim.host, ben]) sim.ok({ type: "DISCONNECT", guestId: guest });
+    sim.advance(10_000);
+    sim.ok({ type: "RECONNECT", guestId: sim.host });
+    expect(sim.state.reconnectHold?.playerIds).toEqual([sim.playerId(ben)]);
+    // Ben hat schon geantwortet: Mit der Antwort des Hosts haben alle geantwortet, die zählen.
+    expect(sim.answer(sim.host, sim.correct).ok).toBe(true);
+    sim.advance(TIMINGS.normal.earlyRevealMs);
+    expect(sim.state.phase).toBe("reveal");
+  });
+
+  it("die Host-Rolle geht in der Schonfrist nicht an die erste zurückkehrende Person", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    const lea = sim.guests[2] ?? "";
+    const host = sim.host;
+    const hostId = sim.state.hostPlayerId;
+    toOpenQuestion(sim);
+    sim.ok({ type: "FREEZE" });
+    sim.advance(20_000);
+    for (const guest of [host, ben, lea]) sim.ok({ type: "DISCONNECT", guestId: guest });
+    // Länger getrennt als die Host-Übergabe (30 s) – ohne Schonfrist würde Ben sofort Host.
+    sim.advance(TIMINGS.normal.hostHandoverMs + 5_000);
+    sim.ok({ type: "RECONNECT", guestId: ben });
+    expect(sim.state.hostPlayerId).toBe(hostId);
+    sim.advance(holdMs - 1_000);
+    expect(sim.state.hostPlayerId).toBe(hostId);
+    sim.ok({ type: "RECONNECT", guestId: host });
+    sim.advance(holdMs);
+    expect(sim.state.hostPlayerId).toBe(hostId);
+  });
+
+  it("kommt der Host in der Schonfrist nicht zurück, übernimmt danach die am längsten anwesende verbundene Person", () => {
+    const sim = lobbyWith(3);
+    const ben = sim.guests[1] ?? "";
+    const lea = sim.guests[2] ?? "";
+    toOpenQuestion(sim);
+    sim.ok({ type: "FREEZE" });
+    sim.advance(20_000);
+    for (const guest of [sim.host, ben, lea]) sim.ok({ type: "DISCONNECT", guestId: guest });
+    sim.advance(TIMINGS.normal.hostHandoverMs + 5_000);
+    sim.ok({ type: "RECONNECT", guestId: lea });
+    const thawedAt = sim.now;
+    sim.ok({ type: "RECONNECT", guestId: ben });
+    sim.advance(holdMs - 1);
+    expect(sim.state.hostPlayerId).not.toBe(sim.playerId(ben));
+    // Der Timer der Übergabe liegt auf dem Ende der Schonfrist.
+    sim.advance(1);
+    expect(sim.now).toBe(thawedAt + holdMs);
+    expect(sim.state.hostPlayerId).toBe(sim.playerId(ben));
+  });
+
+  it("beginnt im Einfrieren eine neue Phase, zählen auch die vorher im Aussetzer Getrennten", () => {
+    // Die Shell liefert die Fragen erst im Einfrieren: Die Frage beginnt angehalten (ab ihrem Beginn) – getrennt
+    // wurden alle schon vorher, aber erst im Aussetzer.
+    const sim = lobbyWith(3, 0, { autoRespond: false });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.runUntil(() => sim.requests.length > 0);
+    sim.respond();
+    const turn = sim.state.game?.turns.at(-1);
+    const categoryId = turn?.options[0]?.id ?? "";
+    sim.ok({ type: "PICK", guestId: sim.guestOf(turn?.pickerId ?? ""), categoryId });
+    sim.ok({ type: "FREEZE" });
+    sim.advance(18_000);
+    const [first, ...rest] = sim.guests;
+    for (const guest of sim.guests) sim.ok({ type: "DISCONNECT", guestId: guest });
+    sim.advance(1_000);
+    sim.respond();
+    expect(sim.state.phase).toBe("question");
+    expect(sim.state.frozen?.since).toBe(sim.now);
+    sim.ok({ type: "RECONNECT", guestId: first ?? "" });
+    expect([...(sim.state.reconnectHold?.playerIds ?? [])].sort()).toEqual(
+      rest.map((guest) => sim.playerId(guest)).sort(),
+    );
   });
 });

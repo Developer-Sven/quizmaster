@@ -31,13 +31,18 @@ export const TIMER_KINDS = [
   "host_handover",
   /** Lobby schließen, wenn 60 s lang kein Mensch verbunden ist. */
   "empty_close",
-  /** Lobby schließen: 30 min ohne Aktivität (Phase lobby) bzw. 2 h nach Spielende (game_over). */
+  /** Lobby schließen: 30 min ohne Aktivität (nur Phase lobby; das Ergebnis geht von selbst zurück, ADR-038). */
   "idle_close",
   /**
    * Frist der offenen Anfrage an die Shell (`offerCategories`/`loadQuestions`, `SHELL_REQUEST_TIMEOUT_MS`):
    * bleibt eine gültige Antwort aus, endet das Spiel mit `load_failed` statt ewig zu warten.
    */
   "request",
+  /**
+   * Ende der Schonfrist nach dem Auftauen (ADR-060): Wer bis dahin nicht zurück ist, zählt wieder als getrennt –
+   * `normalize` prüft frühe Auflösung und Host-Übergabe neu.
+   */
+  "reconnect_hold",
 ] as const;
 export type TimerKind = (typeof TIMER_KINDS)[number];
 
@@ -52,8 +57,11 @@ export interface PendingTimer {
   playerId: string | null;
 }
 
-/** Gründe, aus denen eine Lobby schließt (docs/01 §Lobby „Schließen“). */
-export const CLOSE_REASONS = ["empty", "idle", "after_game"] as const;
+/**
+ * Gründe, aus denen eine Lobby schließt (docs/01 §Lobby „Schließen“): niemand mehr da bzw. 30 min ohne Aktivität.
+ * Nur Log und Effect – nie gespeichert; ein eigenes Ende „nach Spielende“ gibt es seit ADR-038 nicht mehr.
+ */
+export const CLOSE_REASONS = ["empty", "idle"] as const;
 export type CloseReason = (typeof CLOSE_REASONS)[number];
 
 /** Person in der Lobby (Server-Sicht, enthält die geheime guestId). */
@@ -228,9 +236,18 @@ export interface LobbyState {
    * Eingefroren (ADR-057): Die Shell hört von keiner aktiven Person mehr etwas (Netzaussetzer) – die Spielzeit
    * steht, der Phasen-Timer ist angehalten (`phaseTimerAt` = sein Zeitpunkt beim Einfrieren). Beim Auftauen rücken
    * Phase, Frage und Timer um die Pause nach hinten. `phaseToken` = die angehaltene Phase: Beginnt im Einfrieren
-   * eine neue (Shell-Antwort, Aufgeben), friert `normalize` sie ab ihrem Beginn mit ein. Nicht im Snapshot.
+   * eine neue (Shell-Antwort, Aufgeben), friert `normalize` sie ab ihrem Beginn mit ein. `from` = Beginn des
+   * Einfrierens (bleibt dabei): Wer ab dann getrennt wurde, bekommt beim Auftauen die Schonfrist (ADR-060).
+   * Nicht im Snapshot.
    */
-  frozen: { since: number; phaseTimerAt: number | null; phaseToken: number } | null;
+  frozen: { since: number; from: number; phaseTimerAt: number | null; phaseToken: number } | null;
+  /**
+   * Schonfrist nach dem Auftauen (ADR-060): Menschen, die im Aussetzer getrennt wurden und noch nicht zurück sind. Bis
+   * `until` zählen sie für die frühe Auflösung als „gleich wieder da“, und die Host-Rolle geht nicht an andere – die
+   * erste zurückkehrende Person entscheidet nicht für alle. `normalize` streicht, wer zurück oder ausgeschieden ist,
+   * und hebt sie mit Ablauf auf (Timer `reconnect_hold`). Nicht im Snapshot.
+   */
+  reconnectHold: { until: number; playerIds: string[] } | null;
   /** Zuletzt vergebenes Token (Timer, Anfragen, Phasen). */
   seq: number;
   timers: PendingTimer[];

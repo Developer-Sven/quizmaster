@@ -5,7 +5,7 @@
  * Zeiten skalieren mit dem Timing-Modus: Antwort nach 10–60 % der Antwortzeit (normal 2–12 s),
  * Kategoriewahl nach 10–40 % der Wahlzeit (normal 1,5–6 s).
  */
-import { type AnswerIndex, type Difficulty, getTimings, type Timings } from "@quizmaster/shared";
+import { ANSWER_INDEXES, type AnswerIndex, type Difficulty, getTimings, type Timings } from "@quizmaster/shared";
 import type { AnswerCommand, PickCommand } from "./commands.ts";
 import { chance, pickOne, type Rng } from "./rng.ts";
 import { activePlayers, currentQuestion, currentTurn } from "./state.ts";
@@ -53,9 +53,9 @@ export function chooseBotAnswer(
   rng: Rng,
 ): AnswerIndex {
   const { correct, difficulty } = question;
-  if (correct === null || difficulty === null) return rng.int(4) as AnswerIndex;
+  if (correct === null || difficulty === null) return pickOne(ANSWER_INDEXES, rng);
   if (chance(botAccuracy(difficulty), rng)) return correct;
-  const wrong = ([0, 1, 2, 3] as const).filter((index) => index !== correct);
+  const wrong = ANSWER_INDEXES.filter((index) => index !== correct);
   return pickOne(wrong, rng);
 }
 

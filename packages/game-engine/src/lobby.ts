@@ -132,6 +132,7 @@ export function createLobbyState(input: CreateLobbyInput, tx: Tx): LobbyState {
     bannedGuestIds: [],
     suggestions: [],
     frozen: null,
+    reconnectHold: null,
     seq: 0,
     timers: [],
     game: null,

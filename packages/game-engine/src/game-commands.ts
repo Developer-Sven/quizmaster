@@ -11,6 +11,7 @@ import {
   type CategoryOption,
   categoryIdSchema,
   categoryOptionSchema,
+  GAME_RULES,
   questionInstanceIdSchema,
 } from "@quizmaster/shared";
 import { arrangeAnswers } from "./answers.ts";
@@ -91,11 +92,14 @@ export function onAnswer(state: LobbyState, command: AnswerCommand, tx: Tx): Lob
   }));
 }
 
-/** Prüft die Kategorien aus OPTIONS_READY (genau 3, verschieden, gültig) und liefert Kopien. */
-/** 3 Optionen – bei einer Auswahl des Hosts 1–3 (ADR-048), immer verschieden. */
+/**
+ * Prüft die Kategorien aus OPTIONS_READY und liefert Kopien: 3 Optionen (`GAME_RULES.categoryOptionsPerTurn`) –
+ * bei einer Auswahl des Hosts auch 1–2 (ADR-048) –, immer verschieden und gültig.
+ */
 function parseOptions(options: readonly CategoryOption[]): CategoryOption[] {
-  if (!Array.isArray(options) || options.length < 1 || options.length > 3) {
-    reject("VALIDATION_FAILED", "1–3 Kategorien erwartet");
+  const max = GAME_RULES.categoryOptionsPerTurn;
+  if (!Array.isArray(options) || options.length < 1 || options.length > max) {
+    reject("VALIDATION_FAILED", `1–${max} Kategorien erwartet`);
   }
   const parsed = options.map((option) => {
     const result = categoryOptionSchema.safeParse(option);

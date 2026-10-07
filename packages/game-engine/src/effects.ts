@@ -85,9 +85,9 @@ export type Effect =
   | { type: "scheduleTimer"; at: number; token: number; kind: TimerKind; playerId: string | null }
   /** Timer ist hinfällig (darf gelöscht werden). */
   | { type: "cancelTimer"; token: number }
-  /** 3 Kategorien wählen (`offerCategories()`) → `OPTIONS_READY { token, options }`. */
+  /** Kategorien anbieten (`offerCategories()`, 3 bzw. bei einer Auswahl des Hosts 1–3) → `OPTIONS_READY`. */
   | { type: "offerCategories"; token: number; turn: TurnRef }
-  /** Fragen ziehen (`drawQuestions()`), Volldokumente laden → `QUESTIONS_READY { token, questions }`. */
+  /** Fragen ziehen (`drawQuestions()`), Spielinhalte liefern → `QUESTIONS_READY { token, questions }`. */
   | {
       type: "loadQuestions";
       token: number;

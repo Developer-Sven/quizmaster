@@ -280,9 +280,9 @@ describe("fromLobbySnapshot – laufendes Spiel", () => {
     expect(state.game?.results).toEqual(sim.state.game?.results);
     expect(state.phaseStartedAt).toBe(sim.state.game?.endedAt);
     expect(state.players.find((player) => player.guestId === left)?.left).toBe(true);
-    expect(state.timers.find((timer) => timer.kind === "idle_close")?.at).toBe(
-      (sim.state.game?.endedAt ?? 0) + 2 * 60 * 60_000,
-    );
+    // Kein eigener Schließ-Timer im Ergebnis: Nach `gameOverMs` geht es zurück in die Lobby (ADR-038).
+    expect(state.timers.map((timer) => timer.kind)).not.toContain("idle_close");
+    expect(state.timers.find((timer) => timer.kind === "phase")?.at).toBe(now + getTimings(state.timing).gameOverMs);
   });
 });
 

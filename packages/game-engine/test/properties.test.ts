@@ -284,11 +284,33 @@ function resolvedQuestions(state: LobbyState): number {
  */
 function checkFreeze(before: LobbyState, after: LobbyState): void {
   expect(after.timers.filter((timer) => timer.kind === "phase").length).toBeLessThanOrEqual(1);
+  checkReconnectHold(after);
   if (after.frozen === null) return;
   expect(isRunningPhase(after.phase)).toBe(true);
   expect(after.frozen.phaseToken).toBe(after.phaseToken);
+  // Beginn des Einfrierens (Basis der Schonfrist, ADR-060) liegt nie nach dem Beginn der angehaltenen Phase.
+  expect(after.frozen.from).toBeLessThanOrEqual(after.frozen.since);
   expect(after.timers.some((timer) => timer.kind === "phase")).toBe(false);
   if (before.frozen !== null) expect(resolvedQuestions(after)).toBe(resolvedQuestions(before));
+}
+
+/**
+ * Schonfrist nach dem Auftauen (ADR-060): nur getrennte menschliche Mitglieder, genau ein Timer auf ihrem Ende –
+ * ohne Schonfrist keiner.
+ */
+function checkReconnectHold(state: LobbyState): void {
+  const timers = state.timers.filter((timer) => timer.kind === "reconnect_hold");
+  if (state.reconnectHold === null) {
+    expect(timers).toEqual([]);
+    return;
+  }
+  expect(state.closed).toBeNull();
+  expect(timers.map((timer) => timer.at)).toEqual([state.reconnectHold.until]);
+  expect(state.reconnectHold.playerIds.length).toBeGreaterThan(0);
+  for (const playerId of state.reconnectHold.playerIds) {
+    const player = state.players.find((entry) => entry.playerId === playerId);
+    expect(player !== undefined && !player.isBot && !player.left && !player.connected, playerId).toBe(true);
+  }
 }
 
 function checkStep(sim: Simulation, step: SimulationStep): void {

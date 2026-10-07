@@ -24,6 +24,7 @@ import {
   categoryIdSchema,
   categoryOptionSchema,
   DIFFICULTIES,
+  GAME_RULES,
   GAME_TIMING_MODES,
   type GameTimingMode,
   gameResultsSchema,
@@ -146,7 +147,7 @@ const turnSchema = z.strictObject({
   number: z.int().min(1),
   round: z.int().min(1),
   pickerId: playerIdSchema,
-  options: z.array(categoryOptionSchema).min(1).max(3),
+  options: z.array(categoryOptionSchema).min(1).max(GAME_RULES.categoryOptionsPerTurn),
   categoryId: categoryIdSchema.nullable(),
   pickedBy: z.enum(["player", "timeout", "fixed"]).nullable(),
   participantIds: z.array(playerIdSchema).max(8),
@@ -439,6 +440,8 @@ export function fromLobbySnapshot(raw: unknown, ctx: RestoreContext): RestoreRes
       suggestions: [],
       // Eingefroren (ADR-057) ebenso – laufende Phasen beginnen nach dem Neustart ohnehin neu.
       frozen: null,
+      // Die Schonfrist nach dem Auftauen (ADR-060) ebenso.
+      reconnectHold: null,
       seq: 0,
       timers: [],
       game: game === null ? null : toGameState(game),

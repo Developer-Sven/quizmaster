@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ANSWER_INDEXES } from "./constants.ts";
 import {
   ADVANCE_SECONDS,
   ANSWER_SECONDS,
@@ -32,6 +33,7 @@ describe("Timings (docs/05 §Timings)", () => {
       reconnectGameMs: [90_000, 5_000],
       hostHandoverMs: [30_000, 2_000],
       emptyLobbyCloseMs: [60_000, 2_000],
+      reconnectHoldMs: [15_000, 2_000],
     };
     for (const [key, [normal, fast]] of Object.entries(expected) as [keyof Timings, [number, number]][]) {
       expect(TIMINGS.normal[key], key).toBe(normal);
@@ -52,8 +54,8 @@ describe("Timings (docs/05 §Timings)", () => {
     expect(questionLeadInMs(TIMINGS.fast, 3)).toBe(100);
   });
 
-  it("hält Lobbys 30 min ohne Aktivität und 2 h nach Spielende", () => {
-    expect(LOBBY_LIFETIME).toEqual({ idleCloseMs: 1_800_000, afterGameCloseMs: 7_200_000 });
+  it("hält Lobbys 30 min ohne Aktivität – das Ergebnis geht von selbst zurück in die Lobby (ADR-038)", () => {
+    expect(LOBBY_LIFETIME).toEqual({ idleCloseMs: 1_800_000 });
   });
 });
 
@@ -85,14 +87,18 @@ describe("Einstellungen (docs/01 §Einstellungen)", () => {
   });
 
   it("hat die festen Werte wie beim Vorbild – passend zu den Timings", () => {
-    expect(GAME_RULES.answersPerQuestion).toBe(4);
-    expect(GAME_RULES.categoryOptionsPerTurn).toBe(3);
-    expect(GAME_RULES.answerTimeMs).toBe(20_000);
-    expect(GAME_RULES.categoryPickTimeMs).toBe(15_000);
-    expect(GAME_RULES.pointsPerCorrectAnswer).toBe(1);
+    // Nur Werte mit Wirkung: jede neue Regel hier braucht eine Stelle im Code, die sie liest.
+    expect(GAME_RULES).toEqual({
+      categoryOptionsPerTurn: 3,
+      answerTimeMs: 20_000,
+      pointsPerCorrectAnswer: 1,
+      minPlayers: 2,
+      maxPlayersPerLobby: 8,
+      maxBotsPerLobby: 7,
+    });
     expect(GAME_RULES.answerTimeMs).toBe(TIMINGS.normal.answerMs);
-    expect(GAME_RULES.categoryPickTimeMs).toBe(TIMINGS.normal.categoryPickMs);
-    expect(GAME_RULES.maxPlayersPerLobby).toBe(8);
+    expect(TIMINGS.normal.categoryPickMs).toBe(15_000);
+    expect(ANSWER_INDEXES).toEqual([0, 1, 2, 3]);
   });
 
   it("validiert lobby:update-settings (nur geänderte Felder, mindestens eines)", () => {

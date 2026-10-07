@@ -39,12 +39,12 @@ import {
 import { addTimer, removeTimers } from "./timers.ts";
 import type { GameEndReason, GameState, LobbyState, PickedBy } from "./types.ts";
 
-/** Startet ein Spiel (START, REMATCH): Reihenfolge auslosen, Punkte/Tafel neu, Intro. */
 /** Zeigt der Host nur an (Anzeige-Modus, ADR-046)? Dann spielt diese Person nicht mit. */
 export function isSpectatingHost(state: LobbyState, playerId: string): boolean {
   return !state.settings.hostPlays && playerId === state.hostPlayerId;
 }
 
+/** Startet ein Spiel (START, REMATCH): Reihenfolge auslosen, Punkte/Tafel neu, Intro. */
 export function startGame(state: LobbyState, tx: Tx): LobbyState {
   const order = shuffle(
     members(state)

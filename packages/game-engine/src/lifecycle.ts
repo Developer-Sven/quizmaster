@@ -3,16 +3,18 @@
  * §Verbindung & Randfälle; docs/05 §Timings):
  * - keine menschlichen Mitglieder mehr → Lobby schließen,
  * - weniger als 2 Aktive im laufenden Spiel → `game_over`,
- * - frühe Auflösung, sobald alle verbundenen aktiven Personen geantwortet haben (Bots zählen, Getrennte nicht),
- * - Host-Übergabe (Host weg: sofort; Host 30 s getrennt: an die am längsten anwesende verbundene Person),
+ * - frühe Auflösung, sobald alle verbundenen aktiven Personen geantwortet haben (Bots zählen, Getrennte nicht – außer
+ *   in der Schonfrist nach dem Auftauen, ADR-060),
+ * - Host-Übergabe (Host weg: sofort; Host 30 s getrennt: an die am längsten anwesende verbundene Person – nicht,
+ *   solange er nach einem Aussetzer in der Schonfrist ist),
  * - Fristen als Timer: Reconnect (Lobby 30 s / Spiel 90 s), Host-Übergabe, „niemand verbunden“ (60 s),
- *   „30 min ohne Aktivität“ (Lobby) bzw. „2 h nach Spielende“ (game_over), Antwort der Shell auf eine
- *   Anfrage (`SHELL_REQUEST_TIMEOUT_MS`, nur solange die Anfrage offen ist).
+ *   „30 min ohne Aktivität“ (nur Phase lobby – das Ergebnis geht nach `gameOverMs` von selbst zurück in die
+ *   Lobby, ADR-038), Antwort der Shell auf eine Anfrage (`SHELL_REQUEST_TIMEOUT_MS`, nur solange sie offen ist).
  */
 import { GAME_RULES, LOBBY_LIFETIME } from "@quizmaster/shared";
 import { requestPersist, type Tx } from "./context.ts";
 import { finishGame, onPhaseTimeout, onRequestTimeout } from "./flow.ts";
-import { keepFrozen } from "./freeze.ts";
+import { heldUntil, isHeld, keepFrozen, syncReconnectHold } from "./freeze.ts";
 import { removeFromLobby } from "./lobby.ts";
 import { reschedulePhaseEnd } from "./phases.ts";
 import {
@@ -40,6 +42,7 @@ export function closeLobby(state: LobbyState, reason: CloseReason, tx: Tx): Lobb
     ...state,
     closed: { at: tx.now, reason },
     timers: [],
+    reconnectHold: null,
     game: state.game ? { ...state.game, pending: null } : null,
   };
 }
@@ -64,16 +67,21 @@ export function onTimerFired(state: LobbyState, timer: PendingTimer, tx: Tx): Lo
     case "empty_close":
       return connectedHumans(state).length === 0 ? closeLobby(state, "empty", tx) : state;
     case "idle_close":
-      return closeLobby(state, state.phase === "game_over" ? "after_game" : "idle", tx);
+      return closeLobby(state, "idle", tx);
     case "request":
       return onRequestTimeout(state, tx);
+    case "reconnect_hold":
+      // Schonfrist vorbei (ADR-060): frühe Auflösung und Host-Übergabe prüft `normalize` neu.
+      return state;
   }
 }
 
 /**
- * Frühe Auflösung (+400 ms), sobald alle verbundenen aktiven Teilnehmer:innen geantwortet haben. Nie eingefroren
+ * Frühe Auflösung (nach `earlyRevealMs`, höchstens bis Antwortschluss + Kulanz), sobald alle verbundenen aktiven
+ * Teilnehmer:innen geantwortet haben. Nie eingefroren
  * (ADR-057): Bei einem Aussetzer trennt Socket.IO die Geräte gestaffelt – wer zuerst getrennt wird, verlöre sonst
- * die Frage an die Leitung. Nach dem Auftauen prüft `normalize` mit dem verschobenen Antwortschluss erneut.
+ * die Frage an die Leitung. Nach dem Auftauen prüft `normalize` mit dem verschobenen Antwortschluss erneut; wer im
+ * Aussetzer getrennt wurde, zählt in der Schonfrist wie verbunden (ADR-060) – die Geräte kommen nacheinander zurück.
  */
 function ensureEarlyReveal(state: LobbyState, tx: Tx): LobbyState {
   if (state.phase !== "question" || state.frozen !== null) return state;
@@ -82,7 +90,8 @@ function ensureEarlyReveal(state: LobbyState, tx: Tx): LobbyState {
   if (!turn || !question || question.deadline === null) return state;
   const answered = new Set(question.responses.map((entry) => entry.playerId));
   const waitingFor = activePlayers(state).filter(
-    (player) => player.connected && turn.participantIds.includes(player.playerId),
+    (player) =>
+      (player.connected || isHeld(state, player.playerId, tx.now)) && turn.participantIds.includes(player.playerId),
   );
   if (waitingFor.length === 0 || waitingFor.some((player) => !answered.has(player.playerId))) return state;
   const revealAt = Math.min(tx.now + tx.timings.earlyRevealMs, question.deadline + tx.timings.deadlineGraceMs);
@@ -104,10 +113,16 @@ function handOver(state: LobbyState, candidate: EnginePlayer, tx: Tx): LobbyStat
   return { ...state, hostPlayerId: candidate.playerId };
 }
 
+/** Zeitpunkt der Host-Übergabe an eine verbundene Person: 30 s nach der Trennung, frühestens nach der Schonfrist. */
+function handoverAt(state: LobbyState, host: EnginePlayer, disconnectedAt: number, tx: Tx): number {
+  return Math.max(disconnectedAt + tx.timings.hostHandoverMs, heldUntil(state, host.playerId, tx.now) ?? 0);
+}
+
 /**
  * Host gültig halten: Ist der Host kein Mitglied mehr, übernimmt sofort die am längsten anwesende
  * verbundene Person (sonst die am längsten anwesende). Ist der Host seit ≥ 30 s getrennt, übernimmt die am
- * längsten anwesende verbundene Person – falls es eine gibt. Bots werden nie Host.
+ * längsten anwesende verbundene Person – falls es eine gibt, und nicht, solange er nach einem Aussetzer in der
+ * Schonfrist ist (ADR-060): Wer zuerst zurückkommt, wird nicht an seiner Stelle Host. Bots werden nie Host.
  */
 function ensureHost(state: LobbyState, tx: Tx): LobbyState {
   const host = findPlayer(state, state.hostPlayerId);
@@ -116,7 +131,7 @@ function ensureHost(state: LobbyState, tx: Tx): LobbyState {
     const candidate = candidates.find((player) => player.connected) ?? candidates[0];
     return candidate ? handOver(state, candidate, tx) : state;
   }
-  if (!host.connected && host.disconnectedAt !== null && tx.now >= host.disconnectedAt + tx.timings.hostHandoverMs) {
+  if (!host.connected && host.disconnectedAt !== null && tx.now >= handoverAt(state, host, host.disconnectedAt, tx)) {
     const candidate = hostCandidates(state, host.playerId).find((player) => player.connected);
     if (candidate) return handOver(state, candidate, tx);
   }
@@ -127,7 +142,7 @@ function syncHostTimer(state: LobbyState, tx: Tx): LobbyState {
   const host = findPlayer(state, state.hostPlayerId);
   let desiredAt: number | null = null;
   if (host && !host.left && !host.connected && host.disconnectedAt !== null) {
-    const at = host.disconnectedAt + tx.timings.hostHandoverMs;
+    const at = handoverAt(state, host, host.disconnectedAt, tx);
     // Bereits fällig ohne verbundene Kandidat:in: keine Endlosschleife – nächster Command prüft erneut.
     if (at > tx.now) desiredAt = at;
   }
@@ -168,11 +183,9 @@ function syncRequestTimer(state: LobbyState): LobbyState {
   return removeTimers(state, (timer) => timer.kind === "request");
 }
 
+/** „30 min ohne Aktivität“ gilt nur in der Lobby; im Spiel und im Ergebnis gibt es keinen solchen Timer. */
 function syncIdleTimer(state: LobbyState): LobbyState {
-  const endedAt = state.game?.endedAt ?? null;
-  let desiredAt: number | null = null;
-  if (state.phase === "lobby") desiredAt = state.lastActivityAt + LOBBY_LIFETIME.idleCloseMs;
-  else if (state.phase === "game_over" && endedAt !== null) desiredAt = endedAt + LOBBY_LIFETIME.afterGameCloseMs;
+  const desiredAt = state.phase === "lobby" ? state.lastActivityAt + LOBBY_LIFETIME.idleCloseMs : null;
   return syncTimer(state, "idle_close", null, desiredAt);
 }
 
@@ -198,6 +211,8 @@ export function normalize(state: LobbyState, tx: Tx): LobbyState {
   if (isRunningPhase(next.phase) && activePlayers(next).length < GAME_RULES.minPlayers) {
     next = finishGame(next, "not_enough_players", tx);
   }
+  // Schonfrist nach dem Auftauen (ADR-060): vor früher Auflösung und Host-Übergabe aktualisieren.
+  next = syncReconnectHold(next, tx);
   next = ensureEarlyReveal(next, tx);
   next = ensureHost(next, tx);
   next = pruneSuggestions(next);

@@ -37,6 +37,12 @@ export interface Timings {
   readonly hostHandoverMs: number;
   /** Lobby ohne verbundene Personen schließen. */
   readonly emptyLobbyCloseMs: number;
+  /**
+   * Schonfrist nach dem Auftauen (ADR-060): Wer im Netzaussetzer getrennt wurde, gilt so lange als „gleich wieder
+   * da“ – die frühe Auflösung wartet auf ihn, die Host-Rolle geht nicht an andere. Reicht für den Backoff der Clients
+   * (bis 5 s ± 50 %) samt Ticket und Handshake.
+   */
+  readonly reconnectHoldMs: number;
 }
 
 export const TIMINGS = {
@@ -57,6 +63,7 @@ export const TIMINGS = {
     reconnectGameMs: 90_000,
     hostHandoverMs: 30_000,
     emptyLobbyCloseMs: 60_000,
+    reconnectHoldMs: 15_000,
   },
   fast: {
     introMs: 300,
@@ -74,6 +81,7 @@ export const TIMINGS = {
     reconnectGameMs: 5_000,
     hostHandoverMs: 2_000,
     emptyLobbyCloseMs: 2_000,
+    reconnectHoldMs: 2_000,
   },
 } as const satisfies Record<GameTimingMode, Timings>;
 
@@ -87,10 +95,10 @@ export function questionLeadInMs(timings: Timings, indexInTurn: number): number 
 }
 
 /**
- * Lebensdauer von Lobbys unabhängig vom Timing-Modus (docs/01 §Lobby „Schließen“, docs/04 lobbies):
- * 30 min ohne Aktivität, 2 h nach Spielende.
+ * Lebensdauer von Lobbys unabhängig vom Timing-Modus (docs/01 §Lobby „Schließen“, docs/04 lobbies): 30 min ohne
+ * Aktivität in der Lobby. Ein eigenes Ende „nach Spielende“ gibt es nicht mehr – das Ergebnis geht nach
+ * `gameOverMs` zurück in die Lobby (ADR-038), ab dann gilt diese Frist.
  */
 export const LOBBY_LIFETIME = {
   idleCloseMs: 30 * 60_000,
-  afterGameCloseMs: 2 * 60 * 60_000,
 } as const;

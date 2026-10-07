@@ -406,6 +406,23 @@ describe("Lobby schließen", () => {
     sim.advance(1);
     expect(sim.state.closed?.reason).toBe("idle");
   });
+
+  it("im Ergebnis (game_over) kein eigener Schließ-Timer – nach gameOverMs zurück in die Lobby (ADR-038)", () => {
+    const sim = lobbyWith(2, 0, { timing: "fast" });
+    sim.ok({ type: "UPDATE_SETTINGS", guestId: sim.host, update: { rounds: 1, questionsPerCategory: 1 } });
+    sim.ok({ type: "START", guestId: sim.host });
+    sim.playToEnd();
+    expect(sim.state.phase).toBe("game_over");
+    expect(sim.state.timers.map((timer) => timer.kind)).not.toContain("idle_close");
+    expect(sim.state.timers.filter((timer) => timer.kind === "phase")).toEqual([
+      expect.objectContaining({ at: sim.now + getTimings("fast").gameOverMs }),
+    ]);
+    sim.advance(getTimings("fast").gameOverMs);
+    expect(sim.state.phase).toBe("lobby");
+    expect(sim.state.timers.filter((timer) => timer.kind === "idle_close")).toEqual([
+      expect.objectContaining({ at: sim.now + LOBBY_LIFETIME.idleCloseMs }),
+    ]);
+  });
 });
 
 describe("Dev-Bots", () => {

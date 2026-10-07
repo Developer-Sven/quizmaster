@@ -168,7 +168,7 @@ export interface TimeoutCommand {
   token: number;
 }
 
-/** Antwort auf `offerCategories`: genau 3 verschiedene Kategorien (z. B. aus `offerCategories()`). */
+/** Antwort auf `offerCategories`: 3 verschiedene Kategorien, bei einer Auswahl des Hosts 1–3 (ADR-048). */
 export interface OptionsReadyCommand {
   type: "OPTIONS_READY";
   token: number;
@@ -176,7 +176,7 @@ export interface OptionsReadyCommand {
 }
 
 /**
- * Frage, wie die Shell sie aus `questions` lädt (Volldokument oder Projektion). Weitere Felder
+ * Frage, wie die Shell sie liefert (Spielinhalt aus dem Pool im Speicher, ADR-057). Weitere Felder
  * (`source`, `stats`, `status` …) werden beim Validieren verworfen und gelangen nie in den Zustand.
  */
 export type QuestionInput = Pick<
