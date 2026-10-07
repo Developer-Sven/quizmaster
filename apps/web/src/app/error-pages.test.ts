@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ErrorView, ToStartLink } from "../components/app/error-view";
+import { SharedDictionary } from "../components/app/shared-dictionary";
 import { renderHtml } from "../components/ui/ssr-render";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -28,6 +29,18 @@ describe("Fehlerseiten bleiben schlank (Initial-JS jeder Seite)", () => {
     for (const path of ["./global-error.tsx", "./layout.tsx"]) {
       expect(read(path), path).not.toContain("next/font/google");
     }
+  });
+
+  it("bekommen das Wörterbuch aus dem Layout-Chunk statt einer eigenen Kopie (ADR-037)", () => {
+    // Fehlergrenze und Seite sind Geschwister-Einträge – nur über ein Client-Modul des Layouts teilen sie das Modul.
+    const layout = read("./layout.tsx");
+    expect(layout).toMatch(/import \{ SharedDictionary \} from "@\/components\/app\/shared-dictionary"/);
+    expect(layout).toContain("<SharedDictionary />");
+    const anchor = read("../components/app/shared-dictionary.tsx");
+    expect(anchor).toMatch(/^"use client";/);
+    expect(anchor).toMatch(/import \{ de \} from "\.\.\/\.\.\/i18n\/de"/);
+    expect(anchor).toMatch(/void de\.app;/);
+    expect(renderHtml(SharedDictionary, {})).toBe("");
   });
 
   it("zeigen „Zur Startseite“ als Link im Button-Look (volle Navigation)", () => {

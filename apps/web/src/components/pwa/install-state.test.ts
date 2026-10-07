@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -267,5 +268,13 @@ describe("InstallRow", () => {
   it("rendert auf dem Server nichts – die Zeile entsteht erst im Browser (kein Hydration-Unterschied)", () => {
     resetInstallStateForTests();
     expect(renderToStaticMarkup(createElement(InstallRow))).toBe("");
+  });
+
+  it("lädt das Anleitungs-Sheet erst beim ersten Tipp – Sheet und motion bleiben aus der Startseite (ADR-037)", () => {
+    // Ein statischer Import zog Sheet + motion (≈ 42 KB gzip) in das initiale JS von `/` (205 statt ≤ 165 KB).
+    const source = readFileSync(new URL("./install-row.tsx", import.meta.url), "utf8");
+    expect(source).not.toMatch(/^import[^;]*from\s+["']\.\/install-sheet["']/m);
+    expect(source).toMatch(/dynamic\(\s*\(\)\s*=>\s*import\("\.\/install-sheet"\)/);
+    expect(source).toMatch(/\{guideMounted && method !== "prompt" \?/);
   });
 });

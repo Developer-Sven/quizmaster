@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
+import { SharedDictionary } from "@/components/app/shared-dictionary";
 import { EARLY_INSTALL_CAPTURE_SCRIPT } from "@/components/pwa/early-install-capture";
 import { PwaRegistrar } from "@/components/pwa/pwa-registrar";
 import { getWebEnv } from "../env";
@@ -41,6 +42,7 @@ export const viewport: Viewport = {
  * rendered“). Statisch vorgerendertes HTML hätte Skripte ohne Nonce, die die CSP blockiert.
  * `PwaRegistrar` registriert den Service Worker und übernimmt `beforeinstallprompt` (docs/10); das Event fängt
  * vorher ein kleines Inline-Skript mit der CSP-Nonce ab, weil es oft schon vor der Hydration kommt (ADR-040).
+ * `SharedDictionary` legt das Wörterbuch in den Layout-Chunk, den Fehlergrenze und Seite teilen (ADR-037).
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
   await connection();
@@ -53,6 +55,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: EARLY_INSTALL_CAPTURE_SCRIPT }} />
         {children}
         <PwaRegistrar />
+        <SharedDictionary />
         {DevWebVitals === null ? null : <DevWebVitals />}
       </body>
     </html>
