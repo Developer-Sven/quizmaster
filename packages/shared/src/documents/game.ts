@@ -8,7 +8,7 @@ import {
   lobbyCodeSchema,
   playerIdSchema,
 } from "../primitives.ts";
-import { lobbySettingsSchema } from "../settings.ts";
+import { GAME_RULES, lobbySettingsSchema } from "../settings.ts";
 import { documentIdSchema, ownerGuestIdSchema } from "./lobby.ts";
 
 /** Mischung einer Frage: Index in `answers` (Repo-Reihenfolge) je angezeigter Position. */
@@ -39,9 +39,8 @@ export const gameAnswerSchema = z.object({
 export const gameTurnSchema = z.object({
   round: z.int().min(1),
   pickerId: playerIdSchema,
-  /** Angebotene Kategorien. */
-  /** Angebotene Kategorien: 3 – bei einer Auswahl des Hosts 1–3 (ADR-048) */
-  offered: z.array(categoryIdSchema).min(1).max(3),
+  /** Angebotene Kategorien: 3 – bei einer Auswahl des Hosts auch 1–2 (ADR-048) */
+  offered: z.array(categoryIdSchema).min(1).max(GAME_RULES.categoryOptionsPerTurn),
   categoryId: categoryIdSchema,
   /** „fixed“: nur eine Kategorie erlaubt, keine Wahl (ADR-048) */
   pickedBy: z.enum(["player", "timeout", "fixed"]),

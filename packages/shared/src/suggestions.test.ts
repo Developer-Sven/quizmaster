@@ -5,6 +5,7 @@ import {
   DEFAULT_LOBBY_SETTINGS,
   lobbySettingsSchema,
   SUGGESTABLE_SETTINGS,
+  sameSettingValue,
   settingsChangesBetween,
   settingsChangesSchema,
   updateSettingsPayloadSchema,
@@ -46,6 +47,37 @@ describe("Vorschläge für die Einstellungen (ADR-053)", () => {
     const changes = settingsChangesBetween(current, next);
     expect(changes?.categoryIds).toEqual(["kunst"]);
     expect(changes?.categoryIds).not.toBe(next.categoryIds);
+  });
+
+  it("settingsChangesBetween: der Reihe nach (ADR-056) zählt die Reihenfolge der Kategorien", () => {
+    const sequence = { ...DEFAULT_LOBBY_SETTINGS, categoryIds: ["sport", "musik"], categoryMode: "sequence" as const };
+    // Runde 1 spielt die erste Kategorie – nur die Reihenfolge zu ändern ist hier eine Änderung.
+    expect(settingsChangesBetween(sequence, { ...sequence, categoryIds: ["musik", "sport"] })).toEqual({
+      categoryIds: ["musik", "sport"],
+    });
+    // Zusammen mit einer anderen Änderung fällt die Reihenfolge nicht still weg.
+    expect(settingsChangesBetween(sequence, { ...sequence, categoryIds: ["musik", "sport"], answerSec: 10 })).toEqual({
+      categoryIds: ["musik", "sport"],
+      answerSec: 10,
+    });
+    // Wechsel zu „der Reihe nach“: die vorgeschlagene Reihenfolge gehört dazu.
+    const pick = { ...sequence, categoryMode: "pick" as const };
+    expect(
+      settingsChangesBetween(pick, { ...pick, categoryMode: "sequence", categoryIds: ["musik", "sport"] }),
+    ).toEqual({ categoryMode: "sequence", categoryIds: ["musik", "sport"] });
+    // Zurück zur Wahl: Die Reihenfolge spielt keine Rolle mehr.
+    expect(
+      settingsChangesBetween(sequence, { ...sequence, categoryMode: "pick", categoryIds: ["musik", "sport"] }),
+    ).toEqual({ categoryMode: "pick" });
+  });
+
+  it("sameSettingValue: Auswahl mengengleich, mit `ordered` reihenfolgesensitiv", () => {
+    expect(sameSettingValue(["sport", "musik"], ["musik", "sport"])).toBe(true);
+    expect(sameSettingValue(["sport", "musik"], ["musik", "sport"], true)).toBe(false);
+    expect(sameSettingValue(["sport", "musik"], ["sport", "musik"], true)).toBe(true);
+    expect(sameSettingValue(["sport", "musik"], ["sport"], true)).toBe(false);
+    expect(sameSettingValue(["sport"], null, true)).toBe(false);
+    expect(sameSettingValue(5, 5, true)).toBe(true);
   });
 
   it("im öffentlichen Zustand: mit Status, nur bekannte Felder (keine guestId)", () => {

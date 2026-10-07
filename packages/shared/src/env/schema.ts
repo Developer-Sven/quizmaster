@@ -79,6 +79,11 @@ export const sourceEnvSchema = z.object({
   LOG_LEVEL: optional(z.enum(LOG_LEVELS)),
 
   ALERT_WEBHOOK_URL: optional(z.string().regex(/^https:\/\/\S+$/, "https-URL erwartet")),
+  /**
+   * Optional, nur lokal in der Entwicklung: Verbindung eines lesenden Datenbank-Werkzeugs (MongoDB-MCP-Server mit
+   * `--readOnly`, read-Rolle auf der Dev-Datenbank). Keine App und keine Ableitung liest den Wert – geprüft wird nur
+   * das Format, damit ein Tippfehler in der Datei auffällt; Test-Stacks erben ihn nie (`scripts/dev/lib/stack-config.ts`).
+   */
   MDB_MCP_CONNECTION_STRING: optional(mongoUri),
 });
 

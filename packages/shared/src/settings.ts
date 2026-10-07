@@ -14,22 +14,22 @@ export const SETTINGS_BOUNDS = {
   maxPlayers: { min: 2, max: 8, default: 8 },
 } as const;
 
-/** Feste Spielregeln (nicht einstellbar). Zeiten in ms, passend zu `TIMINGS.normal`. */
+/**
+ * Feste Spielregeln (nicht einstellbar), jede mit Wirkung im Code. Weitere feste Werte haben ihre eine Quelle
+ * dort, wo sie wirken: vier Antworten `ANSWER_INDEXES` (constants.ts), Zeiten `TIMINGS` (timings.ts), gemerkte
+ * gesehene Fragen `RECENT_QUESTION_IDS_MAX` (documents), eine gehostete Lobby je Gast `QUOTAS` (limits.ts).
+ */
 export const GAME_RULES = {
-  answersPerQuestion: 4,
+  /** Kategorien zur Wahl je Zug (docs/01); mit einer Auswahl des Hosts auch weniger (ADR-048). */
   categoryOptionsPerTurn: 3,
+  /** Standard der Antwortzeit (`answerSec`, ADR-049) – 20 s wie beim Vorbild, gleich `TIMINGS.normal.answerMs`. */
   answerTimeMs: 20_000,
-  categoryPickTimeMs: 15_000,
   pointsPerCorrectAnswer: 1,
   /** „ab 2 verbundenen Personen“ startbar; weniger als 2 Aktive beenden ein laufendes Spiel. */
   minPlayers: 2,
   maxPlayersPerLobby: SETTINGS_BOUNDS.maxPlayers.max,
   /** Dev-Bots: Host fügt bis zu 7 hinzu (docs/05 §Dev-Bots). */
   maxBotsPerLobby: 7,
-  /** Gesehene Fragen je Gast, die vermieden werden (docs/01 §Fragenauswahl). */
-  recentQuestionsRemembered: 1_000,
-  /** Pro Gast max. 1 aktive gehostete Lobby. */
-  maxActiveHostedLobbiesPerGuest: 1,
 } as const;
 
 const bounded = (bounds: { readonly min: number; readonly max: number }) => z.int().min(bounds.min).max(bounds.max);
@@ -284,21 +284,32 @@ export function applySettingsUpdate(current: LobbySettings, update: SettingsUpda
   });
 }
 
-/** Gleicher Einstellungswert; eine Kategorie-Auswahl gilt unabhängig von der Reihenfolge als gleich. */
-export function sameSettingValue(a: LobbySettings[SuggestableSetting], b: LobbySettings[SuggestableSetting]): boolean {
-  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((entry) => b.includes(entry));
+/**
+ * Gleicher Einstellungswert. Eine Kategorie-Auswahl gilt unabhängig von der Reihenfolge als gleich – außer mit
+ * `ordered`: „Der Reihe nach“ (ADR-056) spielt Runde r die r-te Kategorie, dort ist die Reihenfolge Inhalt.
+ */
+export function sameSettingValue(
+  a: LobbySettings[SuggestableSetting],
+  b: LobbySettings[SuggestableSetting],
+  ordered = false,
+): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return ordered ? a.every((entry, index) => entry === b[index]) : a.every((entry) => b.includes(entry));
+  }
   return a === b;
 }
 
 /**
  * Vorschlagbare Felder, in denen `next` von `current` abweicht (ADR-053) – `null`, wenn keins abweicht. Eine
- * Kategorie-Auswahl wird kopiert.
+ * Kategorie-Auswahl wird kopiert; spielt `next` die Kategorien der Reihe nach (ADR-056), zählt ihre Reihenfolge.
  */
 export function settingsChangesBetween(current: LobbySettings, next: LobbySettings): SettingsChanges | null {
+  const ordered = next.categoryMode === "sequence";
   const changes: Partial<Record<SuggestableSetting, LobbySettings[SuggestableSetting]>> = {};
   for (const key of SUGGESTABLE_SETTINGS) {
     const value = next[key];
-    if (!sameSettingValue(current[key], value)) changes[key] = Array.isArray(value) ? [...value] : value;
+    if (!sameSettingValue(current[key], value, ordered)) changes[key] = Array.isArray(value) ? [...value] : value;
   }
   // Je Schlüssel stammt der Wert aus `next[key]` – passt also zum Feld gleichen Namens.
   return Object.keys(changes).length === 0 ? null : (changes as SettingsChanges);

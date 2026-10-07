@@ -1,7 +1,7 @@
 /**
  * zod-Fassade (zod.ts): englische Meldungen, keine Namespace-/Locale-Re-Exporte und kein direkter `zod`-Import in
- * den client-erreichbaren Modulen des Haupt-Exports – sonst landen wieder alle ~40 Locales im Lobby-Chunk (W3-Review,
- * W4-Messung: 89,9 → 31,6 KB gzip).
+ * den client-erreichbaren Modulen des Haupt-Exports – sonst landen wieder alle ~40 Locales im Lobby-Chunk (Messung
+ * im Bundle-Review: 89,9 → 31,6 KB gzip).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

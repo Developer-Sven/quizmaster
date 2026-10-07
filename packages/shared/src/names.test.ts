@@ -15,7 +15,7 @@ describe("normalizeName", () => {
   it("wendet NFKC an, trimmt und fasst Leerzeichen zusammen", () => {
     expect(normalizeName("  Mia   Sophie  ")).toBe("Mia Sophie");
     expect(normalizeName("Ｍｉａ")).toBe("Mia");
-    expect(normalizeName("Mia  S")).toBe("Mia S");
+    expect(normalizeName("Mia\u00A0\u00A0S")).toBe("Mia S");
     expect(normalizeName("ﬁnn")).toBe("finn");
   });
 
@@ -76,26 +76,37 @@ describe("validateNameFormat", () => {
 
   it("lehnt Zero-Width-, Bidi-, Steuer- und unsichtbare Zeichen ab", () => {
     const names = [
-      "Mi​a",
-      "Mia‍",
-      "Mi‌a",
-      "‮aiM",
-      "Mi⁦a",
-      "Mi‏a",
+      "Mi\u200Ba",
+      "Mia\u200D",
+      "Mi\u200Ca",
+      "\u202EaiM",
+      "Mi\u2066a",
+      "Mi\u200Fa",
       "Mia\u0000",
       "Mi\ta",
       "Mi\na",
-      "Mia­",
-      "Mi﻿a",
-      "Mia؜",
-      "ㅤㅤㅤ",
-      "Mi͏a",
+      "Mia\u00AD",
+      "Mi\uFEFFa",
+      "Mia\u061C",
+      "\u3164\u3164\u3164",
+      "Mi\u034Fa",
     ];
     for (const name of names) expect(validateNameFormat(name), JSON.stringify(name)).toMatchObject({ ok: false });
   });
 
   it("lehnt Emojis und Symbole ab", () => {
-    const names = ["Mia 😀", "👍👍", "Mia❤️", "Mia❤", "Mia🇩🇪", "1️⃣2", "Mia ☺", "Ben ✔", "Mia★", "Mia👍🏽"];
+    const names = [
+      "Mia 😀",
+      "👍👍",
+      "Mia❤\uFE0F",
+      "Mia❤",
+      "Mia🇩🇪",
+      "1\u{FE0F}\u{20E3}2",
+      "Mia ☺",
+      "Ben ✔",
+      "Mia★",
+      "Mia👍🏽",
+    ];
     for (const name of names) {
       expect(validateNameFormat(name), name).toEqual({ ok: false, reason: "invalid_characters" });
     }
