@@ -527,11 +527,11 @@ export interface CategoryRecountResult {
 /** Neuberechnung je Kategorie der wiederhergestellten Fragen – einzeln: Ein Fehler hält die übrigen nicht auf. */
 async function recountCategories(
   repos: Repositories,
-  restored: BulkRestoreResult["restored"],
+  categories: Iterable<string>,
   options: { pool: QuestionPool; now: Date },
 ): Promise<CategoryRecountResult[]> {
   const results: CategoryRecountResult[] = [];
-  for (const category of [...new Set(restored.map((entry) => entry.category))].sort()) {
+  for (const category of [...new Set(categories)].sort()) {
     try {
       results.push({ category, ...(await recountAfterRestore(repos, category, options)), problem: null });
     } catch (error) {
@@ -544,7 +544,8 @@ async function recountCategories(
 /**
  * Massen-Wiederherstellung: alle seit `since` automatisch zurückgezogenen Fragen (optional nur eines Grunds) mit
  * denselben Prüfungen wie `--restore`. Gelesen wird vom Primary (danach wird geschrieben); die Live-Zähler laufen je
- * Kategorie einmal am Ende – auch wenn ein Fehler ohne fachlichen Grund (z. B. Datenbank weg) den Lauf abbricht:
+ * Kategorie mit einem Schreibversuch einmal am Ende – auch wenn ein Fehler ohne fachlichen Grund (z. B. Datenbank
+ * weg) den Lauf abbricht, auch nach einem Schreibfehler mit offenem Ausgang:
  * Sonst blieben die Kategorien der schon wiederhergestellten Fragen auf dem Stand der Rückzüge (ggf. `playable: false`),
  * und ein neuer Lauf fände diese Fragen nicht mehr (`autoRetired` ist zurückgesetzt). Ergebnis mit `aborted` bzw.
  * `problem` je Kategorie → `reportsActionFailed` (Exit-Code 1).
@@ -563,10 +564,15 @@ export async function restoreAutoRetiredSince(
   const restored: BulkRestoreResult["restored"] = [];
   const skipped: BulkRestoreResult["skipped"] = [];
   let aborted: BulkRestoreResult["aborted"] = null;
+  /** Kategorien mit einem Schreibversuch – auch einem, dessen Ausgang offen ist (Neuberechnung ist idempotent). */
+  const touched = new Set<string>();
   for (const question of questions) {
     try {
       const plan = await planRestore(repos, question._id, options.contentDir, files);
       if (!action.dryRun) {
+        // Vor dem Schreiben merken: Wirft der Zugriff, nachdem der Server das Update schon angewandt hat
+        // (mehrdeutiger Ausgang bei einem Netzaussetzer), wird die Kategorie trotzdem neu gezählt.
+        touched.add(plan.category);
         const done = await repos.questions.restoreAutoRetired(
           question._id,
           { status: plan.status, contentHash: plan.contentHash },
@@ -593,7 +599,7 @@ export async function restoreAutoRetiredSince(
       break;
     }
   }
-  const categories = action.dryRun ? [] : await recountCategories(repos, restored, options);
+  const categories = action.dryRun ? [] : await recountCategories(repos, touched, options);
   return {
     since: action.since,
     reason: action.reason,

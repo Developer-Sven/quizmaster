@@ -492,6 +492,39 @@ describe("Massen-Wiederherstellung (--restore-auto, z. B. nach Missbrauch der Me
     expect(reportsActionFailed(rest)).toBe(false);
   });
 
+  it("mehrdeutiger Schreibfehler (Update angewandt, dann Fehler): die Kategorie wird trotzdem neu gezählt", async () => {
+    const [film] = await questionsOf("kinofilme", 1);
+    if (film === undefined) throw new Error("Fixtures fehlen");
+    const films = await repos.questions.countPlayable("kinofilme");
+    expect(await repos.questions.autoRetire(film._id, "reports", late(1))).toBe(true);
+    await repos.categories.applyCounts(
+      "kinofilme",
+      { playableCount: 0, approvedCount: 0 },
+      { minPlayable: 1, pool: "all" },
+      now,
+    );
+    // Der Server wendet das Update an, die Antwort geht im Netzaussetzer verloren (Treiber meldet einen Fehler).
+    const ambiguous: Repositories = {
+      ...repos,
+      questions: {
+        ...repos.questions,
+        restoreAutoRetired: async (...args: Parameters<Repositories["questions"]["restoreAutoRetired"]>) => {
+          await repos.questions.restoreAutoRetired(...args);
+          throw new Error("Verbindung zur Datenbank verloren");
+        },
+      },
+    };
+    const options = { contentDir, pool: "all" as const, now: late(0) };
+    const action = { kind: "restore-auto" as const, since: late(2), reason: null, dryRun: false };
+    const result = await runReportsAction(ambiguous, action, options);
+    expect(result).toMatchObject({
+      restored: [],
+      aborted: { questionId: film._id },
+      categories: [{ category: "kinofilme", playable: true, playableCount: films.playableCount, problem: null }],
+    });
+    expect(await storedCounts("kinofilme")).toEqual({ playable: true, playableCount: films.playableCount });
+  });
+
   it("scheitert die Neuberechnung einer Kategorie, laufen die übrigen weiter – mit Hinweis auf --recount (Exit 1)", async () => {
     const [comic] = await questionsOf("comics", 1);
     const [sport] = await questionsOf("sport-freizeit", 1);
