@@ -242,7 +242,7 @@ describe("questionReports + questionRatings", () => {
   it("zählt unabhängige Quellen im Zeitfenster, speichert die Herkunft und liefert die Prüf-Queue", async () => {
     const [a, b] = [randomUUID(), randomUUID()];
     const ipA = "a".repeat(32);
-    await repos.reports.create(
+    const first = await repos.reports.create(
       { questionId: "co-pool0002", reason: "falsch", guestId: a, lobbyCode: "ABC234", ipKey: ipA },
       now,
     );
@@ -265,10 +265,20 @@ describe("questionReports + questionRatings", () => {
         now,
       ),
     ).rejects.toThrow();
-    const open = await repos.reports.listOpen(10);
-    expect(open).toHaveLength(3);
-    expect(await repos.reports.setStatus(open[0]?._id ?? "", "resolved")).toBe(true);
-    expect(await repos.reports.listOpen(10)).toHaveLength(2);
+    // `create` liefert die Meldung ohne Herkunft (guestId, IP-Schlüssel, Lobby-Code bleiben in der Datenbank).
+    expect(first).toEqual({
+      _id: expect.any(String),
+      questionId: "co-pool0002",
+      reason: "falsch",
+      status: "open",
+      createdAt: now,
+      expiresAt: expect.any(Date),
+    });
+    const openReports = () =>
+      t.collections.questionReports.countDocuments({ questionId: "co-pool0002", status: "open" });
+    expect(await openReports()).toBe(3);
+    expect(await repos.reports.setStatus(first._id, "resolved")).toBe(true);
+    expect(await openReports()).toBe(2);
     expect(await repos.reports.findReportedQuestionIds(a, ["co-pool0002", "co-pool0001"])).toEqual(
       new Set(["co-pool0002"]),
     );

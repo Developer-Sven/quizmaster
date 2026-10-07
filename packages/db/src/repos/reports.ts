@@ -10,7 +10,7 @@
  * erledigte (`resolved`) oder verworfene (`dismissed`) Meldungen zählen nicht – sonst zöge die nächste Meldung
  * eine geprüfte Frage sofort wieder zurück.
  *
- * Prüf-Queue (`buildReviewQueue`, Grundlage von `pnpm admin:reports` und `/faktencheck`): offene Meldungen je
+ * Prüf-Queue (`buildReviewQueue`, Grundlage von `pnpm admin:reports` und des Faktenchecks): offene Meldungen je
  * Frage, automatisch zurückgezogene Fragen, schlecht bewertete Fragen und Fragen mit Trefferquote < 10 %. Die
  * guestIds verlassen die Datenbank dabei nie – gezählt wird serverseitig (`$addToSet` + `$size`); für die
  * unabhängigen Quellen verlassen nur IP-Schlüssel und Lobby-Codes je Gast die Datenbank (nie ausgegeben).
@@ -102,8 +102,6 @@ const ORIGIN_SETS = {
   lobbyCodes: { $addToSet: { $ifNull: ["$lobbyCode", null] } },
 } as const;
 
-/** Höchstzahl je Queue-Abfrage. */
-export const REPORT_QUEUE_MAX = 200;
 /** Höchstzahl Fragen mit offenen Meldungen je Prüf-Queue (admin:reports). */
 export const REVIEW_QUEUE_MAX = 1_000;
 
@@ -129,10 +127,21 @@ export interface OpenReportGroup {
   reportIds: string[];
 }
 
+/**
+ * Gespeicherte Meldung, wie `create` sie zurückgibt – ohne guestId, IP-Schlüssel und Lobby-Code: Die Herkunft wird
+ * nur gespeichert und verlässt das Repository nie, höchstens als Zahl (ADR-058).
+ */
+export type CreatedReport = Pick<
+  QuestionReportDoc,
+  "_id" | "questionId" | "reason" | "status" | "createdAt" | "expiresAt"
+>;
+
+/**
+ * Meldungen. Keine Methode gibt guestIds, IP-Schlüssel oder Lobby-Codes heraus (Test: `feedback-privacy.test.ts`);
+ * offene Meldungen liest die Prüf-Queue nur gezählt (`summarizeOpen`).
+ */
 export interface ReportsRepo {
-  create(report: NewReport, now: Date): Promise<QuestionReportDoc>;
-  /** Offene Meldungen, neueste zuerst (Prüf-Queue). */
-  listOpen(limit?: number): Promise<QuestionReportDoc[]>;
+  create(report: NewReport, now: Date): Promise<CreatedReport>;
   setStatus(reportId: string, status: ReportStatus): Promise<boolean>;
   /**
    * Anzahl verschiedener Gäste mit OFFENEN Meldungen der Gründe `reasons` seit `since` (Prüf-Queue, Wiederherstellung;
@@ -170,12 +179,14 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
         expiresAt: new Date(now.getTime() + RETENTION.questionReportMs),
       };
       await reports.insertOne(doc);
-      return doc;
-    },
-
-    async listOpen(limit = 50) {
-      const capped = Math.max(1, Math.min(REPORT_QUEUE_MAX, Math.trunc(limit)));
-      return reports.find({ status: "open" }).sort({ createdAt: -1 }).limit(capped).toArray();
+      return {
+        _id: doc._id,
+        questionId: doc.questionId,
+        reason: doc.reason,
+        status: doc.status,
+        createdAt: doc.createdAt,
+        expiresAt: doc.expiresAt,
+      };
     },
 
     async setStatus(reportId, status) {
@@ -353,7 +364,7 @@ export function createReportsRepo(reports: Collection<QuestionReportDoc>): Repor
   };
 }
 
-// --- Prüf-Queue (admin:reports, /faktencheck) ---------------------------------------------------------------------
+// --- Prüf-Queue (admin:reports, Faktencheck) ----------------------------------------------------------------------
 
 /** Warum eine Frage in der Prüf-Queue steht. */
 export const REVIEW_FLAGS = ["auto_retired", "reports", "low_rating", "low_hit_rate"] as const;

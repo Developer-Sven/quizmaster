@@ -18,7 +18,7 @@
  * });
  * ```
  *
- * Apps/E2E (ab W2): `t.uri`, `t.dbName` und `t.prefix` als `MONGODB_URI`, `MONGODB_DB` und
+ * Apps/E2E: `t.uri`, `t.dbName` und `t.prefix` als `MONGODB_URI`, `MONGODB_DB` und
  * `MONGODB_COLLECTION_PREFIX` an den Kindprozess geben – `uri` nie loggen.
  */
 import type { Db, MongoClient } from "mongodb";
