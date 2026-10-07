@@ -16,8 +16,10 @@ import {
 
 let t: TestDatabase;
 let repos: Repositories;
-const startedAt = new Date("2026-09-30T18:00:00Z");
-const endedAt = new Date("2026-09-30T18:12:00Z");
+// Relativ zur Laufzeit: Mit festen Daten wären die Dokumente nach Ablauf ihrer TTL (beendete Lobby 2 h) fällig, und
+// der TTL-Monitor löschte sie mitten im Test.
+const startedAt = new Date(Date.now() - 13 * 60_000);
+const endedAt = new Date(startedAt.getTime() + 12 * 60_000);
 const [mia, ben] = [randomUUID(), randomUUID()];
 
 beforeAll(async () => {
@@ -142,6 +144,11 @@ const input = (gameId: string, rev: number) => ({
 });
 
 describe("finishGame (Transaktion)", () => {
+  it("Testdokumente sind beim Lauf nicht abgelaufen – sonst löscht der TTL-Monitor (alle 60 s) sie mitten im Test", () => {
+    expect(lobby(1).expiresAt.getTime()).toBeGreaterThan(Date.now());
+    expect(game("game_ttl").expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
   it("schreibt games, lobbies, guests und Fragen-Statistik gemeinsam", async () => {
     const result = await repos.finishGame(input("game_1", 10), endedAt);
     expect(result).toEqual({ guestsUpdated: 2, questionsUpdated: 2, lobby: "saved" });

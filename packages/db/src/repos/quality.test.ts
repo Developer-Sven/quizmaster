@@ -34,7 +34,9 @@ import {
 let t: TestDatabase;
 let repos: Repositories;
 const DAY_MS = 24 * 60 * 60 * 1_000;
-const now = new Date("2026-10-01T10:00:00Z");
+// Relativ zur Laufzeit: Mit einem festen Datum wären Meldungen und Bewertungen nach Ablauf ihrer TTL (365 Tage) fällig,
+// und der TTL-Monitor löschte sie mitten im Test.
+const now = new Date();
 const PRIMARY = { readPreference: "primary" } as const;
 
 beforeAll(async () => {
@@ -118,6 +120,12 @@ function category(id: string, overrides: Partial<CategoryDoc> = {}): CategoryDoc
     ...overrides,
   };
 }
+
+describe("Testdokumente", () => {
+  it("sind beim Lauf nicht abgelaufen – sonst löscht der TTL-Monitor (alle 60 s) sie mitten im Test", () => {
+    expect(report("kf-ttl00001").expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+});
 
 describe("Schwellen und Regeln (docs/08 §5)", () => {
   it("Meldungen: ≥ 3 verschiedene Gäste, Fenster 7 Tage, frühestens ab der letzten Änderung", () => {
@@ -345,7 +353,7 @@ describe("questionReports – Schutzautomatik-Zählung und Prüf-Queue", () => {
 });
 
 describe("questions – Schutzautomatik, Wiederherstellung, Live-Zähler", () => {
-  const changedAt = new Date("2026-09-20T12:00:00Z");
+  const changedAt = new Date(now.getTime() - 11 * DAY_MS);
 
   beforeAll(async () => {
     await t.collections.questions.insertMany([

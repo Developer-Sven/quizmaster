@@ -10,7 +10,9 @@ import { activeLobbyExpiresAt, createRepositories, playableStatuses, type Reposi
 
 let t: TestDatabase;
 let repos: Repositories;
-const now = new Date("2026-09-30T18:00:00Z");
+// Relativ zur Laufzeit: Mit einem festen Datum wären die Dokumente nach Ablauf ihrer TTL (aktive Lobby 30 min) fällig,
+// und der TTL-Monitor löschte sie mitten im Test.
+const now = new Date();
 
 beforeAll(async () => {
   t = await createTestDatabase({ ensureIndexes: true });
@@ -54,6 +56,12 @@ function lobby(overrides: Partial<LobbyDoc> = {}): LobbyDoc {
 }
 
 const qid = (n: number) => `rw-${String(n).padStart(8, "0")}`;
+
+describe("Testdokumente", () => {
+  it("sind beim Lauf nicht abgelaufen – sonst löscht der TTL-Monitor (alle 60 s) sie mitten im Test", () => {
+    expect(lobby().expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+});
 
 describe("guests", () => {
   it("legt Gäste an, erneuert die TTL und merkt sich höchstens 1.000 gesehene Fragen", async () => {
