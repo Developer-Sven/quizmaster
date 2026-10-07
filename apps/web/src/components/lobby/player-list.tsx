@@ -116,18 +116,43 @@ export function PlayerList({
         }}
         onCancel={() => setTarget(null)}
       />
-      <Dialog
-        open={heir !== null}
-        title={de.dialogs.transferHost.title(heir?.name ?? "")}
-        description={de.dialogs.transferHost.description(heir?.name ?? "")}
-        confirmLabel={de.dialogs.transferHost.confirm}
-        cancelLabel={de.dialogs.transferHost.cancel}
-        onConfirm={() => {
-          if (heir) onTransferHost?.(heir.id);
+      <TransferHostDialog
+        heir={heir}
+        onConfirm={(playerId) => {
+          onTransferHost?.(playerId);
           setHeir(null);
         }}
         onCancel={() => setHeir(null)}
       />
     </section>
+  );
+}
+
+export interface TransferHostDialogProps {
+  /** Person, die Host werden soll – `null` = geschlossen */
+  heir: PublicPlayer | null;
+  onConfirm: (playerId: string) => void;
+  onCancel: () => void;
+}
+
+/**
+ * Bestätigung „Ben zum Host machen?“ (ADR-047). Host übertragen ist keine destruktive Aktion (Rot nur für Falsch,
+ * Fehler und Destruktives, docs/09 §1): Bestätigung `primary` – die einzige orange Aktion der obersten Ebene, der
+ * Dialog liegt mit Scrim über der Lobby.
+ */
+export function TransferHostDialog({ heir, onConfirm, onCancel }: TransferHostDialogProps) {
+  return (
+    <Dialog
+      open={heir !== null}
+      title={de.dialogs.transferHost.title(heir?.name ?? "")}
+      description={de.dialogs.transferHost.description(heir?.name ?? "")}
+      confirmLabel={de.dialogs.transferHost.confirm}
+      cancelLabel={de.dialogs.transferHost.cancel}
+      confirmVariant="primary"
+      onConfirm={() => {
+        if (heir) onConfirm(heir.id);
+      }}
+      onCancel={onCancel}
+    />
   );
 }

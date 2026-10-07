@@ -34,7 +34,8 @@ export function RankingList({ entries }: RankingListProps) {
             </span>
             <Avatar name={entry.name} color={entry.color} size={40} resigned={resigned} />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className={cx("truncate text-body", resigned ? "text-text-2 line-through" : "text-text")}>
+              {/* Der Name wird nie abgeschnitten – bei großer Schrift bricht er um (docs/09 §12, WCAG 1.4.4). */}
+              <span className={cx("text-body wrap-break-word", resigned ? "text-text-2 line-through" : "text-text")}>
                 {entry.name}
               </span>
               {resigned ? <span className="text-caption text-text-2">{de.result.resigned}</span> : null}

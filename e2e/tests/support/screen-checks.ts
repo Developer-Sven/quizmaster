@@ -8,7 +8,10 @@
  *   nur die oberste Ebene,
  * - keine Emojis im sichtbaren Text, keine beliebigen Tailwind-Werte (`[…]`) oder Hex-Farben in Klassen,
  * - Fragen: Fragetext und Antworten passen (nichts abgeschnitten, nichts ragt über den Rand); jede Antwort hat in
- *   allen Zuständen dieselbe Zeilenzahl, die letzte steht auf der Bühne vollständig über dem Spielerstreifen.
+ *   allen Zuständen dieselbe Zeilenzahl, die letzte steht auf der Bühne vollständig über dem Spielerstreifen –
+ *   ebenso die Avatare an den Antworten (Auflösung) und die Zeilen des Zug-Ergebnisses,
+ * - Spiel auf der Bühne: unter dem Spielerstreifen steht nichts (keine zweite Leiste); wartet das Spiel auf den
+ *   Host, stehen „Weiter“/„Auflösen …“ bzw. „Warte auf …“ in der Zone des Spielerstreifens (ADR-045/049).
  *
  * Befunde werden per `expect.soft` gemeldet (ein Lauf zeigt alle Probleme) und als JSON an den Test gehängt;
  * dazu ein Screenshot je Screen und Viewport (`<name>-<breite>x<höhe>.png`, siehe {@link screenshotDir}).
@@ -26,16 +29,22 @@ export const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa",
 /** Diese Auswirkungen lassen den Test scheitern (docs/11: „keine ernsten Befunde“). */
 export const BLOCKING_IMPACTS: readonly string[] = ["serious", "critical"];
 
+/**
+ * Gewollt horizontal scrollbar (docs/09 §7): die Liste des Spielerstreifens ab 5 Personen bzw. neben der
+ * Host-Aktion – für {@link ScreenCheckOptions.allowHorizontalScroll}.
+ */
+export const PLAYER_STRIP_SCROLL = '[data-testid="player-strip"] ul';
+
 const REPO_ROOT = resolve(import.meta.dirname, "../../..");
 
 /**
- * Ablage der Screenshots: `E2E_SCREENSHOT_DIR`, sonst lokal `docs/screenshots/w3` (docs/ ist das lokale
+ * Ablage der Screenshots: `E2E_SCREENSHOT_DIR`, sonst lokal `docs/screenshots/e2e` (docs/ ist das lokale
  * Spezifikations-Repo, DoD Phase 3), sonst (z. B. CI ohne docs/) neben den Test-Artefakten.
  */
 export function screenshotDir(testInfo: TestInfo): string {
   const configured = process.env.E2E_SCREENSHOT_DIR;
   if (configured) return resolve(configured);
-  if (existsSync(join(REPO_ROOT, "docs"))) return join(REPO_ROOT, "docs", "screenshots", "w3");
+  if (existsSync(join(REPO_ROOT, "docs"))) return join(REPO_ROOT, "docs", "screenshots", "e2e");
   return join(testInfo.project.outputDir, "screenshots");
 }
 
@@ -263,6 +272,8 @@ export interface AnswerGeometry {
   /** Unterkante der letzten Antwort (D) und Oberkante des Spielerstreifens im Viewport */
   lastAnswerBottom: number;
   stripTop: number | null;
+  /** Avatare an den Antworten (Auflösung, ragen 12 px unter die Antwort): Unterkante je Antwort mit Avataren */
+  pickers: { answer: string; bottom: number }[];
 }
 
 /** Antworten der aktuellen Frage bzw. Auflösung: Zeilen je Antwort und Lage der letzten Antwort (D). */
@@ -286,14 +297,81 @@ export async function answerGeometry(page: Page): Promise<AnswerGeometry | null>
       return [{ text: own, state, lines: Math.round(text.getBoundingClientRect().height / lineHeight) }];
     });
     const strip = document.querySelector('[data-testid="player-strip"]');
+    // Avatarreihe an der Antwort (AnswerButton: absolut am rechten Rand, 12 px unter der Kante)
+    const pickers = buttons.flatMap((button) => {
+      const row = button.querySelector(":scope > span.absolute");
+      return row ? [{ answer: button.dataset.testid ?? "", bottom: row.getBoundingClientRect().bottom }] : [];
+    });
     return {
       layout: document.querySelector('[data-testid="game-screen"]')?.getAttribute("data-layout") ?? null,
       media: overlay.querySelector("img") !== null,
       answers,
       lastAnswerBottom: buttons.at(-1)?.getBoundingClientRect().bottom ?? 0,
       stripTop: strip ? strip.getBoundingClientRect().top : null,
+      pickers,
     };
   });
+}
+
+export interface StageGeometry {
+  /** `data-layout` und `data-phase` des Spielscreens */
+  layout: string | null;
+  phase: string | null;
+  /** Spielerstreifen (Zone ganz unten) und Viewport */
+  stripTop: number;
+  stripBottom: number;
+  viewportHeight: number;
+  /** „Weiter“/„Auflösen …“ bzw. „Warte auf …“ außerhalb der Zone des Spielerstreifens */
+  continueOutsideStrip: string[];
+  /** Unterkante der letzten Zeile des Zug-Ergebnisses (sonst `null`) */
+  lastSummaryRowBottom: number | null;
+}
+
+/** Lage der unteren Zone im laufenden Spiel (`null` ohne Spielscreen bzw. ohne Spielerstreifen). */
+export async function stageGeometry(page: Page): Promise<StageGeometry | null> {
+  return page.evaluate(() => {
+    const screen = document.querySelector('[data-testid="game-screen"]');
+    const strip = document.querySelector('[data-testid="player-strip"]');
+    if (!screen || !strip) return null;
+    const stripBox = strip.getBoundingClientRect();
+    const actions = [
+      ...document.querySelectorAll('[data-testid="game-continue"], [data-testid="game-continue-waiting"]'),
+    ];
+    const rows = [
+      ...document.querySelectorAll(
+        '[data-testid="overlay-turn-summary"]:not([data-exiting]) [data-testid="turn-summary-row"]',
+      ),
+    ];
+    return {
+      layout: screen.getAttribute("data-layout"),
+      phase: screen.getAttribute("data-phase"),
+      stripTop: stripBox.top,
+      stripBottom: stripBox.bottom,
+      viewportHeight: window.innerHeight,
+      continueOutsideStrip: actions
+        .filter((element) => !strip.contains(element))
+        .map((element) => element.getAttribute("data-testid") ?? ""),
+      lastSummaryRowBottom: rows.at(-1)?.getBoundingClientRect().bottom ?? null,
+    };
+  });
+}
+
+/**
+ * Laufendes Spiel auf der Bühne (docs/09 §4, §7; ADR-045/049): Der Spielerstreifen schließt unten ab – keine
+ * zweite Leiste darunter, die der Bühne Höhe nimmt; Host-Aktion bzw. „Warte auf …“ stehen in seiner Zone; das
+ * Zug-Ergebnis steht vollständig über ihm.
+ */
+function checkStage(geometry: StageGeometry | null, name: string, size: string): void {
+  if (geometry?.layout !== "stage" || geometry.phase === "game_over") return;
+  expect
+    .soft(geometry.stripBottom, `${name} (${size}): unter dem Spielerstreifen steht nichts`)
+    .toBeGreaterThanOrEqual(geometry.viewportHeight - 1);
+  expect.soft(geometry.continueOutsideStrip, `${name} (${size}): Host-Aktion in der Zone des Streifens`).toEqual([]);
+  if (geometry.lastSummaryRowBottom !== null) {
+    expect
+      .soft(geometry.lastSummaryRowBottom, `${name} (${size}): Zug-Ergebnis vollständig über dem Spielerstreifen`)
+      .toBeLessThanOrEqual(geometry.stripTop + 0.5);
+  }
 }
 
 /**
@@ -304,7 +382,8 @@ const answerLinesSeen = new Map<string, { lines: number; state: string; screen: 
 
 /**
  * Frage und Auflösung (ADR-034, AnswerButton): gleiche Zeilenzahl je Antwort in allen Zuständen und – auf der Bühne
- * ohne Bildfrage – die letzte Antwort vollständig über dem Spielerstreifen (Frage und Auflösung stehen gleich).
+ * ohne Bildfrage – die letzte Antwort samt der Avatare an den Antworten vollständig über dem Spielerstreifen (Frage
+ * und Auflösung stehen gleich).
  */
 function checkAnswers(geometry: AnswerGeometry | null, name: string, size: string): void {
   if (!geometry) return;
@@ -326,7 +405,126 @@ function checkAnswers(geometry: AnswerGeometry | null, name: string, size: strin
     expect
       .soft(geometry.lastAnswerBottom, `${name} (${size}): letzte Antwort vollständig über dem Spielerstreifen`)
       .toBeLessThanOrEqual(geometry.stripTop + 0.5);
+    for (const picker of geometry.pickers) {
+      expect
+        .soft(picker.bottom, `${name} (${size}): Avatare an ${picker.answer} vollständig über dem Spielerstreifen`)
+        .toBeLessThanOrEqual(geometry.stripTop + 0.5);
+    }
   }
+}
+
+/**
+ * Text-Zoom (WCAG 1.4.4, docs/09 §12 „Zoom bis 200 % ohne Verlust“): Schriftgröße der Seite in Prozent – rem-basierte
+ * Maße wachsen mit, wie bei „Schriftgröße“ in den Browser-Einstellungen. Danach `resize`, damit Hooks, die die
+ * Schriftgröße der Seite lesen (z. B. der Fluss-Modus des Spiels), neu messen.
+ */
+export async function setTextZoom(page: Page, percent: number): Promise<void> {
+  await page.evaluate((value) => {
+    document.documentElement.style.fontSize = `${value}%`;
+    window.dispatchEvent(new Event("resize"));
+  }, percent);
+}
+
+export interface TextZoomReport {
+  /** Schriftgröße der Seite in Pixeln (Beleg, dass der Zoom greift) */
+  rootFontPx: number;
+  /** sichtbare Texte, deren Kasten keine Breite hat – der Text läuft über Nachbarn (z. B. unter eine Taste) */
+  collapsed: string[];
+  /** Texte, die ihr Kasten abschneidet (`truncate`, `line-clamp`, feste Höhe mit `overflow: hidden`) */
+  clipped: string[];
+  /** Bedienelemente, die über den Viewport hinausragen (außerhalb gewollt waagerecht scrollender Bereiche) */
+  offscreenControls: string[];
+  /** Das Dokument scrollt seitlich */
+  documentScroll: boolean;
+}
+
+/**
+ * Verlust bei großer Schrift (WCAG 1.4.4): Texte ohne Breite, abgeschnittene Texte und Bedienelemente außerhalb des
+ * Viewports – nur Sichtbares, ohne Screenreader-Texte (`sr-only`) und inerte bzw. dekorative Teile.
+ */
+export async function textZoomReport(page: Page): Promise<TextZoomReport> {
+  return page.evaluate(() => {
+    const describe = (element: Element, text: string) => {
+      const testId = element.closest("[data-testid]")?.getAttribute("data-testid");
+      return `„${text.slice(0, 40)}“ ${element.tagName.toLowerCase()}${testId ? ` (in ${testId})` : ""}`;
+    };
+    const hidden = (element: Element) =>
+      element.closest('.sr-only, [aria-hidden="true"], [inert]') !== null ||
+      getComputedStyle(element).visibility === "hidden";
+    const clips = (value: string) => value === "hidden" || value === "clip";
+    const collapsed: string[] = [];
+    const clipped: string[] = [];
+    for (const element of document.body.querySelectorAll("*")) {
+      if (!(element instanceof HTMLElement) || hidden(element)) continue;
+      const text = [...element.childNodes]
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => (node.textContent ?? "").trim())
+        .join(" ")
+        .trim();
+      if (text === "") continue;
+      const box = element.getBoundingClientRect();
+      if (box.height === 0 && box.width === 0) continue;
+      if (box.width < 1) collapsed.push(describe(element, text));
+      const style = getComputedStyle(element);
+      if (
+        (clips(style.overflowX) && element.scrollWidth > element.clientWidth + 1) ||
+        (clips(style.overflowY) && element.scrollHeight > element.clientHeight + 1)
+      ) {
+        clipped.push(
+          `${describe(element, text)}: ${element.scrollWidth}×${element.scrollHeight} > ${element.clientWidth}×${element.clientHeight}`,
+        );
+      }
+    }
+    const scrollsSideways = (element: Element) => {
+      for (let node = element.parentElement; node; node = node.parentElement) {
+        const overflowX = getComputedStyle(node).overflowX;
+        if ((overflowX === "auto" || overflowX === "scroll") && node !== document.documentElement) return true;
+      }
+      return false;
+    };
+    const offscreenControls = [
+      ...document.querySelectorAll('button, a[href], input, select, textarea, [role="button"]'),
+    ]
+      .filter((element) => !hidden(element) && !scrollsSideways(element))
+      .filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && (box.right > window.innerWidth + 1 || box.left < -1);
+      })
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        const name = element.getAttribute("aria-label") ?? element.textContent ?? "";
+        return `${describe(element, name.trim())}: ${Math.round(box.left)}–${Math.round(box.right)} bei ${window.innerWidth}`;
+      });
+    const root = document.documentElement;
+    return {
+      rootFontPx: Number.parseFloat(getComputedStyle(root).fontSize),
+      collapsed,
+      clipped,
+      offscreenControls,
+      documentScroll: root.scrollWidth > root.clientWidth + 1,
+    };
+  });
+}
+
+/** Text-Zoom prüfen: Bericht als Anhang, Befunde per `expect.soft`, dazu ein Screenshot. */
+export async function checkTextZoom(page: Page, name: string, testInfo: TestInfo): Promise<TextZoomReport> {
+  await waitForStill(page);
+  const report = await textZoomReport(page);
+  const viewport = page.viewportSize();
+  const size = viewport ? `${viewport.width}x${viewport.height}` : "unbekannt";
+  const dir = screenshotDir(testInfo);
+  mkdirSync(dir, { recursive: true });
+  await page.screenshot({ path: join(dir, `${name}-${size}.png`) });
+  await testInfo.attach(`text-zoom-${name}-${size}.json`, {
+    body: JSON.stringify(report, null, 2),
+    contentType: "application/json",
+  });
+  expect.soft(report.rootFontPx, `${name} (${size}): Schrift der Seite vergrößert`).toBeGreaterThanOrEqual(32);
+  expect.soft(report.collapsed, `${name} (${size}): Texte ohne Breite`).toEqual([]);
+  expect.soft(report.clipped, `${name} (${size}): abgeschnittene Texte`).toEqual([]);
+  expect.soft(report.offscreenControls, `${name} (${size}): Bedienelemente außerhalb`).toEqual([]);
+  expect.soft(report.documentScroll, `${name} (${size}): Dokument scrollt seitlich`).toBe(false);
+  return report;
 }
 
 export interface ScreenCheckOptions {
@@ -344,6 +542,8 @@ export interface ScreenResult {
   layout: LayoutReport;
   /** Frage/Auflösung: Zeilen je Antwort und Lage der letzten Antwort (sonst `null`) */
   answers: AnswerGeometry | null;
+  /** Laufendes Spiel: Lage von Spielerstreifen, Host-Aktion und Zug-Ergebnis (sonst `null`) */
+  stage: StageGeometry | null;
   /** Bewegungen kamen vor der Prüfung zur Ruhe */
   settled: boolean;
   axeMs: number;
@@ -368,6 +568,7 @@ export async function checkScreen(
   const axeMs = Date.now() - started;
   const layout = await layoutReport(page, options.allowHorizontalScroll);
   const answers = await answerGeometry(page);
+  const stage = await stageGeometry(page);
   const viewport = page.viewportSize();
   const size = viewport ? `${viewport.width}x${viewport.height}` : "unbekannt";
   if (options.screenshot !== false) {
@@ -377,7 +578,7 @@ export async function checkScreen(
   }
   // Die Prüfung muss die Phase selbst erfasst haben – nicht schon den Übergang zur nächsten.
   const phaseStayed = options.stays === undefined || (await options.stays.count()) === 1;
-  const result: ScreenResult = { name, axe, layout, answers, settled, axeMs, totalMs: Date.now() - begin };
+  const result: ScreenResult = { name, axe, layout, answers, stage, settled, axeMs, totalMs: Date.now() - begin };
   await testInfo.attach(`screen-${name}-${size}.json`, {
     body: JSON.stringify(result, null, 2),
     contentType: "application/json",
@@ -393,5 +594,6 @@ export async function checkScreen(
   expect.soft(layout.emojis, `${name} (${size}): Emojis`).toEqual([]);
   expect.soft(layout.arbitraryClasses, `${name} (${size}): beliebige Werte/Hex in Klassen`).toEqual([]);
   checkAnswers(answers, name, size);
+  checkStage(stage, name, size);
   return result;
 }

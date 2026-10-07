@@ -66,7 +66,8 @@ export function Podium({ entries, animate = false }: PodiumProps) {
               className={cx("flex w-24 min-w-0 flex-col items-center gap-2", COLUMN_ORDER[index])}
             >
               <Avatar name={entry.name} color={entry.color} size={56} winner={entry.place === 1} />
-              <span className="max-w-full truncate text-label text-text">{entry.name}</span>
+              {/* Der Name wird nie abgeschnitten – bei großer Schrift bricht er um (docs/09 §12, WCAG 1.4.4). */}
+              <span className="max-w-full text-center text-label text-text wrap-break-word">{entry.name}</span>
               <m.span
                 className={cx(
                   "flex w-full origin-bottom justify-center rounded-t-lg bg-surface-2 pt-2",

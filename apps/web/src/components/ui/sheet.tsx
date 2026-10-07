@@ -2,7 +2,7 @@
 
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
 import { focusTitleOnViewChange } from "../../lib/ui/focus";
@@ -29,6 +29,26 @@ export interface SheetProps {
   view?: string;
   /** Aktionsbereich unten (z. B. Button „Fertig“), mit Safe Area */
   footer?: ReactNode;
+}
+
+export interface SheetViewChange {
+  previousView: string | undefined;
+  view: string | undefined;
+  open: boolean;
+  /** neue Ansicht ist eine Unteransicht (mit „Zurück“) */
+  subview: boolean;
+  /** zuletzt gemessene Position der Hauptansicht */
+  mainScrollTop: number;
+}
+
+/**
+ * Scrollposition nach einem Ansichtswechsel im offenen Sheet – der scrollende Bereich bleibt derselbe DOM-Knoten und
+ * behielte sonst die Position der vorigen Ansicht: Unteransichten beginnen oben, die Hauptansicht steht wieder dort,
+ * wo man sie verlassen hat. `null` = nichts ändern (kein Wechsel, Sheet zu).
+ */
+export function sheetScrollTop(change: SheetViewChange): number | null {
+  if (!change.open || change.previousView === change.view) return null;
+  return change.subview ? 0 : change.mainScrollTop;
 }
 
 /** Was per Tab erreichbar ist (deaktivierte Bedienelemente nicht). */
@@ -96,6 +116,23 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
     if (focusTitle) titleRef.current?.focus({ preventScroll: true });
   }, [view, open]);
 
+  // Scrollposition je Ansicht (vor dem Zeichnen, damit nichts springt): Unteransichten oben, Hauptansicht wie verlassen.
+  const subview = onBack !== undefined;
+  const mainScrollTop = useRef(0);
+  const scrolledView = useRef(view);
+  useLayoutEffect(() => {
+    const target = sheetScrollTop({
+      previousView: scrolledView.current,
+      view,
+      open,
+      subview,
+      mainScrollTop: mainScrollTop.current,
+    });
+    scrolledView.current = view;
+    if (!open) mainScrollTop.current = 0;
+    if (target !== null && bodyRef.current) bodyRef.current.scrollTop = target;
+  }, [view, open, subview]);
+
   const motionProps = sheetMotion(reduce);
 
   return (
@@ -133,6 +170,13 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
                   // mit Namen ein Bereich (`region`) – sonst ein schlichter Abschnitt ohne Rolle.
                   tabIndex={bodyNeedsFocus ? 0 : undefined}
                   aria-label={bodyNeedsFocus ? title : undefined}
+                  onScroll={
+                    subview
+                      ? undefined
+                      : (event) => {
+                          mainScrollTop.current = event.currentTarget.scrollTop;
+                        }
+                  }
                   data-testid="sheet-body"
                   className={cx(
                     "min-h-0 flex-1 overflow-y-auto overscroll-contain px-gutter",

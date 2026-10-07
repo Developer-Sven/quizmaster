@@ -112,3 +112,61 @@ test("Ablehnen, Zurückziehen und Vorschläge ausschalten (ADR-053)", async ({ p
   const axe = await axeReport(guest.page);
   expect(axe.violations.filter((finding) => BLOCKING_IMPACTS.includes(finding.impact))).toEqual([]);
 });
+
+test("Vorschlag, der nur die Reihenfolge der Kategorien ändert: beide sehen, was sich ändert (ADR-053/056)", async ({
+  players,
+}) => {
+  const host = await players.create("Mia");
+  const guest = await players.create("Ben");
+  const code = await host.createLobby();
+  await guest.joinByCode(code);
+
+  // Mia: drei Kategorien der Reihe nach.
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
+  const settings = host.page.getByRole("dialog", { name: "Einstellungen" });
+  await settings.getByTestId("settings-categories-row").click();
+  const rows = host.page.getByTestId("settings-categories").locator('[data-testid^="settings-category-"]');
+  const names: string[] = [];
+  for (const index of [0, 1, 2]) {
+    const row = rows.nth(index);
+    names.push(((await row.textContent()) ?? "").trim());
+    await row.click();
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+  }
+  await host.page.getByRole("button", { name: /^Der Reihe nach, ohne Wahl/ }).click();
+  const [first, second, third] = names;
+  const before = `1. ${first} · 2. ${second} · 3. ${third}`;
+  const after = `1. ${second} · 2. ${third} · 3. ${first}`;
+  await expect(host.page.getByTestId("settings-category-order")).toHaveText(`Reihenfolge: ${before}`);
+  await host.page.getByTestId("settings-categories-done").click();
+  await settings.getByRole("button", { name: "Fertig" }).click();
+  await expect(settings).toBeHidden();
+
+  // Ben nimmt die erste Kategorie heraus und wieder hinein – sie rückt ans Ende, sonst bleibt alles gleich.
+  await guest.page.getByRole("button", { name: "Einstellungen ansehen" }).click();
+  const draft = guest.page.getByRole("dialog", { name: "Einstellungen" });
+  await draft.getByTestId("settings-categories-row").click();
+  const firstRow = guest.page
+    .getByTestId("settings-categories")
+    .getByRole("button", { name: first ?? "", exact: true });
+  await firstRow.click();
+  await expect(firstRow).toHaveAttribute("aria-pressed", "false");
+  await firstRow.click();
+  await expect(firstRow).toHaveAttribute("aria-pressed", "true");
+  await expect(guest.page.getByTestId("settings-category-order")).toHaveText(`Reihenfolge: ${after}`);
+  await expect(guest.page.getByTestId("settings-category-order-note")).toHaveText(`Aktuell: ${before}`);
+  await guest.page.getByTestId("settings-categories-done").click();
+  await expect(draft.getByTestId("settings-categories-row")).toContainText(`Aktuell: ${before}`);
+  await draft.getByTestId("settings-suggest").click();
+  await expect(draft).toBeHidden();
+
+  // Mia sieht in der Lobby und im Prüfen-Sheet die neue Reihenfolge.
+  const row = host.page.getByTestId("lobby-suggestion");
+  await expect(row).toContainText(`Kategorien: ${after}`);
+  await row.click();
+  const review = host.page.getByRole("dialog", { name: "Vorschlag von Ben" });
+  await expect(review.getByTestId("settings-categories-row")).toContainText(`Aktuell: ${before}`);
+  await review.getByTestId("suggestion-accept").click();
+  await expect(review).toBeHidden();
+  await expect(guest.toast("Mia hat deinen Vorschlag übernommen.")).toBeAttached();
+});

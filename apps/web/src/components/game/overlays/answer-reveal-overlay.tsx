@@ -38,7 +38,8 @@ const REVEAL = CHOREOGRAPHY.answerReveal;
 const SHAKE_LATE_MS = 120;
 
 /**
- * Auflösung (Phase `reveal`, 3,5 s, docs/09 §7.6) – die Karte der Frage bleibt stehen (Übergang „cut“):
+ * Auflösung (Phase `reveal`, Standard 5 s bzw. Weiter-Einstellung, docs/09 §7.6, ADR-045) – die Karte der Frage
+ * bleibt stehen (Übergang „cut“):
  * 0 ms richtige Antwort `correct`, eigene falsche `wrong` mit Seitwärtsruck (2 × 4 px, 160 ms – nur bei
  * eigener falscher Antwort, nicht bei reduzierter Bewegung); ab 500 ms gleiten die Avatare 24 px gestaffelt
  * (150 ms, je 480 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 1.200 ms der Spielerstreifen

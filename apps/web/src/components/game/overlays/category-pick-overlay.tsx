@@ -39,10 +39,10 @@ const PICK = CHOREOGRAPHY.pick;
 
 /**
  * Kategoriewahl (Phase `category_pick`, 15 s, docs/09 §7.2): wählende Person „Wähle eine Kategorie“,
- * alle anderen „Mia wählt eine Kategorie“ mit Avatar; drei Kacheln (Einflug gestaffelt 40 ms), `TimerRing`
- * rechts oben. Zuschauende sehen die Kacheln view-only mit einem ruhig wandernden 2-px-Rahmen (1,2-s-Takt ab
- * Phasenbeginn – bei allen gleichzeitig), der bei der Wahl sofort stoppt; nach der Wahl bleibt die gewählte
- * Kachel `selected`, die anderen blenden aus (200 ms). Reduzierte Bewegung: kein wandernder Rahmen.
+ * alle anderen „Mia wählt eine Kategorie“ mit Avatar; drei Kacheln (Einflug gestaffelt 100 ms, je 480 ms),
+ * `TimerRing` rechts oben. Zuschauende sehen die Kacheln view-only mit einem ruhig wandernden 2-px-Rahmen
+ * (1,2-s-Takt ab Phasenbeginn – bei allen gleichzeitig), der bei der Wahl sofort stoppt; nach der Wahl bleibt die
+ * gewählte Kachel `selected`, die anderen blenden aus (200 ms). Reduzierte Bewegung: kein wandernder Rahmen.
  * Tastatur: `1`–`3`, solange der Fokus in der Kachelgruppe liegt (WCAG 2.1.4, lib/client/keyboard.ts). Der
  * Fokusring der Gruppe erscheint nur nach Bedienung per Tastatur und nur, solange gewählt werden kann.
  *

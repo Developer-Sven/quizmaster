@@ -5,10 +5,25 @@ export interface CategoryBadgeProps {
   category: CategoryVisual;
   /** nur das Icon (Tafel, „Fragen ansehen“); der Name wird Screenreader-Text und Tooltip */
   compact?: boolean;
+  /**
+   * Kompakt direkt neben dem sichtbaren Namen (z. B. Kategorien-Auswahl): nur Schmuck – ohne Screenreader-Text und
+   * Tooltip, sonst würde der Name doppelt vorgelesen („Sport Sport“).
+   */
+  decorative?: boolean;
 }
 
 /** CategoryBadge (docs/09 §5): Chip 32 hoch, `surface-2`, `radius-md`, Icon 16 in Kategoriefarbe + Name (`label`). */
-export function CategoryBadge({ category, compact = false }: CategoryBadgeProps) {
+export function CategoryBadge({ category, compact = false, decorative = false }: CategoryBadgeProps) {
+  if (compact && decorative) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-2"
+      >
+        <CategoryIcon icon={category.icon} color={category.color} size={16} />
+      </span>
+    );
+  }
   if (compact) {
     return (
       <span

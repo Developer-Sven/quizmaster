@@ -29,9 +29,32 @@ describe("Text-Zoom (WCAG 1.4.4): nichts wird abgeschnitten", () => {
     expect(header).not.toContain("truncate");
   });
 
+  it("Kopfzeile bei großer Schrift: Titel in eigener Zeile unter den Icons statt Buchstabe für Buchstabe", () => {
+    // 200 % Text-Zoom bei 360 px: zwischen den zwei 88-px-Icons blieben dem Titel nur 88 px („Lo / bb / y“). Die
+    // Container-Abfrage misst die Spalte in rem und wächst damit mit der Schriftgröße mit; darunter (< 16 rem) stehen
+    // die Icons oben links/rechts und der Titel volle Breite darunter. Lesereihenfolge bleibt links · Titel · rechts.
+    const header = renderHtml(AppHeader, { left: "L", title: h(HeaderTitle, null, "Lobby"), right: "R" });
+    expect(header).toMatch(/<div class="@container [^"]*max-w-column[^"]*px-gutter[^"]*">/);
+    const row = /<div class="([^"]*)"><div class="[^"]*">L<\/div>/.exec(header)?.[1]?.split(" ") ?? [];
+    expect(row).toEqual(expect.arrayContaining(["flex", "flex-wrap", "@max-3xs:justify-between", "min-h-14"]));
+    const titleSlot = /<div class="([^"]*)"><h1 /.exec(header)?.[1]?.split(" ") ?? [];
+    expect(titleSlot).toEqual(expect.arrayContaining(["flex-1", "@max-3xs:order-last", "@max-3xs:basis-full"]));
+    expect(header.indexOf(">L<")).toBeLessThan(header.indexOf(">Lobby<"));
+    expect(header.indexOf(">Lobby<")).toBeLessThan(header.indexOf(">R<"));
+  });
+
   it("Wartetext der Aktionsleiste hat eine Mindesthöhe statt einer festen", () => {
     const note = renderHtml(ActionBarNote, {}, "Warte auf Mia …");
     expect(note).toContain("min-h-14");
     expect(note).not.toMatch(/(?:^|[\s"])h-14(?:[\s"]|$)/);
+  });
+
+  it("kompakt (Zone des Spielerstreifens, ADR-060): gleicher Stil, Höhe wie ein kompakter Button", () => {
+    const regular = renderHtml(ActionBarNote, {}, "Warte auf Mia …");
+    const compact = renderHtml(ActionBarNote, { compact: true }, "Warte auf Mia …");
+    expect(compact).toContain("min-h-11");
+    expect(compact).not.toContain("min-h-14");
+    // gleiche Schrift, Farbe und Ausrichtung wie in der Lobby (docs/09 §13: gleiche Elemente sehen gleich aus)
+    expect(compact.replace("min-h-11", "")).toBe(regular.replace("min-h-14", ""));
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "@quizmaster/shared";
 import { type ReactNode, useState } from "react";
 import { ActionBar, ActionBarNote } from "@/components/app/action-bar";
+import { Banner } from "@/components/ui/banner";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { de } from "@/i18n/de";
@@ -28,7 +29,7 @@ import { type CategoryArrival, CategoryStrip } from "./category-strip";
 import { displayedScores, pointsShown, scoreBoundaries, stageCues } from "./choreography";
 import { Hud } from "./hud";
 import { OverlayLayoutContext } from "./overlays/overlay-layout";
-import { PlayerStrip } from "./player-strip";
+import { PlayerStrip, type StripAction } from "./player-strip";
 import { PreviewClock } from "./preview-clock";
 import { stageAnnouncement } from "./results";
 import { GameOverStage, Stage } from "./stage";
@@ -37,6 +38,7 @@ import {
   useCompactHeight,
   useGameAudio,
   useGameDocument,
+  useRoomyHeight,
   useServerMoment,
   useStageCues,
 } from "./use-choreography";
@@ -78,6 +80,11 @@ export interface GameScreenProps {
   busy?: GameBusy;
   /** Banner unter dem HUD (Wartung, Update) */
   banner?: ReactNode;
+  /**
+   * Netzaussetzer im laufenden Spiel (ADR-057): Banner „Verbindung hakt …“ unter dem HUD, angesagt über eine
+   * dauerhafte Live-Region
+   */
+  networkStalled?: boolean;
 }
 
 /**
@@ -102,22 +109,33 @@ const GAME_OVER_SETTLED_MS = DURATION_MS.overlay + DURATION_MS.base;
 
 /**
  * Spiel-Screen (docs/09 §7 Grundgerüst): HUD ersetzt die Kopfzeile, darunter der Kategoriestreifen, die
- * Bühne mit den Overlays und unten der Spielerstreifen statt der Aktionsleiste. Im Spielende (§6) steht
- * unten die Aktionsleiste: Host „Revanche“, sonst „Warte auf Mia …“; „Fragen ansehen“; „Lobby verlassen“.
+ * Bühne mit den Overlays und unten der Spielerstreifen statt der Aktionsleiste.
+ *
+ * **Wartet das Spiel auf den Host** (Weiter per Host, ADR-045; Zeit pro Frage „Host“, ADR-049), steht die Aktion
+ * in der Zone des Spielerstreifens, nie in einer eigenen Leiste darunter (ADR-060). Der Host sieht kompakt (44 px)
+ * die eine orange Aktion, alle anderen in Weiter-Phasen „Warte auf Mia …“ (`ActionBarNote`, kompakt):
+ * - Hoher Viewport (ab 50 rem, z. B. 430 × 932, Anzeige-Modus) bzw. Fluss-Layout: in einer zweiten Zeile unter den
+ *   Personen über die volle Breite – der Streifen bleibt wie ohne Aktion (bis 4 Personen verteilt, Ringe, „+1“).
+ * - Sonst (z. B. 360 × 740: dort fehlte Antwort D samt Avataren die Höhe): „Weiter“ bzw. der Hinweis neben den
+ *   Personen (die Liste scrollt, eigene Person zuerst), „Auflösen (2/3 Antworten)“ statt der Personen (der Spielstand
+ *   bleibt für Screenreader).
  *
  * Die Choreografie (docs/09 §7–8) läuft an Serverzeitpunkten: die Bühne wechselt ihr Overlay, der Streifen
- * empfängt die gewählte Kategorie, die Punkte steigen 400 ms nach Beginn der Auflösung, Töne und Haptik
+ * empfängt die gewählte Kategorie, die Punkte steigen 1.200 ms nach Beginn der Auflösung, Töne und Haptik
  * (docs/09 §10) kommen als Cues. Rein darstellend – Daten und Aktionen kommen als Props (Live-Spiel und
  * /dev/game; dort mit eingefrorener bzw. per `?clock=play` laufender Uhr).
  *
- * **Spielende** liegt als eigene Ebene über Kategoriestreifen, Bühne und Spielerstreifen (die darunter inert
- * und unverändert bleiben): Beim Wechsel springt so nichts unter dem ausblendenden Overlay (CLS). Die Ebene
- * hat oben die Banner, in der Mitte das scrollende Ergebnis und unten die Aktionsleiste („Fragen ansehen“ und
- * „Lobby verlassen“ kompakt, nebeneinander, sobald sie in eine Zeile passen).
+ * **Spielende** (docs/09 §6, ADR-038) liegt als eigene Ebene über Kategoriestreifen, Bühne und Spielerstreifen
+ * (die darunter inert und unverändert bleiben): Beim Wechsel springt so nichts unter dem ausblendenden Overlay
+ * (CLS). Die Ebene hat oben die Banner, in der Mitte das scrollende Ergebnis und unten die Aktionsleiste mit
+ * „Gleich geht es zurück in die Lobby …“ und „Lobby verlassen“.
  *
  * **Niedrige Viewports** (`useCompactHeight`, WCAG 1.4.10): Statt einer starren Bühne zwischen festen
  * Leisten scrollt der ganze Screen als ein Dokument – Streifen, Overlay (im Fluss) und Aktionsleiste (nicht
  * klebend) stehen untereinander, nichts verdeckt Inhalt oder Bedienelemente.
+ *
+ * **Netzaussetzer** (ADR-057): Das Banner „Verbindung hakt …“ ist für Screenreader verborgen; angesagt wird der
+ * Text über eine Live-Region, die dauerhaft im DOM steht (nur dann sagen Screenreader die Änderung zuverlässig an).
  */
 export function GameScreen(props: GameScreenProps) {
   return (
@@ -138,11 +156,15 @@ function GameScreenContent({
   handlers,
   busy = {},
   banner,
+  networkStalled = false,
 }: GameScreenProps) {
   const [leaveOpen, setLeaveOpen] = useState(false);
   /** Frage, deren Antwortgruppe den Fokus nicht bekam – das HUD sagt sie dann an */
   const [unfocusedPrompt, setUnfocusedPrompt] = useState<string | null>(null);
   const compact = useCompactHeight();
+  // Zweite Zeile für die Host-Aktion im Spielerstreifen, wo die Bühne sie verträgt (ADR-060).
+  const roomy = useRoomyHeight();
+  const stackedAction = compact || roomy;
   const selfId = self?.playerId ?? null;
   const selfPlayer = findPlayer(lobby.players, selfId);
   const phase = lobby.phase;
@@ -202,6 +224,39 @@ function GameScreenContent({
     handlers.onAnswer(questionId, choice);
   };
 
+  // Host-Aktion in der Zone des Spielerstreifens (ADR-045/049, Lage ADR-060) – die einzige orange Aktion.
+  let stripAction: StripAction | null = null;
+  if (untimedQuestion !== null && isSelfHost) {
+    stripAction = {
+      placement: "instead",
+      content: (
+        <ContinueButton
+          label={de.actions.revealNow(untimedQuestion.answeredBy.length, activeCount)}
+          block
+          disabled={!questionOpen}
+          busy={busy.continue === true}
+          onContinue={() => handlers.onContinue("question")}
+        />
+      ),
+    };
+  } else if (advancePhase !== null) {
+    stripAction = {
+      placement: "beside",
+      content: isSelfHost ? (
+        <ContinueButton
+          label={de.actions.next}
+          block={stackedAction}
+          busy={busy.continue === true}
+          onContinue={() => handlers.onContinue(advancePhase)}
+        />
+      ) : (
+        <ActionBarNote compact testId="game-continue-waiting">
+          {de.lobby.waitingFor(host?.name ?? "")}
+        </ActionBarNote>
+      ),
+    };
+  }
+
   const gameOverLayer = gameOver ? (
     <div className={cx("flex flex-col", compact ? "shrink-0 grow" : "absolute inset-0")}>
       {banner}
@@ -242,6 +297,10 @@ function GameScreenContent({
       />
       <main className={cx("relative flex flex-col", compact ? "shrink-0 grow" : "min-h-0 flex-1")}>
         {heading ? <h1 className="sr-only">{heading}</h1> : null}
+        {/* Dauerhaft im DOM (auch leer) und außerhalb der inerten Teile: nur so wird „Verbindung hakt“ angesagt. */}
+        <p role="status" className="sr-only" data-testid="network-announcer">
+          {networkStalled ? de.network.stalled : ""}
+        </p>
         <OverlayLayoutContext value={compact ? "flow" : "stage"}>
           {/* Laufendes Spiel. Am Spielende bleibt es (bei normaler Höhe) unverändert unter der Spielende-Ebene
               stehen – inert, damit Fokus, Klicks und Screenreader nur das Ergebnis erreichen. */}
@@ -255,6 +314,12 @@ function GameScreenContent({
               )}
             >
               {gameOver ? null : banner}
+              {networkStalled && !gameOver ? (
+                // Sichtbar für alle, vorgelesen nur über die Live-Region oben – sonst käme die Ansage doppelt.
+                <div aria-hidden="true" data-testid="network-banner">
+                  <Banner tone="network" />
+                </div>
+              ) : null}
               <CategoryStrip
                 category={categoryId ? categoryVisual(categories, categoryId) : null}
                 fraction={fraction}
@@ -279,28 +344,9 @@ function GameScreenContent({
                 selfId={selfId}
                 answeredIds={phase === "question" && question ? question.answeredBy : []}
                 scores={displayedScores(lobby, shownPoints)}
+                action={stripAction}
+                stacked={stackedAction}
               />
-              {advancePhase !== null ? (
-                <AdvanceActions
-                  isHost={isSelfHost}
-                  hostName={host?.name ?? ""}
-                  label={de.actions.next}
-                  busy={busy.continue === true}
-                  onContinue={() => handlers.onContinue(advancePhase)}
-                  inFlow={compact}
-                />
-              ) : null}
-              {untimedQuestion !== null && isSelfHost ? (
-                <AdvanceActions
-                  isHost
-                  hostName={host?.name ?? ""}
-                  label={de.actions.revealNow(untimedQuestion.answeredBy.length, activeCount)}
-                  disabled={!questionOpen}
-                  busy={busy.continue === true}
-                  onContinue={() => handlers.onContinue("question")}
-                  inFlow={compact}
-                />
-              ) : null}
             </div>
           )}
           {gameOverLayer}
@@ -319,43 +365,35 @@ function GameScreenContent({
   );
 }
 
-interface AdvanceActionsProps {
-  isHost: boolean;
-  hostName: string;
+interface ContinueButtonProps {
   /** „Weiter“ bzw. „Auflösen (2/3 Antworten)“ */
   label: string;
+  /** über die ganze Breite der Zone (statt der Personen bzw. in der zweiten Zeile darunter) */
+  block?: boolean;
   /** noch nicht bedienbar (Frage noch im Vorlauf) */
   disabled?: boolean;
   busy: boolean;
   onContinue: () => void;
-  /** niedriger Viewport: Leiste im Dokumentfluss statt unten klebend */
-  inFlow: boolean;
 }
 
 /**
- * Weiter-Leiste (ADR-045), solange Auflösung, Zug-Ergebnis oder Zwischenstand auf den Host warten: Der Host
- * tippt „Weiter“ (die einzige orange Aktion), alle anderen sehen „Warte auf Mia …“.
+ * Host-Aktion „Weiter“ (ADR-045) bzw. „Auflösen (2/3 Antworten)“ (ADR-049): die einzige orange Aktion, kompakt
+ * (44 px, Trefferfläche 48), damit sie in der Zone des Spielerstreifens steht (ADR-060).
  */
-function AdvanceActions({ isHost, hostName, label, disabled = false, busy, onContinue, inFlow }: AdvanceActionsProps) {
-  const bar = (
-    <ActionBar>
-      {isHost ? (
-        <Button
-          variant="primary"
-          block
-          loading={busy}
-          disabled={disabled}
-          onClick={onContinue}
-          data-testid="game-continue"
-        >
-          {label}
-        </Button>
-      ) : (
-        <ActionBarNote testId="game-continue-waiting">{de.lobby.waitingFor(hostName)}</ActionBarNote>
-      )}
-    </ActionBar>
+function ContinueButton({ label, block = false, disabled = false, busy, onContinue }: ContinueButtonProps) {
+  return (
+    <Button
+      variant="primary"
+      size="compact"
+      block={block}
+      loading={busy}
+      disabled={disabled}
+      onClick={onContinue}
+      data-testid="game-continue"
+    >
+      {label}
+    </Button>
   );
-  return inFlow ? <div className="shrink-0">{bar}</div> : bar;
 }
 
 interface GameOverActionsProps {
@@ -365,7 +403,7 @@ interface GameOverActionsProps {
 }
 
 /**
- * Aktionsleiste am Spielende (ADR-038): Das Ergebnis steht `gameOverMs` (5 s), danach geht es für alle
+ * Aktionsleiste am Spielende (ADR-038): Das Ergebnis steht `gameOverMs` (6 s), danach geht es für alle
  * automatisch zurück in die Lobby – dort liegen Ergebnis und „Fragen ansehen“ als Karte „Letztes Spiel“, und der
  * Host startet die nächste Runde. Hier nur der Hinweis und „Lobby verlassen“ (ghost, kompakt).
  */

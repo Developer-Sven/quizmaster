@@ -73,8 +73,11 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: repoRoot,
   turbopack: { root: repoRoot },
   transpilePackages: ["@quizmaster/shared", "@quizmaster/db"],
-  // Eigenes Build-Verzeichnis je paralleler Instanz (z. B. Agents/E2E), Standard .next
+  // Eigenes Build-Verzeichnis je paralleler Instanz (z. B. paralleler Build oder E2E-Stack), Standard .next
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  // Kein next/image im Projekt: Bildoptimierer aus – /_next/image antwortet 404, sharp/libvips liegen nie im
+  // Request-Pfad (weniger Angriffsfläche, docs/06). sharp bleibt Dev-Abhängigkeit der Icon-/Screenshot-Skripte.
+  images: { unoptimized: true },
   // Schrift-Preloads als `<link rel="preload">` im HTML statt als `Link`-Header: React fügt beim Hydrieren
   // (Ressourcen-Hinweise im RSC-Payload) sonst ein zweites Preload ein. Ohne Service Worker verschmilzt
   // Chromium beide; kommt die Seite aus dem SW, lädt es jede Schrift doppelt und warnt „preloaded … but not

@@ -5,7 +5,8 @@
  * und Antworten (40 Zeichen) passen. Jede Phase wird als Screenshot abgelegt (DoD Phase 3).
  *
  * Läuft gegen den Normal-Stack (`GAME_TIMING=normal`, Fixtures als Langtext-Variante): Phasen in
- * Originallänge, damit axe jede Phase sicher trifft. Zusätzlich ein komplettes Spiel mit reduzierter Bewegung.
+ * Originallänge, damit axe jede Phase sicher trifft. Zusätzlich die Host-Modi (ADR-045/049) mit 8 Personen und ein
+ * komplettes Spiel mit reduzierter Bewegung.
  */
 import type { Locator, TestInfo } from "@playwright/test";
 import { expect, test } from "./support/fixtures.ts";
@@ -21,11 +22,18 @@ import {
   pickByKeyboard,
   pickFirstCategory,
   pickRoles,
+  pickUntilQuestion,
   playQuicklyUntil,
   waitForOverlay,
 } from "./support/phases.ts";
 import type { Player } from "./support/player.ts";
-import { checkScreen, questionTextFit } from "./support/screen-checks.ts";
+import {
+  checkScreen,
+  checkTextZoom,
+  PLAYER_STRIP_SCROLL,
+  questionTextFit,
+  setTextZoom,
+} from "./support/screen-checks.ts";
 import { countByOverlay, stageEvents } from "./support/stage-recorder.ts";
 
 /** Länge der Langtext-Variante (e2e/stack/long-texts.ts = Höchstwerte des Katalog-Schemas). */
@@ -80,6 +88,27 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     const mia = await players.create("Mia");
     await mia.openStart();
     await checkScreen(mia.page, "start", testInfo);
+    // Die drei Wege als Gruppe (ADR-043, docs/09 §6): je 16 px zwischen „Lobby erstellen“, „oder“, Code, „oder“ und
+    // „QR-Code scannen“ – die Statuszeile „Trete bei …“ kostet im Leerlauf keinen Platz.
+    const rhythm = await mia.page.evaluate(() => {
+      const box = (element: Element | null | undefined) => element?.getBoundingClientRect() ?? null;
+      const create = box(document.querySelector('[data-testid="start-create"]'));
+      const code = box(document.querySelector('[data-testid="start-join-status"]')?.parentElement);
+      const scan = box(document.querySelector('[data-testid="start-scan"]'));
+      const ors = [...document.querySelectorAll("main span")]
+        .filter((span) => span.textContent === "oder")
+        .map((span) => box(span.parentElement));
+      const [orBefore, orAfter] = ors;
+      if (!create || !code || !scan || !orBefore || !orAfter) return null;
+      return [
+        orBefore.top - create.bottom,
+        code.top - orBefore.bottom,
+        orAfter.top - code.bottom,
+        scan.top - orAfter.bottom,
+      ];
+    });
+    expect(rhythm, "Abstände zwischen den drei Wegen").not.toBeNull();
+    for (const gap of rhythm ?? []) expect(gap).toBeCloseTo(16, 0);
 
     // Sichtbarer Fokus (docs/09 §5, §12): per Tab auf „Lobby erstellen“ → 2-px-Ring in primary.
     await mia.page.getByLabel("Dein Name").focus();
@@ -281,7 +310,7 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     await expect(mia.page.getByTestId("game-over-headline")).toHaveText("Gewonnen");
     await expect(ben.page.getByTestId("game-over-headline")).toHaveText("Verloren");
 
-    // --- Nach dem Ergebnis (5 s) zurück in der Lobby: Karte „Letztes Spiel“ (ADR-038) ---------------------
+    // --- Nach dem Ergebnis (6 s) zurück in der Lobby: Karte „Letztes Spiel“ (ADR-038) ---------------------
     await expect(ben.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
     await checkScreen(ben.page, "lobby-nach-spiel", testInfo);
     await ben.page.getByRole("button", { name: "Ergebnis ansehen" }).click();
@@ -334,7 +363,7 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     await expect(mia.page.getByTestId("game-over-headline")).toHaveText("Gewonnen");
     await expect(ben.page.getByTestId("game-over-headline")).toHaveText("Platz 2");
     await expect(lea.page.getByTestId("game-over-headline")).toHaveText("Platz 3");
-    // Das Ergebnis steht 5 s (ADR-038): beide Prüfungen parallel.
+    // Das Ergebnis steht 6 s (ADR-038): beide Prüfungen parallel.
     await Promise.all([
       checkPhase(mia, "game-over", "spielende-3p", testInfo),
       checkPhase(lea, "game-over", "spielende-3p-platz-3", testInfo),
@@ -344,6 +373,227 @@ test.describe("Szenario 9: A11y und Design-Abnahme je Phase", () => {
     // skaliert (z. B. Avatare im Intro, Podest) – der Detektor des Stage-Recorders erkennt das.
     const events = await stageEvents(mia.page);
     expect(events.filter((event) => event.moving > 0).length, "Overlays mit Startbewegung").toBeGreaterThan(0);
+  });
+
+  test("Host-Modi mit 8 Personen: Frage ohne Countdown, Auflösung und Zug-Ergebnis warten auf den Host", async ({
+    players,
+  }, testInfo) => {
+    // „Zeit pro Frage: Host“ (ADR-049) und „Weiter: Host“ (ADR-045) mit der Höchstzahl an Personen und Langtexten:
+    // Die Host-Aktion steht in der Zone des Spielerstreifens (ADR-060) – bei 430 × 932 in einer zweiten Zeile unter
+    // den Personen, bei 360 × 740 neben bzw. statt ihrer. Antwort D samt Avataren und alle Zeilen des Zug-Ergebnisses
+    // bleiben sichtbar (checkScreen prüft Lage und genau eine orange Aktion).
+    test.setTimeout(240_000);
+    const mia = await players.create("Mia");
+    const ben = await players.create("Ben");
+    const all = [mia, ben];
+    const code = await mia.createLobby();
+    await ben.joinByCode(code);
+    for (let bot = 1; bot <= 6; bot++) {
+      await mia.addBot();
+      await expect(mia.lobbyPlayer(`Bot ${bot}`)).toBeVisible();
+    }
+    await expect(mia.lobbyPlayers).toHaveCount(8);
+    await mia.changeSettings({
+      Runden: 1,
+      "Fragen pro Kategorie": 1,
+      "Zeit pro Frage": 0,
+      "Nach jeder Frage": 0,
+      "Nach jeder Kategorie": 0,
+    });
+    await mia.startGame();
+    await pickUntilQuestion(all);
+    // 8 Personen: Der Spielerstreifen scrollt gewollt waagerecht (docs/09 §7).
+    const scrolls = { allowHorizontalScroll: [PLAYER_STRIP_SCROLL] };
+
+    // --- Frage ohne Countdown: Mia (Host) „Auflösen (x/8 Antworten)“ unter bzw. statt der Personen, Ben den Streifen ---
+    const [miaQuestion, benQuestion] = await Promise.all(all.map((player) => waitForOverlay(player, "question")));
+    if (!miaQuestion || !benQuestion) throw new Error("Frage fehlt");
+    const resolve = mia.page.getByTestId("player-strip").getByTestId("game-continue");
+    await expect(resolve).toHaveText(/^Auflösen \(\d\/8 Antworten\)$/);
+    await expect(ben.page.getByTestId("game-continue")).toHaveCount(0);
+    await expect(ben.stripPlayers).toHaveCount(8);
+    await checkScreen(mia.page, "host-frage-ohne-countdown-8p", testInfo, { stays: miaQuestion, ...scrolls });
+    await checkLongQuestion(mia, "question", "host-frage-ohne-countdown-8p", testInfo);
+    await checkScreen(ben.page, "gast-frage-ohne-countdown-8p", testInfo, { stays: benQuestion, ...scrolls });
+
+    // Ben antwortet D (Avatar an der letzten Antwort), Mia löst ohne eigene Antwort auf („Zeit abgelaufen“).
+    await benQuestion.getByTestId("answer-3").click();
+    await expect(openAnswers(ben)).toHaveCount(0);
+    await expect(resolve).not.toHaveAttribute("aria-disabled", "true");
+    await resolve.click();
+
+    // --- Auflösung wartet auf „Weiter“: Host „Weiter“ unter bzw. neben den Personen, alle anderen „Warte auf Mia …“ ---
+    const [miaReveal, benReveal] = await Promise.all(all.map((player) => waitForOverlay(player, "answer-reveal")));
+    if (!miaReveal || !benReveal) throw new Error("Auflösung fehlt");
+    await expect(mia.page.getByTestId("player-strip").getByTestId("game-continue")).toHaveText("Weiter");
+    await expect(ben.page.getByTestId("player-strip").getByTestId("game-continue-waiting")).toHaveText(
+      "Warte auf Mia …",
+    );
+    await expect(mia.stripPlayers).toHaveCount(8);
+    await expect(benReveal.getByTestId("answer-3").locator(":scope > span.absolute")).toBeVisible();
+    await Promise.all([
+      checkScreen(mia.page, "host-aufloesung-8p", testInfo, { stays: miaReveal, ...scrolls }),
+      checkScreen(ben.page, "gast-aufloesung-8p-warte", testInfo, { stays: benReveal, ...scrolls }),
+    ]);
+
+    // --- Zug-Ergebnis wartet auf „Weiter“: alle 8 Zeilen über dem Spielerstreifen ---
+    await mia.page.getByTestId("game-continue").click();
+    const [miaSummary, benSummary] = await Promise.all(all.map((player) => waitForOverlay(player, "turn-summary")));
+    if (!miaSummary || !benSummary) throw new Error("Zug-Ergebnis fehlt");
+    await expect(miaSummary.getByTestId("turn-summary-row")).toHaveCount(8);
+    await expect(ben.page.getByTestId("player-strip").getByTestId("game-continue-waiting")).toBeVisible();
+    await Promise.all([
+      checkScreen(mia.page, "host-zug-ergebnis-8p", testInfo, { stays: miaSummary, ...scrolls }),
+      checkScreen(ben.page, "gast-zug-ergebnis-8p", testInfo, { stays: benSummary, ...scrolls }),
+    ]);
+
+    // Spiel für alle beenden (ADR-051) – die übrigen Züge braucht die Prüfung nicht.
+    await mia.page.getByRole("button", { name: "Spiel beenden" }).click();
+    await mia.page
+      .getByRole("alertdialog", { name: "Spiel für alle beenden?" })
+      .getByRole("button", { name: "Beenden" })
+      .click();
+    await Promise.all(all.map((player) => waitForOverlay(player, "game-over")));
+  });
+
+  for (const count of [3, 4] as const) {
+    test(`Host-Aktion mit ${count} Personen: alle Punkte sichtbar, wo Platz ist (ADR-060)`, async ({
+      players,
+    }, testInfo) => {
+      // docs/09 §7: bis 4 Personen verteilt. Ist der Viewport hoch genug (430 × 932), stehen „Auflösen …“, „Weiter“
+      // und „Warte auf Mia …“ in einer zweiten Zeile unter den Personen – nichts scrollt. Bei 360 × 740 fehlt der Bühne
+      // dafür die Höhe (Antwort D): dann „Weiter“ bzw. der Hinweis neben der Liste (sie scrollt, eigene Person
+      // zuerst) und „Auflösen …“ statt der Liste – für Screenreader bleibt der Spielstand (ADR-060).
+      test.setTimeout(180_000);
+      const tall = testInfo.project.name === "a11y-430";
+      const mia = await players.create("Mia");
+      const ben = await players.create("Ben");
+      const all = [mia, ben];
+      const code = await mia.createLobby();
+      await ben.joinByCode(code);
+      for (let bot = 1; bot <= count - 2; bot++) {
+        await mia.addBot();
+        await expect(mia.lobbyPlayer(`Bot ${bot}`)).toBeVisible();
+      }
+      await mia.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1, "Zeit pro Frage": 0, "Nach jeder Frage": 0 });
+      await mia.startGame();
+      await pickUntilQuestion(all);
+      const scrolls = tall ? {} : { allowHorizontalScroll: [PLAYER_STRIP_SCROLL] };
+
+      /** Lage der Zone: Art der Aktion, Liste ohne Scrollen, alle Personen ganz im Viewport. */
+      const zone = (player: Player) =>
+        player.page.getByTestId("player-strip").evaluate((strip) => {
+          const list = strip.querySelector("ul");
+          const entries = [...strip.querySelectorAll('[data-testid="strip-player"]')].map((entry) =>
+            entry.getBoundingClientRect(),
+          );
+          const action = strip.querySelector('[data-testid="game-continue"], [data-testid="game-continue-waiting"]');
+          return {
+            layout: strip.getAttribute("data-action-layout"),
+            listScrolls: list !== null && list.scrollWidth > list.clientWidth + 1,
+            entriesInView: entries.every((box) => box.left >= 0 && box.right <= window.innerWidth && box.width > 0),
+            actionBelowList:
+              list !== null &&
+              action !== null &&
+              action.getBoundingClientRect().top >= list.getBoundingClientRect().bottom - 1,
+          };
+        });
+
+      // --- Frage ohne Countdown: Mia „Auflösen (x/y Antworten)“, Ben nur der Streifen ---
+      const [miaQuestion, benQuestion] = await Promise.all(all.map((player) => waitForOverlay(player, "question")));
+      if (!miaQuestion || !benQuestion) throw new Error("Frage fehlt");
+      await expect(mia.page.getByTestId("player-strip").getByTestId("game-continue")).toHaveText(
+        new RegExp(`^Auflösen \\(\\d/${count} Antworten\\)$`),
+      );
+      await expect(mia.stripPlayers).toHaveCount(count);
+      const miaAsks = await zone(mia);
+      if (tall) {
+        expect(miaAsks).toEqual({ layout: "stacked", listScrolls: false, entriesInView: true, actionBelowList: true });
+      } else {
+        expect(miaAsks.layout).toBe("instead");
+        await expect(mia.page.getByRole("list", { name: "Spielstand" })).toHaveCount(1);
+      }
+      await checkScreen(mia.page, `host-frage-ohne-countdown-${count}p`, testInfo, { stays: miaQuestion, ...scrolls });
+      expect((await zone(ben)).listScrolls, "Ben: Streifen ohne Aktion").toBe(false);
+
+      await benQuestion.getByTestId("answer-3").click();
+      await expect(openAnswers(ben)).toHaveCount(0);
+      const resolve = mia.page.getByTestId("game-continue");
+      await expect(resolve).not.toHaveAttribute("aria-disabled", "true");
+      await resolve.click();
+
+      // --- Auflösung wartet: Mia „Weiter“, Ben „Warte auf Mia …“ ---
+      const [miaReveal, benReveal] = await Promise.all(all.map((player) => waitForOverlay(player, "answer-reveal")));
+      if (!miaReveal || !benReveal) throw new Error("Auflösung fehlt");
+      await expect(ben.page.getByTestId("player-strip").getByTestId("game-continue-waiting")).toHaveText(
+        "Warte auf Mia …",
+      );
+      for (const player of all) {
+        const shown = await zone(player);
+        if (tall) {
+          expect(shown, player.name).toEqual({
+            layout: "stacked",
+            listScrolls: false,
+            entriesInView: true,
+            actionBelowList: true,
+          });
+        } else {
+          expect(shown.layout, player.name).toBe("beside");
+          // Ausnahme (ADR-060): neben der Aktion scrollt die Liste – die eigene Person steht immer ganz vorn.
+          await expect(player.selfStripEntry).toBeInViewport({ ratio: 1 });
+        }
+      }
+      await Promise.all([
+        checkScreen(mia.page, `host-aufloesung-${count}p`, testInfo, { stays: miaReveal, ...scrolls }),
+        checkScreen(ben.page, `gast-aufloesung-${count}p-warte`, testInfo, { stays: benReveal, ...scrolls }),
+      ]);
+      await mia.page.getByRole("button", { name: "Spiel beenden" }).click();
+      await mia.page
+        .getByRole("alertdialog", { name: "Spiel für alle beenden?" })
+        .getByRole("button", { name: "Beenden" })
+        .click();
+      await Promise.all(all.map((player) => waitForOverlay(player, "game-over")));
+    });
+  }
+
+  test("Text-Zoom 200 %: Lobby, Einstellungen, Kategoriewahl und Ergebnis ohne Verlust (WCAG 1.4.4)", async ({
+    players,
+  }, testInfo) => {
+    // docs/09 §12 „Zoom bis 200 % ohne Verlust“: Schrift der Seite 200 % (wie „Schriftgröße“ im Browser) – keine
+    // Beschriftung ohne Breite, kein abgeschnittener Name, kein Bedienelement außerhalb des Viewports.
+    test.setTimeout(240_000);
+    const mia = await players.create("Mia");
+    const ben = await players.create("Ben Sommer");
+    const lea = await players.create("Lea");
+    const all = [mia, ben, lea];
+    const code = await mia.createLobby();
+    await ben.joinByCode(code);
+    await lea.joinByCode(code);
+    await expect(mia.lobbyPlayers).toHaveCount(3);
+    await mia.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1 });
+    for (const player of all) await setTextZoom(player.page, 200);
+    await checkTextZoom(mia.page, "lobby-host-textzoom200", testInfo);
+    await checkTextZoom(ben.page, "lobby-gast-textzoom200", testInfo);
+
+    const settingsButton = mia.page.getByRole("button", { name: "Einstellungen", exact: true });
+    await settingsButton.click();
+    const sheet = mia.page.getByRole("dialog", { name: "Einstellungen" });
+    await expect(sheet).toBeVisible();
+    await checkTextZoom(mia.page, "einstellungen-host-textzoom200", testInfo);
+    await mia.page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+
+    await mia.startGame();
+    const { picker, watchers } = await pickRoles(all);
+    const watcher = watchers[0];
+    if (!watcher) throw new Error("keine zuschauende Person");
+    await Promise.all([
+      checkTextZoom(picker.page, "kategoriewahl-waehlen-textzoom200", testInfo),
+      checkTextZoom(watcher.page, "kategoriewahl-zuschauen-textzoom200", testInfo),
+    ]);
+    await playQuicklyUntil(all, "game-over");
+    await waitForOverlay(ben, "game-over");
+    await checkTextZoom(ben.page, "spielende-textzoom200", testInfo);
   });
 
   test("reduzierte Bewegung: komplettes Spiel nur mit Überblendungen", async ({ players }, testInfo) => {

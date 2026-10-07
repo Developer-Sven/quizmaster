@@ -1,7 +1,7 @@
 /**
  * Lobby-Werkzeuge (ADR-041–043, ADR-045, ADR-052): Startseite mit drei Wegen, Namen in der Lobby ändern, schnelles
  * Einstellen ohne „Zu viele Versuche“, „Weiter“ per Host nach Frage, Kategorie und Zwischenstand und die Regeln
- * als Sheet, ohne die Lobby zu verlassen.
+ * als Sheet, ohne die Lobby zu verlassen – auch über den Wechsel vom Spielende in die Lobby.
  */
 
 import { expect, test } from "./support/fixtures.ts";
@@ -132,6 +132,29 @@ test("Regeln in der Lobby: Sheet statt Seitenwechsel, die Lobby bleibt verbunden
   // Noch in der Lobby und verbunden: der Host sieht Ben weiter, Ben die Lobby.
   await expect(guest.page.getByTestId("lobby-screen")).toBeVisible();
   await expect(host.page.getByTestId("lobby-players").getByText("Ben", { exact: true })).toBeVisible();
+});
+
+test("Regeln am Spielende: Das Sheet übersteht den Wechsel in die Lobby, danach Fokus auf „Regeln“ (ADR-052)", async ({
+  players,
+}) => {
+  const host = await players.create("Mia");
+  const guest = await players.create("Ben");
+  const code = await host.createLobby();
+  await guest.joinByCode(code);
+  await host.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1 });
+  await host.startGame();
+  await playQuicklyUntil([host, guest], "game-over");
+  await waitForOverlay(guest, "game-over");
+  await stageOverlay(guest.page, "game-over").getByTestId("rules-link").click();
+  const sheet = guest.page.getByRole("dialog", { name: "Regeln" });
+  await expect(sheet).toBeVisible();
+  // Nach dem Ergebnis zurück in die Lobby (ADR-038) – das Sheet bleibt offen, sein Auslöser ist mit dem Spiel weg.
+  await expect(guest.page.getByTestId("lobby-last-game")).toBeVisible({ timeout: 15_000 });
+  await expect(sheet).toBeVisible();
+  await guest.page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  // Fokus nicht auf <body> (WCAG 2.4.3): „Regeln“ der Lobby übernimmt ihn, Tab geht von dort weiter.
+  await expect(guest.page.getByTestId("lobby-screen").getByTestId("rules-link")).toBeFocused();
 });
 
 test("Startseite am Handy: „Als App installieren“ ist immer da, auf dem iPhone mit Anleitung (ADR-054)", async ({

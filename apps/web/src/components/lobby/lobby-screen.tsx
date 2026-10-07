@@ -156,5 +156,24 @@ export function LobbyScreen({ code, displayCode, realtimeUrl, devBots, turnstile
 /** Regeln-Sheet für Lobby und Spielende (ADR-052): hier eingehängt, damit es den Wechsel Spielende → Lobby übersteht. */
 function LiveRulesSheet() {
   const open = useGameStore(selectRulesOpen);
-  return <RulesSheet open={open} onClose={gameActions.closeRules} />;
+  return <RulesSheet open={open} onClose={closeLiveRules} />;
+}
+
+/** „Regeln“ des aktuellen Screens (Lobby bzw. Spielende, `RulesLink`). */
+const RULES_TRIGGER = '[data-testid="rules-link"]';
+
+/**
+ * Schließt das Regeln-Sheet. Am Spielende geöffnet, gibt es seinen Auslöser nach dem Wechsel in die Lobby nicht mehr
+ * (ADR-052): Die Fokus-Rückgabe des Sheets greift dann ins Leere, und der Fokus fiele mit dem ausblendenden Sheet auf
+ * `<body>` – Tab begänne wieder oben (WCAG 2.4.3). Steht er nach dem Schließen (die Rückgabe läuft im Commit) noch
+ * dort, wo er im Sheet war, oder auf `<body>`, bekommt „Regeln“ der Lobby den Fokus.
+ */
+function closeLiveRules(): void {
+  const inSheet = document.activeElement;
+  gameActions.closeRules();
+  window.requestAnimationFrame(() => {
+    const focused = document.activeElement;
+    if (focused !== null && focused !== document.body && focused !== inSheet) return;
+    document.querySelector<HTMLElement>(RULES_TRIGGER)?.focus({ preventScroll: true });
+  });
 }

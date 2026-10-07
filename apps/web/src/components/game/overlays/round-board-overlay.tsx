@@ -42,8 +42,9 @@ export interface RoundBoardOverlayProps {
 const BOARD_FILL_LATE_MS = 200;
 
 /**
- * Rundentafel (Phase `round_board`, 6 s, docs/09 §7.8): Vollbild-Panel „Runde 1 von 3“; 2 Personen im
- * Duell-Layout (links Person A, Mitte Kategorie, rechts Person B, oben „5 : 4“), 3–8 als `Board`-Tabelle.
+ * Rundentafel (Phase `round_board`, Standard 7 s bzw. Weiter-Einstellung, docs/09 §7.8, ADR-045): Vollbild-Panel
+ * „Runde 1 von 3“; 2 Personen im Duell-Layout (links Person A, Mitte Kategorie, rechts Person B, oben „5 : 4“),
+ * 3–8 als `Board`-Tabelle.
  * Die neuen Zeilen der Runde füllen sich animiert; Platzwechsel mit `arrow-up`/`arrow-down` neben den Summen.
  */
 export function RoundBoardOverlay({
@@ -147,7 +148,10 @@ function DuelBoard({ left, right, rows, newFrom, questionsPerTurn, enteredAt }: 
       <span className="flex min-w-0 flex-col items-center gap-1">
         <Avatar name={player.name} color={player.color} size={56} resigned={player.resigned} />
         <span
-          className={cx("max-w-full truncate text-label", player.resigned ? "text-text-2 line-through" : "text-text")}
+          className={cx(
+            "max-w-full text-center text-label wrap-break-word",
+            player.resigned ? "text-text-2 line-through" : "text-text",
+          )}
         >
           {player.name}
         </span>

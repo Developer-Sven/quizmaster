@@ -304,7 +304,7 @@ export function pickHighlight(phaseStartedAt: number, serverNow: number, count =
 }
 
 // ---------------------------------------------------------------------------------------------------
-// Punkte: „+1“ ab 400 ms der Auflösung
+// Punkte: „+1“ ab 1.200 ms der Auflösung
 // ---------------------------------------------------------------------------------------------------
 
 type ScoreState = Pick<PublicLobbyState, "phase" | "phaseStartedAt" | "question" | "players">;
@@ -320,14 +320,14 @@ export function revealGains(state: ScoreState): Map<string, number> {
   return gains;
 }
 
-/** Sind die Punkte der laufenden Auflösung schon sichtbar? (ab 400 ms, docs/09 §7.6; sonst immer) */
+/** Sind die Punkte der laufenden Auflösung schon sichtbar? (ab 1.200 ms, docs/09 §7.6; sonst immer) */
 export function pointsShown(state: Pick<PublicLobbyState, "phase" | "phaseStartedAt">, serverNow: number): boolean {
   return state.phase !== "reveal" || serverNow >= state.phaseStartedAt + CHOREOGRAPHY.answerReveal.pointsAtMs;
 }
 
 /**
  * Angezeigte Punkte im Spielerstreifen: Der Server zählt die Frage schon ab Beginn der Auflösung mit – das
- * „+1“ erscheint laut docs/09 §7.6 aber erst nach 400 ms. Bis dahin zeigt der Streifen den alten Stand.
+ * „+1“ erscheint laut docs/09 §7.6 aber erst nach 1.200 ms. Bis dahin zeigt der Streifen den alten Stand.
  */
 export function displayedScores(state: ScoreState, shown: boolean): Record<string, number> {
   const gains = shown ? new Map<string, number>() : revealGains(state);

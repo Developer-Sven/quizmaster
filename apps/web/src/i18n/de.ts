@@ -159,10 +159,13 @@ export const de = {
     /** Kategorien der Reihe nach (ADR-056) */
     categoryModeTitle: "So wird gespielt",
     categoryModes: { pick: "Wer dran ist, wählt", sequence: "Der Reihe nach, ohne Wahl" },
+    /** „bis zu drei“: Bei zwei oder drei ausgewählten stehen alle zur Wahl (ADR-048) */
     categoryModeHints: {
-      pick: "Aus drei Kategorien deiner Auswahl.",
+      pick: "Aus bis zu drei Kategorien deiner Auswahl.",
       sequence: "Jede Runde eine Kategorie – Runde 1 die erste, Runde 2 die zweite … Die Runden passen sich an.",
     },
+    /** „Wer dran ist, wählt“ in der Sicht aller außer dem Host (ADR-050: ohne „deiner“) */
+    categoryModeHintPickOther: "Aus bis zu drei der ausgewählten Kategorien.",
     categorySequence: (order: string) => `Reihenfolge: ${order}`,
     categorySequenceMax: (max: number) => `Der Reihe nach höchstens ${max} Kategorien – so viele Runden gibt es.`,
     categoriesInSequence: (count: number) => `${count} der Reihe nach`,
@@ -328,10 +331,10 @@ export const de = {
       confirm: "Verlassen",
       cancel: "Weiterspielen",
     },
-    /** Host beendet das Spiel vorzeitig (ADR-051) */
+    /** Host beendet das Spiel vorzeitig (ADR-051) – Text gekürzt: höchstens 2 Zeilen bei 360 px (docs/09 §5) */
     endGame: {
       title: "Spiel für alle beenden?",
-      description: "Alle sehen das Ergebnis mit dem aktuellen Stand, danach geht es zurück in die Lobby.",
+      description: "Alle sehen den aktuellen Stand, danach geht es zurück in die Lobby.",
       confirm: "Beenden",
       cancel: "Weiterspielen",
     },
@@ -398,7 +401,7 @@ export const de = {
       iosConfirm: "Tippe oben rechts auf „Hinzufügen“.",
       androidMenu: "Öffne das Menü des Browsers (⋮ oben rechts).",
       androidMenuFirefox: "Öffne das Menü des Browsers (⋮).",
-      androidMenuSamsung: "Öffne das Menü des Browsers (≡ unten rechts).",
+      androidMenuSamsung: "Öffne das Menü des Browsers (unten rechts).",
       androidAdd: "Tippe auf „App installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
       androidAddFirefox: "Tippe auf „Installieren“ bzw. „Zum Startbildschirm hinzufügen“.",
       androidAddSamsung: "Tippe auf „Seite hinzufügen zu“ und dann auf „Startbildschirm“.",
@@ -458,21 +461,21 @@ export const de = {
   },
 
   /**
-   * Regeln-Seite `/regeln` und der Link „Regeln“ in der Fußzeile (docs/09 §6: höchstens 6 kurze Punkte;
-   * Inhalt nach docs/01 – nur, was es gibt, keine Extras). Zahl und Einheit mit geschütztem Leerzeichen
-   * (`\u00a0`), damit „20 Sekunden“ nie über zwei Zeilen bricht.
+   * Regeln-Seite `/regeln` und Regeln-Sheet in Lobby und Spielende (docs/09 §6: höchstens 6 kurze Punkte;
+   * Inhalt nach docs/01 – nur, was es gibt, keine Extras). Einstellbares steht als Standard da (Zeit pro Frage,
+   * Kategorienwahl – ADR-048/049/055/056): Das Sheet erscheint auch in Lobbys mit anderen Einstellungen.
+   * Zahl und Einheit mit geschütztem Leerzeichen (`\u00a0`), damit „20 Sekunden“ nie über zwei Zeilen bricht.
    */
   rules: {
     title: "Regeln",
     points: [
-      "2 bis 8\u00a0Personen spielen in einer Lobby. Der Host stellt Runden und Fragen pro Kategorie ein und startet das Spiel.",
-      "Die Reihenfolge wird ausgelost. In jeder Runde wählt jede Person einmal eine von 3\u00a0Kategorien.",
-      "Alle beantworten gleichzeitig dieselben Fragen: 4\u00a0Antworten, genau eine ist richtig, 20\u00a0Sekunden Zeit.",
+      "2 bis 8\u00a0Personen spielen in einer Lobby. Der Host legt Runden, Zeit und Kategorien fest und startet das Spiel.",
+      "Die Reihenfolge wird ausgelost. Standardmäßig wählt in jeder Runde jede Person einmal eine von 3\u00a0Kategorien.",
+      "Alle beantworten gleichzeitig dieselben Fragen: 4\u00a0Antworten, genau eine ist richtig, standardmäßig 20\u00a0Sekunden Zeit.",
       "Du hast pro Frage eine Antwort und kannst sie nicht ändern. Ohne Antwort zählt die Frage als falsch.",
       "Jede richtige Antwort bringt 1\u00a0Punkt – Tempo zählt nicht. Gleich viele Punkte bedeuten den gleichen Platz.",
       "Wer das Spiel verlässt oder zu lange getrennt ist, gilt als aufgegeben und landet hinter allen, die zu Ende spielen.",
     ] as const,
-    /** Nur für Screenreader, hinter „Regeln“: Der Link öffnet einen neuen Tab (Lobby, Spielende) */
   },
 
   /** Texte nur für Screenreader und Bedienhilfen */

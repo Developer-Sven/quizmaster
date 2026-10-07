@@ -40,11 +40,12 @@ function lines(count: number): number[][] {
 }
 
 /**
- * Zug-Ergebnis (Phase `turn_summary`, 4 s, docs/09 §7.7): ein Sheet, unten auf der Bühne direkt über dem
- * Spielerstreifen verankert (`radius-xl` oben, Ebene 2), fährt ab Phasenbeginn um seine Höhe hoch (320 ms,
- * `ease-emphasized`); bei reduzierter Bewegung nur Überblendung (≤ 200 ms). Kopf = Kategorie-Icon + Name, Zeilen =
- * Personen nach Punkten dieses Zuges mit K Kästchen, die sich danach nacheinander füllen (80 ms Abstand), rechts
- * „+2“; die beste(n) Person(en) mit 1 px orangem Rahmen um die Zeile. Kein Lob-Text.
+ * Zug-Ergebnis (Phase `turn_summary`, Standard 5 s bzw. Weiter-Einstellung, docs/09 §7.7, ADR-045): ein Sheet,
+ * unten auf der Bühne direkt über dem Spielerstreifen verankert (`radius-xl` oben, Ebene 2), fährt ab Phasenbeginn
+ * um seine Höhe hoch (480 ms, `ease-emphasized`); bei reduzierter Bewegung nur Überblendung (≤ 200 ms). Kopf =
+ * Kategorie-Icon + Name, Zeilen = Personen nach Punkten dieses Zuges mit K Kästchen, die sich ab 600 ms
+ * nacheinander füllen (160 ms Abstand, je 320 ms), rechts „+2“; die beste(n) Person(en) mit 1 px orangem Rahmen
+ * um die Zeile. Kein Lob-Text.
  *
  * Synchron für alle (ADR-020): Hochfahren und Füllen hängen am Serverzeitpunkt `phaseStartedAt` – wer später
  * einsteigt (Reconnect), sieht das Sheet mitten in der Bewegung bzw. schon oben und gefüllte Kästchen sofort gefüllt.

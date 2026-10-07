@@ -12,6 +12,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { createTestDatabase, type TestDatabase } from "@quizmaster/db/testing";
+import { RATE_LIMITS } from "@quizmaster/shared";
 import { decodeJwt, jwtVerify } from "jose";
 
 const webRoot = path.resolve(import.meta.dirname, "..");
@@ -264,24 +265,28 @@ async function main(): Promise<void> {
       health.headers.get("cache-control") === "no-store",
   );
 
-  // --- Rate-Limit Session (IP 10 / 10 min, Mongo-Store) – zählt nur NEUE Sessions ---
+  // --- Rate-Limit Session (Regel http.session.ip aus RATE_LIMITS, Mongo-Store) – zählt nur NEUE Sessions ---
+  const sessionRule = RATE_LIMITS.find((rule) => rule.id === "http.session.ip");
+  if (sessionRule === undefined) throw new Error("RATE_LIMITS ohne Regel http.session.ip");
+  // Mehr Anfragen, als die Regel erlaubt: erst dann beweist „alle 200“ etwas bzw. muss ein 429 kommen.
+  const beyondLimit = sessionRule.points + 2;
   let reusedOk = true;
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < beyondLimit; i++) {
     const response = await post("/api/session", { cookie: `kd_sid=${cookie?.value ?? ""}` });
     reusedOk &&= response.status === 200;
     await response.text();
   }
-  check("Weiterverwenden zählt nicht gegen das Anlege-Limit (12× 200)", reusedOk);
+  check(`Weiterverwenden zählt nicht gegen das Anlege-Limit (${beyondLimit}× 200)`, reusedOk);
   let limited: Response | undefined;
-  for (let i = 0; i < 12 && limited === undefined; i++) {
+  for (let i = 0; i < beyondLimit && limited === undefined; i++) {
     const response = await post("/api/session");
     if (response.status === 429) limited = response;
     else await response.text();
   }
   const retryAfter = Number(limited?.headers.get("retry-after"));
   check(
-    "Session-Limit (neue Gäste) → 429 mit Retry-After",
-    limited !== undefined && retryAfter > 0 && retryAfter <= 600,
+    `Session-Limit (neue Gäste, ${sessionRule.points} / ${sessionRule.durationSec} s) → 429 mit Retry-After`,
+    limited !== undefined && retryAfter > 0 && retryAfter <= sessionRule.durationSec,
     `Retry-After ${retryAfter}`,
   );
   const stillReused = await post("/api/session", { cookie: `kd_sid=${cookie?.value ?? ""}` });

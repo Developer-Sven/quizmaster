@@ -2,12 +2,12 @@
  * `POST /api/session` – Gast-Session anlegen oder weiterverwenden (docs/02 §Datenfluss: Beitreten,
  * docs/06 §Identität, §Bot-Schutz). Reihenfolge: Origin (403) → Body (400) → gültige Session?
  * weiterverwenden (lastSeen, ggf. rollierend erneuern; begrenzt wie ein Ticket-Abruf, IP 300/min) :
- * Rate-Limit IP 10/10 min (429) → [Turnstile-Pflicht (403/503)] → neuer Gast (`crypto.randomUUID()`) +
- * Session-Cookie (`__Host-kd_sid` bzw. `kd_sid`, ADR-033).
+ * Rate-Limit `http.session.ip` (IP 30/10 min, ADR-042; 429) → [Turnstile-Pflicht (403/503)] → neuer Gast
+ * (`crypto.randomUUID()`) + Session-Cookie (`__Host-kd_sid` bzw. `kd_sid`, ADR-033).
  *
- * Das Limit 10/10 min zählt NUR neue Sessions (Orchestrator-Entscheidung zu docs/06 §Rate-Limits): Nutzer
- * hinter einer gemeinsamen IP (WLAN, CGNAT) dürfen sich durch Seitenaufrufe, Reloads oder Erneuerungen nicht
- * gegenseitig aussperren.
+ * Das Anlege-Limit zählt NUR neue Sessions (ADR-033 zu docs/06 §Rate-Limits): Nutzer hinter einer gemeinsamen IP
+ * (WLAN, CGNAT) dürfen sich durch Seitenaufrufe, Reloads oder Erneuerungen nicht gegenseitig aussperren. Die Werte
+ * stehen in `RATE_LIMITS` (@quizmaster/shared).
  */
 import { randomUUID } from "node:crypto";
 import { type SessionResponse, sessionRequestSchema } from "@quizmaster/shared";
@@ -50,7 +50,7 @@ export const handleSessionRequest: ApiHandler = async (request, ctx) => {
     }
   }
 
-  // Ab hier entsteht ein neuer Gast – nur das zählt gegen IP 10/10 min (Mongo-Store, fail-closed).
+  // Ab hier entsteht ein neuer Gast – nur das zählt gegen `http.session.ip` (Mongo-Store, fail-closed).
   await consumeRateLimit(ctx, ENDPOINT, "ip", client.key);
   if (ctx.env.turnstile.enabled) {
     if (body.turnstileToken === undefined) throw new ApiError("TURNSTILE_REQUIRED", "Turnstile-Token fehlt");

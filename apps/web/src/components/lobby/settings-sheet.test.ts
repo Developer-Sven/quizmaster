@@ -1,24 +1,85 @@
 /**
  * Einstellungen-Sheet: Die Zusammenfassungszeile bricht bei 360 px nur zwischen ihren Teilen um – nie mitten in
- * „ca. 6 Min.“ (Befund W3: „… ca. 6“ / „Min.“). Serverseitig gerendert – geprüft wird das Markup.
+ * „ca. 6 Min.“ (Befund aus dem UI-Review: „… ca. 6“ / „Min.“). Serverseitig gerendert – geprüft wird das Markup.
  */
 
 import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SettingsSummary, settingsSummaryParts } from "./settings-sheet";
+import { CategoryChoice, SettingsSummary, SettingsValueRow, settingsSummaryParts } from "./settings-sheet";
 import {
+  categoriesNote,
+  categoryModeHint,
+  categoryOrderNote,
   categoryOrderText,
   categorySummary,
   categoryUpdate,
   difficultyPreview,
   difficultySummary,
+  settingDiffers,
   settingValueText,
   sortedCategories,
   suggestionSummary,
   toggleCategory,
 } from "./settings-text";
+
+/** Sichtbarer bzw. vorgelesener Text eines Markups (ohne aria-hidden-Teile, mit aria-label). */
+function accessibleText(html: string): string {
+  const withoutHidden = html.replace(/<span aria-hidden="true"[^>]*>(?:(?!<\/span>).)*<\/span>/g, "");
+  const labels = [...withoutHidden.matchAll(/aria-label="([^"]*)"/g)].map((match) => match[1]);
+  const text = withoutHidden.replace(/<[^>]+>/g, " ");
+  return [...labels, text].join(" ").replaceAll("&amp;", "&").replace(/\s+/g, " ").trim();
+}
+
+describe("Kategorien-Unteransicht: Zeilen (docs/09 §12)", () => {
+  const books = { id: "buecher-woerter", name: "Bücher & Wörter", icon: "book-open", color: "#EBB447" };
+
+  it("nennt jede Kategorie einmal – das Icon daneben ist dekorativ", () => {
+    const html = renderToStaticMarkup(h(CategoryChoice, { category: books }));
+    expect(accessibleText(html)).toBe("Bücher & Wörter");
+    expect(html).toContain("lucide-book-open");
+  });
+
+  it("schneidet lange Namen bei Text-Zoom nicht ab, sondern bricht um", () => {
+    const html = renderToStaticMarkup(h(CategoryChoice, { category: books }));
+    expect(html).not.toContain("truncate");
+    expect(html).toContain("wrap-break-word");
+  });
+
+  it("Hinweis zu „Wer dran ist, wählt“: für den Host „deiner Auswahl“, für alle anderen ohne Du (ADR-050)", () => {
+    expect(categoryModeHint("pick", false)).toContain("deiner Auswahl");
+    expect(categoryModeHint("pick", true)).toBe("Aus bis zu drei der ausgewählten Kategorien.");
+    expect(categoryModeHint("pick", true)).not.toMatch(/\b(?:du|dein\w*)\b/i);
+    expect(categoryModeHint("sequence", true)).toBe(categoryModeHint("sequence", false));
+  });
+
+  it("Hinweis stimmt auch bei zwei oder drei ausgewählten Kategorien (dann stehen alle zur Wahl, ADR-048)", () => {
+    expect(categoryModeHint("pick", false)).toBe("Aus bis zu drei Kategorien deiner Auswahl.");
+  });
+});
+
+describe("Einstellungen: Zeilen mit Wert rechts (Kategorien, Schwierigkeit)", () => {
+  it("kürzt den Wert nie – passt er nicht neben die Beschriftung, rückt er darunter (Text-Zoom 200 %)", () => {
+    const html = renderToStaticMarkup(
+      h(SettingsValueRow, { label: "Schwierigkeit", value: "1–5, pro Kategorie aufsteigend" }),
+    );
+    expect(html).not.toContain("truncate");
+    expect(html).toMatch(/^<span class="[^"]*\bflex-wrap\b/);
+    expect(html).toMatch(/<span class="[^"]*\bwrap-break-word\b[^"]*">1–5, pro Kategorie aufsteigend<\/span>/);
+  });
+
+  it("zeigt abweichende Vorschläge mit „Aktuell: …“ unter der Beschriftung und den Wert in primary", () => {
+    const html = renderToStaticMarkup(
+      h(SettingsValueRow, { label: "Kategorien", value: "2 ausgewählt", note: "Aktuell: Alle" }),
+    );
+    expect(html).toContain('<span class="text-caption text-text-2">Aktuell: Alle</span>');
+    expect(html).toMatch(/<span class="[^"]*\btext-primary\b[^"]*">2 ausgewählt<\/span>/);
+    const plain = renderToStaticMarkup(h(SettingsValueRow, { label: "Kategorien", value: "Alle" }));
+    expect(plain).toMatch(/<span class="[^"]*\btext-text-2\b[^"]*">Alle<\/span>/);
+    expect(plain).not.toContain("Aktuell");
+  });
+});
 
 describe("Einstellungen: Zusammenfassungszeile", () => {
   it("besteht aus den Teilen von Einstellungen und Schätzung (docs/09 §6, §11)", () => {
@@ -147,5 +208,54 @@ describe("Kategorien der Reihe nach (ADR-056)", () => {
     expect(categorySummary(sequence.categoryIds, catalog, "sequence")).toBe("2 der Reihe nach");
     expect(categorySummary(sequence.categoryIds, catalog, "pick")).toBe("2 ausgewählt");
     expect(categoryOrderText(sequence.categoryIds, catalog)).toBe("1. Sport · 2. Musik");
+  });
+});
+
+describe("Vorschlag, der nur die Reihenfolge der Kategorien ändert (ADR-053/056)", () => {
+  const catalog = {
+    "buecher-woerter": { id: "buecher-woerter", name: "Bücher & Wörter", icon: "book-open", color: "#EBB447" },
+    comics: { id: "comics", name: "Comics", icon: "message-circle", color: "#F7DF45" },
+    computerspiele: { id: "computerspiele", name: "Computerspiele", icon: "gamepad-2", color: "#B2DF49" },
+  };
+  const current = {
+    ...DEFAULT_LOBBY_SETTINGS,
+    categoryIds: ["buecher-woerter", "comics", "computerspiele"],
+    categoryMode: "sequence" as const,
+    rounds: 3,
+  };
+  const reordered = { ...current, categoryIds: ["comics", "computerspiele", "buecher-woerter"] };
+
+  it("gilt der Reihe nach als Änderung – wie beim Server (`settingsChangesBetween`); beim Wählen nicht", () => {
+    expect(settingDiffers(current, reordered, "categoryIds")).toBe(true);
+    expect(settingDiffers(current, current, "categoryIds")).toBe(false);
+    const picking = { ...current, categoryMode: "pick" as const };
+    expect(settingDiffers(picking, { ...reordered, categoryMode: "pick" }, "categoryIds")).toBe(false);
+  });
+
+  it("die Zeile „Kategorien“ zeigt „Aktuell:“ mit der bisherigen Reihenfolge", () => {
+    expect(categoriesNote(current, reordered, catalog)).toBe(
+      "Aktuell: 1. Bücher & Wörter · 2. Comics · 3. Computerspiele",
+    );
+    expect(categoriesNote(current, current, catalog)).toBeUndefined();
+    expect(categoriesNote(undefined, reordered, catalog)).toBeUndefined();
+  });
+
+  it("die Unteransicht zeigt unter „Reihenfolge: …“ die bisherige – nur wenn auch bisher der Reihe nach gespielt wird", () => {
+    expect(categoryOrderNote(current, reordered, catalog)).toBe(
+      "Aktuell: 1. Bücher & Wörter · 2. Comics · 3. Computerspiele",
+    );
+    expect(categoryOrderNote(current, current, catalog)).toBeUndefined();
+    expect(categoryOrderNote({ ...current, categoryMode: "pick" }, reordered, catalog)).toBeUndefined();
+  });
+
+  it("Wert und Kurzfassung nennen der Reihe nach die Reihenfolge – der Host sieht, was er übernimmt", () => {
+    expect(settingValueText(reordered, "categoryIds", catalog)).toBe(
+      "1. Comics · 2. Computerspiele · 3. Bücher & Wörter",
+    );
+    expect(suggestionSummary({ categoryIds: reordered.categoryIds }, current, catalog)).toBe(
+      "Kategorien: 1. Comics · 2. Computerspiele · 3. Bücher & Wörter",
+    );
+    // Beim Wählen bleibt es bei der Anzahl.
+    expect(settingValueText({ ...reordered, categoryMode: "pick" }, "categoryIds", catalog)).toBe("3 ausgewählt");
   });
 });

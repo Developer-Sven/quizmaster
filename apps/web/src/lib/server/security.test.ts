@@ -143,14 +143,15 @@ describe("proxy.ts", () => {
     expect(response.headers.get("content-security-policy")).toContain("connect-src 'self' wss://quiz.example.com");
   });
 
-  it("Matcher: Seiten ja – API, statische Assets, Service Worker, Flaggen, Dateien und Prefetches nein", () => {
-    const matches = (url: string, headers?: Record<string, string>) =>
-      unstable_doesMiddlewareMatch({
-        config: proxyConfig,
-        url,
-        ...(headers === undefined ? {} : { headers }),
-        nextConfig: nextConfig as NextConfig,
-      });
+  const matches = (url: string, headers?: Record<string, string>) =>
+    unstable_doesMiddlewareMatch({
+      config: proxyConfig,
+      url,
+      ...(headers === undefined ? {} : { headers }),
+      nextConfig: nextConfig as NextConfig,
+    });
+
+  it("Matcher: Seiten ja – API, statische Assets, Service Worker, Flaggen und Dateien nein", () => {
     for (const page of ["/", "/lobby/ABC234", "/j/ABC234", "/regeln", "/offline", "/dev/ui", "/apiary"]) {
       expect(matches(page), page).toBe(true);
     }
@@ -159,7 +160,6 @@ describe("proxy.ts", () => {
       "/api/health",
       "/api",
       "/_next/static/chunks/main.js",
-      "/_next/image?url=%2Fx.png",
       "/sw.js",
       "/flags/de.svg",
       "/favicon.ico",
@@ -169,8 +169,43 @@ describe("proxy.ts", () => {
     ]) {
       expect(matches(asset), asset).toBe(false);
     }
-    expect(matches("/lobby/ABC234", { "next-router-prefetch": "1" })).toBe(false);
-    expect(matches("/lobby/ABC234", { purpose: "prefetch" })).toBe(false);
+  });
+
+  it("Matcher: /_next/image läuft durch den Proxy – ohne Bildoptimierer liefert Next dort die 404-Seite (HTML)", () => {
+    expect(matches("/_next/image?url=%2Ficons%2Ficon-192.png&w=64&q=75")).toBe(true);
+    expect(matches("/_next/image", { accept: "text/html" })).toBe(true);
+  });
+
+  it("Matcher: auch Prefetches – sie können HTML liefern, und jedes HTML braucht CSP, HSTS und noindex", () => {
+    // Browser-Prefetch (`Purpose`/`Sec-Purpose: prefetch`, Accept text/html) und `Next-Router-Prefetch` ohne `RSC`
+    // liefern die vollständige Seite samt Skripten; ein übersprungener Proxy ließe sie ohne Nonce-CSP durch.
+    const prefetches: Record<string, string>[] = [
+      { accept: "text/html,application/xhtml+xml,*/*;q=0.8", purpose: "prefetch" },
+      { accept: "text/html,application/xhtml+xml,*/*;q=0.8", "sec-purpose": "prefetch" },
+      { accept: "text/html", "next-router-prefetch": "1" },
+      { accept: "*/*", rsc: "1", "next-router-prefetch": "1" },
+    ];
+    for (const headers of prefetches) {
+      for (const page of ["/", "/regeln", "/lobby/ABC234"]) {
+        expect(matches(page, { ...headers }), `${page} ${JSON.stringify(headers)}`).toBe(true);
+      }
+    }
+  });
+
+  it("HTML auf Prefetch-Anfragen bekommt dieselben Header wie jede Seite", () => {
+    stubEnv({ APP_ORIGIN: "https://quiz.example.com", REALTIME_URL: "" });
+    const response = proxy(
+      new NextRequest("https://quiz.example.com/regeln", {
+        headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8", purpose: "prefetch" },
+      }),
+    );
+    const nonce = response.headers.get("x-middleware-request-x-nonce");
+    expect(directive(response.headers.get("content-security-policy") ?? "", "script-src")).toBe(
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    );
+    expect(response.headers.get("strict-transport-security")).toBe(HSTS_VALUE);
+    expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    expect(response.headers.get("cache-control")).toBe(HTML_CACHE_CONTROL);
   });
 });
 
@@ -198,8 +233,13 @@ describe("next.config.ts headers()", () => {
 
   it("liefert Preloads als Tag im HTML statt als Link-Header (keine doppelten Schrift-Preloads mit Service Worker)", () => {
     // Mit `Link`-Header legt React beim Hydrieren ein zweites Preload an; aus dem SW geladen, meldet Chromium
-    // dann „preloaded … but not used“ für beide Schriften (Befund W3: Schrift-Preloads mit aktivem SW).
+    // dann „preloaded … but not used“ für beide Schriften (Befund aus dem UI-Review: Schrift-Preloads mit aktivem SW).
     expect(nextConfig.reactMaxHeadersLength).toBe(0);
+  });
+
+  it("schaltet den Bildoptimierer ab: kein next/image im Projekt – /_next/image antwortet 404 (docs/06 Angriffsfläche)", () => {
+    // Next beantwortet /_next/image mit `images.unoptimized` sofort mit 404, ohne sharp/libvips anzufassen.
+    expect(nextConfig.images?.unoptimized).toBe(true);
   });
 });
 

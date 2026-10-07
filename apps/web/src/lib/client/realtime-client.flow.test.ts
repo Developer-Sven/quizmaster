@@ -187,7 +187,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("Session nur wenn nötig – Ticket zuerst (docs/02, W2-Ablauf)", () => {
+describe("Session nur wenn nötig – Ticket zuerst (docs/02, ADR-033)", () => {
   it("erster Besuch (kein Merker): POST /api/session, dann Ticket; danach ist der Merker gesetzt", async () => {
     respond({ "/api/session": [json(201, { created: true })], "/api/realtime/ticket": [json(200, { ticket: "t-1" })] });
     newClient().connect();

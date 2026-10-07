@@ -194,6 +194,33 @@ export function useCompactHeight(): boolean {
 }
 
 /**
+ * Ab dieser Viewport-Höhe in rem (der Seite) hat die Bühne auch mit den längsten Texten (Frage 140, Antworten 40
+ * Zeichen, Avatare an Antwort D) Platz für eine zweite Zeile im Spielerstreifen (ADR-060): Host-Aktion bzw.
+ * „Warte auf …“ stehen dann unter den Personen, die Liste bleibt wie ohne Aktion. Die Zeile kostet 52 px; bei
+ * 360 × 740 (46 rem) blieben über Antwort D nur 9 px – dafür reichen gut 49 rem, ab 50 rem bleibt Luft.
+ * 430 × 932 sind 58 rem, ein 1280 × 800-Bildschirm (Anzeige-Modus) 50 rem.
+ */
+export const ROOMY_HEIGHT_REM = 50;
+
+/** Ist ein Viewport von `viewportHeightPx` bei der Schriftgröße `rootFontPx` mindestens {@link ROOMY_HEIGHT_REM} rem hoch? */
+export function isRoomyHeight(viewportHeightPx: number, rootFontPx: number): boolean {
+  const rem = Number.isFinite(rootFontPx) && rootFontPx > 0 ? rootFontPx : 16;
+  return viewportHeightPx / rem >= ROOMY_HEIGHT_REM;
+}
+
+function roomySnapshot(): boolean {
+  return isRoomyHeight(window.innerHeight, Number.parseFloat(getComputedStyle(document.documentElement).fontSize));
+}
+
+/**
+ * Hoher Viewport (ADR-060): Die Bühne verträgt eine zweite Zeile im Spielerstreifen für die Host-Aktion. Auf dem
+ * Server `false` (dann die kompakte Lage in einer Zeile).
+ */
+export function useRoomyHeight(): boolean {
+  return useSyncExternalStore(subscribeViewport, roomySnapshot, () => false);
+}
+
+/**
  * Seite während des Spiels (docs/10 §App-Gefühl): kein Überscrollen/Pull-to-Refresh am Dokument
  * (`overscroll-behavior: none`); beim Verlassen wird der vorige Wert wiederhergestellt.
  */

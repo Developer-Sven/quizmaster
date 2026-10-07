@@ -39,14 +39,13 @@ export const config = {
        * Alle Seiten – außer API-Routen (JSON, eigene strikte CSP aus next.config.ts), statischen Next-Assets,
        * Service Worker, Flaggen und Dateien mit Endung (Icons, Sounds, Schriften, Manifest, robots.txt, Lizenztexte …):
        * Statische Dateien brauchen weder Nonce noch CSP und sparen so je Abruf einen Proxy-Lauf.
+       * `/_next/image` läuft mit: Ohne Bildoptimierer (next.config.ts) antwortet Next dort mit der 404-Seite – HTML.
+       * Bewusst OHNE `missing` für Prefetch-Header (anders als im Next-CSP-Leitfaden): Browser-Prefetches
+       * (`Purpose`/`Sec-Purpose: prefetch`) und `Next-Router-Prefetch` ohne `RSC` liefern vollständiges HTML, und
+       * jede Seite braucht Nonce-CSP, HSTS und noindex. Für RSC-Prefetches kostet der Proxy nur Nonce und Header.
        */
       source:
-        "/((?!api(?:/|$)|_next/static|_next/image|sw\\.js|flags/|.*\\.(?:ico|png|svg|jpg|jpeg|gif|webp|avif|txt|xml|json|webmanifest|js|css|map|woff2?|ttf|otf|mp3|webm|ogg|wav|m4a|mp4|md|pdf)$).*)",
-      // Prefetches (next/link) liefern kein HTML → keine Nonce nötig (Next-CSP-Leitfaden).
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-      ],
+        "/((?!api(?:/|$)|_next/static|sw\\.js|flags/|.*\\.(?:ico|png|svg|jpg|jpeg|gif|webp|avif|txt|xml|json|webmanifest|js|css|map|woff2?|ttf|otf|mp3|webm|ogg|wav|m4a|mp4|md|pdf)$).*)",
     },
   ],
 };

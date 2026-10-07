@@ -170,6 +170,119 @@ describe("SettingsSync: Stepper-Tipps gebündelt senden (ADR-042)", () => {
     expect(flushed).toBe(true);
   });
 
+  /**
+   * Ack vor Zustand (so sendet der Server): Während ein Senden läuft, tippt der Host auf den alten Wert zurück.
+   * Nach dem Ack gilt der gesendete Wert als „gleich auf dem Server“ – der zurückgetippte alte Wert muss also
+   * hinterher, obwohl er dem (noch alten) Server-Stand entspricht.
+   */
+  function slowServer() {
+    const sent: SettingsUpdate[] = [];
+    const acks: ((value: EmitResult<null>) => void)[] = [];
+    const drafts: Partial<LobbySettings>[] = [];
+    const sync = new SettingsSync(BASE, {
+      send: (update) => {
+        sent.push(update);
+        return new Promise((done) => {
+          acks.push(done);
+        });
+      },
+      onDraft: (draft) => drafts.push(draft),
+      onRejected: () => undefined,
+    });
+    /** Ack des ältesten offenen Sendens, danach (wie der Server) der Zustand mit diesen Werten. */
+    const ackThenState = async (server: LobbySettings) => {
+      acks.shift()?.({ ok: true, data: null });
+      await vi.advanceTimersByTimeAsync(0);
+      sync.serverChanged(server);
+    };
+    return { sync, sent, drafts, ackThenState };
+  }
+
+  it("Ack vor Zustand: ein während des Sendens zurückgetippter Wert wird nachgesendet (Timer feuert im Senden)", async () => {
+    const { sync, sent, drafts, ackThenState } = slowServer();
+    sync.change({ rounds: BASE.rounds + 1 });
+    await vi.advanceTimersByTimeAsync(SETTINGS_SYNC_TIMING.idleMs);
+    expect(sent).toEqual([{ rounds: BASE.rounds + 1 }]);
+    sync.change({ rounds: BASE.rounds });
+    // Der Timer für den zurückgetippten Wert läuft ab, während das erste Senden noch auf sein Ack wartet.
+    await vi.advanceTimersByTimeAsync(SETTINGS_SYNC_TIMING.idleMs + 50);
+    await ackThenState({ ...BASE, rounds: BASE.rounds + 1 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sent).toEqual([{ rounds: BASE.rounds + 1 }, { rounds: BASE.rounds }]);
+    await ackThenState({ ...BASE, rounds: BASE.rounds });
+    expect(drafts.at(-1)).toEqual({});
+  });
+
+  it("Ack vor Zustand: flush() im Sendefenster wartet, bis der zurückgetippte Wert beim Server ist", async () => {
+    const { sync, sent, ackThenState } = slowServer();
+    sync.change({ rounds: BASE.rounds + 1 });
+    await vi.advanceTimersByTimeAsync(SETTINGS_SYNC_TIMING.idleMs);
+    sync.change({ rounds: BASE.rounds });
+    let flushed = false;
+    const flushing = sync.flush().then(() => {
+      flushed = true;
+    });
+    await ackThenState({ ...BASE, rounds: BASE.rounds + 1 });
+    // Nicht fertig: Der zurückgetippte Wert ist unterwegs, der Server hat noch den gesendeten.
+    expect(sent).toEqual([{ rounds: BASE.rounds + 1 }, { rounds: BASE.rounds }]);
+    expect(flushed).toBe(false);
+    await ackThenState({ ...BASE, rounds: BASE.rounds });
+    await flushing;
+    expect(flushed).toBe(true);
+  });
+
+  it("kommt immer zur Ruhe: Entwurf leer, Server hat den letzten Tipp (zufällige Latenz, Limits, flush)", async () => {
+    // Deterministischer Zufall (mulberry32): jeder Seed ist ein reproduzierbarer Ablauf.
+    const random = (seed: number) => () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+    };
+    for (let seed = 1; seed <= 300; seed++) {
+      const next = random(seed);
+      let server: LobbySettings = { ...BASE };
+      let shown: LobbySettings = { ...BASE };
+      // Socket.IO: eine Leitung, Reihenfolge bleibt (Ack vor Zustand, Antworten in Sendereihenfolge).
+      let lineFreeAt = 0;
+      const deliver = (latencyMs: number, run: () => void) => {
+        lineFreeAt = Math.max(lineFreeAt, Date.now() + latencyMs);
+        setTimeout(run, lineFreeAt - Date.now());
+      };
+      const sync: SettingsSync = new SettingsSync(server, {
+        send: (update) =>
+          new Promise((resolve) => {
+            const limited = next() < 0.15;
+            deliver(Math.floor(next() * 500), () => {
+              if (limited) {
+                resolve({ ok: false, code: "RATE_LIMITED", retryAfterMs: Math.floor(next() * 1_500) });
+                return;
+              }
+              server = { ...server, ...update };
+              resolve({ ok: true, data: null });
+              const state = server;
+              deliver(1, () => sync.serverChanged(state));
+            });
+          }),
+        onDraft: (draft) => {
+          shown = { ...server, ...draft };
+        },
+        onRejected: () => undefined,
+      });
+      let wanted = BASE.rounds;
+      for (let step = 0; step < 30; step++) {
+        wanted = Math.min(10, Math.max(1, wanted + (next() < 0.5 ? -1 : 1)));
+        sync.change({ rounds: wanted });
+        if (next() < 0.1) void sync.flush();
+        await vi.advanceTimersByTimeAsync(Math.floor(next() * 700));
+      }
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(server.rounds, `Seed ${seed}`).toBe(wanted);
+      expect(shown.rounds, `Seed ${seed}`).toBe(wanted);
+      sync.dispose();
+    }
+  });
+
   it("Kategorie-Listen und Wahrheitswerte: gleiche Inhalte gelten als bestätigt (ADR-046/048)", async () => {
     const { sync, sent, drafts } = setup();
     sync.change({ categoryIds: ["sport", "musik"], hostPlays: false });

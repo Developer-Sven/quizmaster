@@ -152,7 +152,7 @@ function PreviewGame({ scene }: { scene: Extract<PreviewScene, { kind: "game" }>
 
 const VIEW_IDS = Object.keys(PREVIEW_VIEWS) as PreviewViewId[];
 
-/** Übersicht aller Vorschauen mit Links (2 und 6 Personen). */
+/** Übersicht aller Vorschauen mit Links (2, 6 und 8 Personen). */
 function PreviewIndex() {
   return (
     <main className="mx-auto w-full max-w-column px-gutter pt-safe pb-safe">
@@ -166,7 +166,7 @@ function PreviewIndex() {
           return (
             <li key={id} className="flex min-h-14 items-center gap-3 border-b border-line">
               <span className="min-w-0 flex-1 text-body text-text">{definition.title}</span>
-              {(definition.byPlayers ? ([2, 6] as const) : ([2] as const)).map((count) => (
+              {(definition.byPlayers ? ([2, 6, 8] as const) : ([2] as const)).map((count) => (
                 <Link
                   key={count}
                   href={`/dev/game?view=${id}&players=${count}`}

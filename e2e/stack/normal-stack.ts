@@ -1,8 +1,9 @@
 // node e2e/stack/normal-stack.ts [--web-port 3201] [--realtime-port 4201] [--log-dir <pfad>] [--log-level warn]
 //
 // Zweiter Test-Stack für die E2E-Szenarien mit `GAME_TIMING=normal` (docs/11 Szenario 9 und 12, docs/09 §13):
-// Phasen in Originallänge (Auflösung 3,5 s, Zug-Ergebnis 4 s, Rundentafel 6 s), damit axe, Layout-Prüfungen und
-// Screenshots jede Phase sicher treffen und die Synchronität zweier Geräte bei echtem Timing messbar ist.
+// Phasen in Originallänge (Auflösung 5 s, Zug-Ergebnis 5 s, Rundentafel 7 s, Ergebnis 6 s), damit axe,
+// Layout-Prüfungen und Screenshots jede Phase sicher treffen und die Synchronität zweier Geräte bei echtem Timing
+// messbar ist.
 //
 // Wie `pnpm stack:test --no-build` (scripts/dev/stack-test.ts, dessen Bausteine hier wiederverwendet werden):
 // Test-DB mit eigenem Präfix (ADR-029), Fixtures seeden, vorhandene Builds (Realtime dist, Web NEXT_DIST_DIR

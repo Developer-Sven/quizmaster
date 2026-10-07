@@ -8,11 +8,11 @@ import {
   SETTINGS_BOUNDS,
   type SettingsUpdate,
   type SuggestableSetting,
-  sameSettingValue,
 } from "@quizmaster/shared";
 import { Fragment, type ReactNode, useState } from "react";
 import { de } from "../../i18n/de";
 import type { CategoryCatalog } from "../../lib/client/game-view";
+import type { CategoryVisual } from "../../lib/ui/category";
 import { cx } from "../../lib/ui/cx";
 import { Button } from "../ui/button";
 import { CategoryBadge } from "../ui/category-badge";
@@ -21,12 +21,16 @@ import { Sheet } from "../ui/sheet";
 import { Stepper } from "../ui/stepper";
 import {
   asDifficulty,
+  categoriesNote as categoriesNoteOf,
+  categoryModeHint,
+  categoryOrderNote,
   categoryOrderText,
   categorySummary,
   categoryUpdate,
   difficultyPreview,
   difficultySummary,
   MAX_SEQUENCE_CATEGORIES,
+  settingDiffers,
   settingValueText,
   sortedCategories,
   toggleCategory,
@@ -93,16 +97,15 @@ export function SettingsSheet({
     if (!readOnly) onChange(update);
   };
   const selectable = (update: SettingsUpdate) => (readOnly ? undefined : () => change(update));
-  // Vorschläge (ADR-053): „Aktuell: …“ unter jedem Wert, der vom Vergleichsstand abweicht.
+  // Vorschläge (ADR-053): „Aktuell: …“ unter jedem Wert, der vom Vergleichsstand abweicht – der Reihe nach zählt
+  // die Reihenfolge der Kategorien (ADR-056), wie beim Server.
   const changedNote = (key: SuggestableSetting) =>
-    baseline === undefined || sameSettingValue(baseline[key], settings[key])
+    baseline === undefined || !settingDiffers(baseline, settings, key)
       ? undefined
       : de.suggestions.currently(settingValueText(baseline, key, categories));
-  // Kategorien (ADR-048/056): „Aktuell: …“, sobald Auswahl oder Spielweise abweicht.
-  const categoriesNote =
-    baseline !== undefined && (changedNote("categoryIds") !== undefined || changedNote("categoryMode") !== undefined)
-      ? de.suggestions.currently(categorySummary(baseline.categoryIds, categories, baseline.categoryMode))
-      : undefined;
+  // Kategorien (ADR-048/056): „Aktuell: …“, sobald Auswahl, Reihenfolge oder Spielweise abweicht.
+  const categoriesNote = categoriesNoteOf(baseline, settings, categories);
+  const orderNote = categoryOrderNote(baseline, settings, categories);
   const sequence = settings.categoryMode === "sequence";
   const hostNote = changedNote("hostPlays");
   // Schwierigkeit (ADR-055): die Zeile der Hauptansicht zeigt „Aktuell: …“, sobald eins der vier Felder abweicht.
@@ -156,10 +159,7 @@ export function SettingsSheet({
                   onClick={selectable(categoryUpdate(settings, toggleCategory(settings.categoryIds, category.id)))}
                   data-testid={`settings-category-${category.id}`}
                 >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <CategoryBadge category={category} compact />
-                    <span className="truncate">{category.name}</span>
-                  </span>
+                  <CategoryChoice category={category} />
                 </ListRow>
               </li>
             );
@@ -186,15 +186,23 @@ export function SettingsSheet({
                   >
                     <span className="flex min-w-0 flex-col py-2">
                       <span>{de.settings.categoryModes[mode]}</span>
-                      <span className="text-caption text-text-2">{de.settings.categoryModeHints[mode]}</span>
+                      <span className="text-caption text-text-2">{categoryModeHint(mode, asGuest)}</span>
                     </span>
                   </ListRow>
                 </li>
               ))}
             </ul>
             {sequence && settings.categoryIds ? (
-              <p className="pt-2 pb-2 text-body text-text" data-testid="settings-category-order">
+              <p
+                className={cx("pt-2 text-body", orderNote ? "text-primary" : "pb-2 text-text")}
+                data-testid="settings-category-order"
+              >
                 {de.settings.categorySequence(categoryOrderText(settings.categoryIds, categories))}
+              </p>
+            ) : null}
+            {orderNote ? (
+              <p className="pb-2 text-caption text-text-2" data-testid="settings-category-order-note">
+                {orderNote}
               </p>
             ) : null}
             {(settings.categoryIds?.length ?? 0) >= MAX_SEQUENCE_CATEGORIES ? (
@@ -350,26 +358,14 @@ export function SettingsSheet({
           onChange={(maxPlayers) => change({ maxPlayers })}
         />
         <ListRow onClick={() => setView("categories")} data-testid="settings-categories-row">
-          <span className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 flex-col">
-              <span>{de.settings.categories}</span>
-              {categoriesNote ? <span className="text-caption text-text-2">{categoriesNote}</span> : null}
-            </span>
-            <span className={cx("truncate text-label", categoriesNote ? "text-primary" : "text-text-2")}>
-              {categorySummary(settings.categoryIds, categories, settings.categoryMode)}
-            </span>
-          </span>
+          <SettingsValueRow
+            label={de.settings.categories}
+            value={categorySummary(settings.categoryIds, categories, settings.categoryMode)}
+            note={categoriesNote}
+          />
         </ListRow>
         <ListRow onClick={() => setView("difficulty")} data-testid="settings-difficulty-row">
-          <span className="flex items-center justify-between gap-3">
-            <span className="flex min-w-0 flex-col">
-              <span>{de.settings.difficulty}</span>
-              {difficultyNote ? <span className="text-caption text-text-2">{difficultyNote}</span> : null}
-            </span>
-            <span className={cx("truncate text-label", difficultyNote ? "text-primary" : "text-text-2")}>
-              {difficultySummary(settings)}
-            </span>
-          </span>
+          <SettingsValueRow label={de.settings.difficulty} value={difficultySummary(settings)} note={difficultyNote} />
         </ListRow>
         <SettingsSummary settings={settings} players={players} />
         <h3 className="pt-4 text-label text-text-2">{de.settings.advanceTitle}</h3>
@@ -447,6 +443,40 @@ export function SettingsSheet({
         ) : null}
       </div>
     </Sheet>
+  );
+}
+
+/**
+ * Inhalt einer Zeile der Kategorien-Auswahl (ADR-048): Icon-Kachel und Name. Die Kachel ist dekorativ – der Name
+ * steht daneben und wird so nur einmal vorgelesen (docs/09 §12). Lange Namen brechen bei Text-Zoom um.
+ */
+export function CategoryChoice({ category }: { category: CategoryVisual }) {
+  return (
+    <span className="flex min-w-0 items-center gap-3">
+      <CategoryBadge category={category} compact decorative />
+      <span className="min-w-0 hyphens-auto wrap-break-word">{category.name}</span>
+    </span>
+  );
+}
+
+/**
+ * Inhalt der Zeilen „Kategorien“ und „Schwierigkeit“: links die Beschriftung (bei Vorschlägen darunter „Aktuell: …“),
+ * rechts der Wert (`label`; abweichend vom aktuellen Stand in `primary`, ADR-053). Der Wert wird nie gekürzt: Passt er
+ * nicht neben die Beschriftung (lange Werte, Text-Zoom), rückt er rechtsbündig in die nächste Zeile.
+ */
+export function SettingsValueRow({ label, value, note }: { label: string; value: string; note?: string | undefined }) {
+  return (
+    <span className="flex flex-wrap items-center justify-between gap-x-3 py-2">
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {note ? <span className="text-caption text-text-2">{note}</span> : null}
+      </span>
+      <span
+        className={cx("ml-auto min-w-0 text-right text-label wrap-break-word", note ? "text-primary" : "text-text-2")}
+      >
+        {value}
+      </span>
+    </span>
   );
 }
 

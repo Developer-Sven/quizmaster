@@ -111,7 +111,7 @@ describe("Flut je Web-Endpunkt über das echte Route-Modul", () => {
     else expect(body.error?.code).toBe("RATE_LIMITED");
   }
 
-  it("POST /api/session (IP 10 / 10 min, neue Sessions)", async () => {
+  it("POST /api/session (IP 30 / 10 min, neue Sessions)", async () => {
     const { POST } = await import("../../app/api/session/route");
     const ip = freshIp();
     await flood("POST /api/session", POST, () => testRequest("/api/session", { body: {}, ip }));

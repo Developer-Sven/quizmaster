@@ -38,21 +38,19 @@ export function installSteps(method: "ios" | "android", browser: InstallBrowser)
       { text: steps.iosConfirm, icon: null },
     ];
   }
-  const menu =
+  // Samsung Internet öffnet sein Menü über ≡ unten rechts – dafür gibt es kein Icon in docs/09 §9, und `⋮` wäre
+  // falsch: Der Schritt nennt nur den Ort, ohne Symbol.
+  const menu: InstallStep =
     browser === "firefox"
-      ? steps.androidMenuFirefox
+      ? { text: steps.androidMenuFirefox, icon: "menu" }
       : browser === "samsung"
-        ? steps.androidMenuSamsung
-        : steps.androidMenu;
+        ? { text: steps.androidMenuSamsung, icon: null }
+        : { text: steps.androidMenu, icon: "menu" };
   const add =
     browser === "firefox"
       ? steps.androidAddFirefox
       : browser === "samsung"
         ? steps.androidAddSamsung
         : steps.androidAdd;
-  return [
-    { text: menu, icon: "menu" },
-    { text: add, icon: "add" },
-    { text: steps.androidConfirm, icon: null },
-  ];
+  return [menu, { text: add, icon: "add" }, { text: steps.androidConfirm, icon: null }];
 }

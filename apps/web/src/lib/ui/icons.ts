@@ -7,8 +7,8 @@
  * |-----------------------------------------|--------------------|
  * | zurück / verlassen (Lobby)              | ChevronLeftIcon    |
  * | Aufgeben (Spiel)                        | XIcon              |
- * | Einstellungen                           | Settings2Icon      |
- * | Host, Sieger:in                         | CrownIcon          |
+ * | Einstellungen, Vorschläge (auch Toast)  | Settings2Icon      |
+ * | Host, Sieger:in, Host-Hinweise (Toast)  | CrownIcon          |
  * | Code kopieren / Link teilen             | CopyIcon / Share2Icon |
  * | QR-Code / Link                          | QrCodeIcon / LinkIcon |
  * | Spiel starten                           | PlayIcon           |

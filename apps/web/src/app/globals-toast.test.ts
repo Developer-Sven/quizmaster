@@ -1,7 +1,7 @@
 /**
  * Toast-Abstand (docs/09 §5 „Toast: unten über der Aktionsleiste“): Am Spielende ist die Aktionsleiste bis zu
  * 201 px hoch (Revanche, „Fragen ansehen“, „Lobby verlassen“) – ein fester Abstand von 96 px legte den Toast über
- * ihre Buttons (Befund W3). Der Toast richtet sich deshalb nach der Höhe, die die Aktionsleiste als
+ * ihre Buttons (Befund aus dem UI-Review). Der Toast richtet sich deshalb nach der Höhe, die die Aktionsleiste als
  * `--sticky-bottom` meldet (components/app/sticky-inset.tsx).
  */
 import { readFileSync } from "node:fs";

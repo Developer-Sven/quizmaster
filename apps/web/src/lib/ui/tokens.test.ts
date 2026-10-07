@@ -1,9 +1,12 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { PLAYER_COLOR_HEX, PLAYER_COLORS } from "@quizmaster/shared";
 import { describe, expect, it } from "vitest";
 import { DURATION_MS, EASING, QR_CODE_COLORS, THEME_COLOR } from "./tokens";
 
 const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+const SRC_DIR = fileURLToPath(new URL("../../", import.meta.url));
 
 /** Wert einer Custom Property aus globals.css (erste Deklaration, ohne Kommentar). */
 function token(name: string): string {
@@ -118,6 +121,22 @@ describe("globals.css – Tokens aus docs/09 §2", () => {
   it("entfernt Tailwinds Standard-Paletten, Schatten, Unschärfen und Animationen", () => {
     for (const namespace of ["color", "font", "text", "radius", "shadow", "drop-shadow", "blur", "ease", "animate"]) {
       expect(css, namespace).toContain(`--${namespace}-*: initial;`);
+    }
+  });
+
+  it("hat nur genutzte Animations-Tokens – keine zweite, abweichende Quelle für eine Bewegung (docs/09 §8)", () => {
+    // Beispiel: Die Krone am Spielende animiert motion mit 480 ms; ein ungenutzter CSS-Token mit 320 ms widersprach dem.
+    const sources = readdirSync(SRC_DIR, { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.(?:ts|tsx)$/.test(file) && !/\.test\.tsx?$/.test(file))
+      .map((file) => readFileSync(join(SRC_DIR, file), "utf8"))
+      .join("\n");
+    const names = [...css.matchAll(/--animate-([a-z0-9-]+):/g)].map((match) => match[1]);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(sources, `animate-${name}`).toMatch(new RegExp(`\\banimate-${name}\\b`));
+    for (const keyframes of css.matchAll(/@keyframes ([a-z0-9-]+)/g)) {
+      expect(css, `@keyframes ${keyframes[1]}`).toMatch(
+        new RegExp(`(?:animation|--animate-[a-z0-9-]+):[^;]*\\b${keyframes[1]}\\b`),
+      );
     }
   });
 

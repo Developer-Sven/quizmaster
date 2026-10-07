@@ -37,6 +37,23 @@ const QrScannerSheet = dynamic(() => import("./qr-scanner-sheet").then((mod) => 
 /** Obergrenze des Namensfelds (NAME_INPUT_MAX_LENGTH; die Namensregeln prüft der Server). */
 const NAME_MAX_LENGTH = 64;
 
+/** Laufender Ablauf der Startseite: Lobby erstellen bzw. per Code oder QR-Code beitreten. */
+export type StartBusy = "create" | "join" | null;
+
+/**
+ * Bedienbarkeit während eines laufenden Ablaufs: Kein anderer Weg ist dann bedienbar – auch „Lobby erstellen“ wird
+ * beim Beitritt sichtbar gesperrt, statt einen Tipp still zu verschlucken. Die Statuszeile unter dem Code sagt
+ * „Trete bei …“ an (ADR-039).
+ */
+export function startBusyState(busy: StartBusy) {
+  return {
+    createDisabled: busy === "join",
+    createLoading: busy === "create",
+    otherWaysDisabled: busy !== null,
+    joinStatus: busy === "join" ? de.start.joining : "",
+  };
+}
+
 export interface StartScreenProps {
   /** Realtime-URL aus der Laufzeit-Konfiguration ("" = gleiche Origin, ADR-023) */
   realtimeUrl: string;
@@ -69,7 +86,8 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
   const [codeError, setCodeError] = useState<string | null>(null);
   // Allgemeine Fehler inline unter der jeweiligen Aktion (kein Toast: hält das Start-Bundle ohne Animationen).
   const [formError, setFormError] = useState<{ at: "create" | "join"; text: string } | null>(null);
-  const [busy, setBusy] = useState<"create" | "join" | null>(null);
+  const [busy, setBusy] = useState<StartBusy>(null);
+  const busyState = startBusyState(busy);
   /** Scanner-Sheet: einmal geladen bleibt es eingehängt (Schließ-Animation), `scanOpen` steuert die Kamera */
   const [scanMounted, setScanMounted] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
@@ -186,7 +204,8 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
       <main className="mx-auto flex w-full max-w-column flex-1 flex-col px-gutter">
         <div className="flex flex-1 flex-col justify-center gap-8 py-10">
           <header className="flex flex-col gap-2">
-            <h1 className="text-wordmark text-text">
+            {/* Text-Zoom 200 %: trennen bzw. umbrechen statt die Seite zu verbreitern (wie die Spielende-Überschrift) */}
+            <h1 className="text-wordmark text-text hyphens-auto wrap-break-word">
               {de.app.name}
               <span aria-hidden="true" className="ml-1 inline-block size-2.5 bg-primary" />
             </h1>
@@ -224,7 +243,8 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
                 form={createFormId}
                 variant="primary"
                 block
-                loading={busy === "create"}
+                disabled={busyState.createDisabled}
+                loading={busyState.createLoading}
                 data-testid="start-create"
               >
                 {de.actions.createLobby}
@@ -239,24 +259,36 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
                 }}
                 className="flex flex-col gap-4"
               >
-                <CodeInput
-                  ref={codeRef}
-                  value={code}
-                  onChange={(value) => {
-                    setCode(value);
-                    setCodeError(null);
-                    if (value.length > 0) warmUpRealtimeClient();
-                  }}
-                  onComplete={join}
-                  hint={de.fields.lobbyCodeHint}
-                  hintHidden
-                  error={codeError}
-                  disabled={busy !== null}
-                  name="code"
-                />
-                <p role="status" data-testid="start-join-status" className="text-caption text-text-2 empty:hidden">
-                  {busy === "join" ? de.start.joining : ""}
-                </p>
+                <div className="relative">
+                  <CodeInput
+                    ref={codeRef}
+                    value={code}
+                    onChange={(value) => {
+                      setCode(value);
+                      setCodeError(null);
+                      if (value.length > 0) warmUpRealtimeClient();
+                    }}
+                    onComplete={join}
+                    hint={de.fields.lobbyCodeHint}
+                    hintHidden
+                    error={codeError}
+                    disabled={busyState.otherWaysDisabled}
+                    name="code"
+                  />
+                  {/*
+                    Live-Region von Anfang an im DOM (eine erst mit ihrem Text eingeblendete Region sagen viele
+                    Screenreader nicht an). Sie liegt außerhalb des Flusses im 16-px-Abstand unter den Code-Zellen:
+                    Im Leerlauf kostet sie keinen Platz – die drei Wege bleiben im 16-px-Rhythmus (ADR-043) –, und
+                    „Trete bei …“ verschiebt nichts (wie die Statuszeile unter der Fragekarte, ADR-034).
+                  */}
+                  <p
+                    role="status"
+                    data-testid="start-join-status"
+                    className="absolute inset-x-0 top-full text-caption text-text-2"
+                  >
+                    {busyState.joinStatus}
+                  </p>
+                </div>
                 <FormError message={formError?.at === "join" ? formError.text : null} testId="start-join-error" />
               </form>
               <OrSeparator />
@@ -264,7 +296,7 @@ export function StartScreen({ realtimeUrl, focus = null, turnstile, maintenance 
                 variant="secondary"
                 icon={QrCodeIcon}
                 block
-                disabled={busy !== null}
+                disabled={busyState.otherWaysDisabled}
                 onClick={() => {
                   setScanMounted(true);
                   setScanOpen(true);

@@ -53,7 +53,18 @@ export interface ConnectionState {
 /** Warum die Lobby für diese Person vorbei ist (Anzeige statt Lobby/Spiel). */
 export type LobbyExit = { kind: "error"; code: ErrorCode } | { kind: "kicked"; reason: KickReason };
 
-export type ToastKind = "hostChanged" | "playerResigned" | "serverRestart" | "info" | "error";
+/**
+ * Art eines Hinweises – bestimmt das Icon (docs/09 §7.10, §9): Hinweise über andere bekommen ihr eigenes Icon,
+ * eigene Bestätigungen (`info`) und Fehler (`error`) das Standard-Icon des Toasts.
+ */
+export type ToastKind =
+  | "hostChanged"
+  | "playerResigned"
+  | "serverRestart"
+  | "suggestion"
+  | "gameEnded"
+  | "info"
+  | "error";
 
 export interface ToastEntry {
   id: number;
@@ -260,7 +271,7 @@ export const gameActions = {
           : withToast(toasts, "playerResigned", de.notices.playerResigned(notice.name));
     }
     for (const notice of suggestionNotices(state.lobby, next, state.self?.playerId ?? null)) {
-      toasts = withToast(toasts, "info", suggestionNoticeText(notice));
+      toasts = withToast(toasts, "suggestion", suggestionNoticeText(notice));
     }
     const roster = lobbyRosterChanges(state.lobby, next, state.self?.playerId ?? null);
     const announcement = nextAnnouncement(state.announcement, [
@@ -331,7 +342,7 @@ export const gameActions = {
     } else if (code === "GAME_ENDED") {
       // Der Host weiß es schon – alle anderen erfahren, warum das Ergebnis kommt (ADR-051).
       useGameStore.setState((state) =>
-        state.self?.isHost ? state : { toasts: withToast(state.toasts, "info", de.notices.gameEnded) },
+        state.self?.isHost ? state : { toasts: withToast(state.toasts, "gameEnded", de.notices.gameEnded) },
       );
     }
   },

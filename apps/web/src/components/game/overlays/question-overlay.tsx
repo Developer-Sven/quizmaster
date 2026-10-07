@@ -41,9 +41,10 @@ export interface QuestionOverlayProps {
 const QUESTION = CHOREOGRAPHY.question;
 
 /**
- * Frage (Phase `question` ab `startsAt`, 20 s, docs/09 §7.4–5): `QuestionCard` fährt 16 px von unten ein
- * (200 ms), die Antworten folgen gestaffelt (40 ms); die `TimerBar` läuft als CSS über die Restzeit bis
- * `deadline` (ab 5 s Rest rot, dazu `tick` je Sekunde – Cues der Bühne). Tippen loggt sofort ein: getippte
+ * Frage (Phase `question` ab `startsAt`, Standard 20 s bzw. „Zeit pro Frage“, docs/09 §7.4–5, ADR-049):
+ * `QuestionCard` fährt 16 px von unten ein (200 ms), die Antworten folgen gestaffelt (40 ms); die `TimerBar` läuft
+ * als CSS über die Restzeit bis `deadline` (ab 5 s Rest rot, dazu `tick` je Sekunde – Cues der Bühne). Ohne
+ * Countdown („Host“) gibt es keinen Balken; der Host löst auf (Aktion im Spielerstreifen, game-screen.tsx). Tippen loggt sofort ein: getippte
  * Antwort `locked`, übrige `dimmed` (Ton `lock`, Haptik 15 ms im Handler der Bühne), in der Statuszeile unter der
  * Karte live „Warte auf 2 weitere …“ (ADR-034: Zeile immer reserviert und mit der Auflösung geteilt – dort steht
  * „Zeit abgelaufen“; Karte und Antworten springen nicht). Nach der Deadline nicht mehr bedienbar.

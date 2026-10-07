@@ -276,6 +276,8 @@ describe("Hinweise und Kategorien", () => {
     gameActions.applyPrivateState(testSelf("p1", { isHost: true }));
     gameActions.applyPublicState(testLobby({ rev: 2, players: [mia, ben], suggestions: [open] }));
     expect(state().toasts.at(-1)?.text).toBe("Ben hat einen Vorschlag gemacht.");
+    // Eigenes Icon (`settings-2` wie der Abschnitt „Vorschläge“) statt des Info-`check` (docs/09 §9)
+    expect(state().toasts.at(-1)?.kind).toBe("suggestion");
     // Sicht von Ben
     gameActions.resetLobby();
     gameActions.applyPublicState(testLobby({ rev: 1, players: [mia, ben], suggestions: [open] }));
@@ -284,6 +286,7 @@ describe("Hinweise und Kategorien", () => {
       testLobby({ rev: 2, players: [mia, ben], suggestions: [{ ...open, status: "accepted" }] }),
     );
     expect(state().toasts.at(-1)?.text).toBe("Mia hat deinen Vorschlag übernommen.");
+    expect(state().toasts.at(-1)?.kind).toBe("suggestion");
   });
 
   it("„Verbindung hakt“ nur im laufenden Spiel bei bestehender Verbindung: lange Stille oder Server eingefroren (ADR-057)", () => {
@@ -324,6 +327,8 @@ describe("Hinweise und Kategorien", () => {
     gameActions.applyPrivateState(testSelf("p2", { isHost: false }));
     gameActions.applyNotice("GAME_ENDED");
     expect(state().toasts.at(-1)?.text).toBe("Der Host hat das Spiel beendet.");
+    // Eigenes Icon (`crown` = Host) statt des Info-`check` (docs/09 §9)
+    expect(state().toasts.at(-1)?.kind).toBe("gameEnded");
     gameActions.resetLobby();
     gameActions.applyPublicState(testLobby({ rev: 1 }));
     gameActions.applyPrivateState(testSelf("p1", { isHost: true }));

@@ -232,9 +232,10 @@ export function LobbyView({
                 {pending.map((entry) => (
                   <li key={entry.id}>
                     <ListRow icon={Settings2Icon} onClick={() => openReview(entry)} data-testid="lobby-suggestion">
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate">{de.suggestions.from(nameOf(entry.playerId))}</span>
-                        <span className="truncate text-caption text-text-2">
+                      {/* Kurzfassung ungekürzt: Sie ist, was der Host übernimmt (der Reihe nach samt Reihenfolge). */}
+                      <span className="flex min-w-0 flex-col py-2 wrap-break-word">
+                        <span>{de.suggestions.from(nameOf(entry.playerId))}</span>
+                        <span className="text-caption text-text-2">
                           {suggestionSummary(entry.changes, settings, categories)}
                         </span>
                       </span>

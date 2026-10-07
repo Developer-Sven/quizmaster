@@ -146,14 +146,19 @@ export class SettingsSync {
     this.#deps.onDraft(draft);
   }
 
-  /** Noch zu sendende Werte: weichen vom Server-Stand ab und sind nicht schon bestätigt gesendet. */
+  /**
+   * Noch zu sendende Werte: weichen vom erwarteten Server-Stand ab. Für bestätigt gesendete Werte ist das der
+   * gesendete Wert (sein `lobby:state` folgt dem Ack), sonst der letzte Server-Stand. So geht auch ein Wert hinterher,
+   * den der Host während des Sendens auf den alten Stand zurückgetippt hat – er gleicht dem Server-Stand nur noch,
+   * bis der Zustand zum Ack eintrifft.
+   */
   #pending(): Partial<LobbySettings> {
+    const awaiting = this.#awaiting;
     const result: SettingsEntries = {};
-    for (const [key, value] of Object.entries(unconfirmed(this.#draft, this.#server)) as [
-      SettingsKey,
-      SettingsValue,
-    ][]) {
-      if (!sameValue(this.#awaiting?.[key], value)) result[key] = value;
+    for (const [key, value] of Object.entries(this.#draft) as [SettingsKey, SettingsValue | undefined][]) {
+      if (value === undefined) continue;
+      const expected = awaiting !== null && Object.hasOwn(awaiting, key) ? awaiting[key] : this.#server[key];
+      if (!sameValue(value, expected)) result[key] = value;
     }
     return asSettings(result);
   }

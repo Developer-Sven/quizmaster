@@ -13,6 +13,7 @@ import {
   type SettingsUpdate,
   SUGGESTABLE_SETTINGS,
   type SuggestableSetting,
+  sameSettingValue,
   spreadDifficulties,
 } from "@quizmaster/shared";
 import { de } from "../../i18n/de";
@@ -44,6 +45,14 @@ export function categorySummary(
   const [only] = categoryIds;
   if (categoryIds.length === 1 && only !== undefined) return catalog[only]?.name ?? de.settings.categoriesCount(1);
   return de.settings.categoriesCount(categoryIds.length);
+}
+
+/**
+ * Erklärung unter „Wer dran ist, wählt“ bzw. „Der Reihe nach, ohne Wahl“ (ADR-056). Alle außer dem Host lesen sie
+ * ohne Du-Form („der ausgewählten“ statt „deiner Auswahl“, ADR-050).
+ */
+export function categoryModeHint(mode: CategoryMode, asGuest: boolean): string {
+  return asGuest && mode === "pick" ? de.settings.categoryModeHintPickOther : de.settings.categoryModeHints[mode];
 }
 
 /** Stepper-Wert als Schwierigkeitsstufe (die Stepper-Grenzen halten ihn ohnehin in 1–5). */
@@ -158,11 +167,21 @@ export function settingLabel(key: SuggestableSetting): string {
   }
 }
 
-/** Wert einer Einstellung als Text: „5“, „20 s“ bzw. „Host“, „Alle“/„Sport“/„3 ausgewählt“, „spielt mit“. */
+/** Spielt die Lobby mit diesen Einstellungen Kategorien der Reihe nach (ADR-056)? */
+function playsInSequence(settings: LobbySettings): settings is LobbySettings & { categoryIds: string[] } {
+  return settings.categoryMode === "sequence" && (settings.categoryIds?.length ?? 0) >= 2;
+}
+
+/**
+ * Wert einer Einstellung als Text: „5“, „20 s“ bzw. „Host“, „Alle“/„Sport“/„3 ausgewählt“, der Reihe nach die
+ * Reihenfolge („1. Sport · 2. Musik“ – sie ist dort Inhalt, ADR-056), „spielt mit“.
+ */
 export function settingValueText(settings: LobbySettings, key: SuggestableSetting, catalog: CategoryCatalog): string {
   switch (key) {
     case "categoryIds":
-      return categorySummary(settings.categoryIds, catalog, settings.categoryMode);
+      return playsInSequence(settings)
+        ? categoryOrderText(settings.categoryIds, catalog)
+        : categorySummary(settings.categoryIds, catalog, settings.categoryMode);
     case "categoryMode":
       return de.settings.categoryModes[settings.categoryMode];
     case "answerSec":
@@ -187,4 +206,41 @@ export function suggestionSummary(changes: SettingsChanges, current: LobbySettin
   return SUGGESTABLE_SETTINGS.filter((key) => changes[key] !== undefined)
     .map((key) => `${settingLabel(key)}: ${settingValueText(proposed, key, catalog)}`)
     .join(" · ");
+}
+
+/**
+ * Weicht die Einstellung vom Vergleichsstand ab (Vorschläge, ADR-053)? Wie beim Server (`settingsChangesBetween`):
+ * Wird der Reihe nach gespielt (ADR-056), zählt die Reihenfolge der Kategorien, sonst nur die Auswahl.
+ */
+export function settingDiffers(baseline: LobbySettings, settings: LobbySettings, key: SuggestableSetting): boolean {
+  return !sameSettingValue(baseline[key], settings[key], key === "categoryIds" && settings.categoryMode === "sequence");
+}
+
+/**
+ * „Aktuell: …“ der Zeile „Kategorien“ (ADR-048/053/056): sobald Auswahl, Reihenfolge (der Reihe nach) oder Spielweise
+ * abweicht – der Reihe nach mit der bisherigen Reihenfolge.
+ */
+export function categoriesNote(
+  baseline: LobbySettings | undefined,
+  settings: LobbySettings,
+  catalog: CategoryCatalog,
+): string | undefined {
+  if (baseline === undefined) return undefined;
+  const changed =
+    settingDiffers(baseline, settings, "categoryIds") || settingDiffers(baseline, settings, "categoryMode");
+  return changed ? de.suggestions.currently(settingValueText(baseline, "categoryIds", catalog)) : undefined;
+}
+
+/**
+ * „Aktuell: …“ unter „Reihenfolge: …“ in der Unteransicht „Kategorien“ (ADR-056): nur wenn auch bisher der Reihe nach
+ * gespielt wird und die Reihenfolge bzw. Auswahl abweicht (sonst sagt es „So wird gespielt“).
+ */
+export function categoryOrderNote(
+  baseline: LobbySettings | undefined,
+  settings: LobbySettings,
+  catalog: CategoryCatalog,
+): string | undefined {
+  if (baseline === undefined || !playsInSequence(baseline) || !playsInSequence(settings)) return undefined;
+  if (!settingDiffers(baseline, settings, "categoryIds")) return undefined;
+  return de.suggestions.currently(categoryOrderText(baseline.categoryIds, catalog));
 }

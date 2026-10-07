@@ -82,6 +82,13 @@ describe("Skeleton und EmptyState", () => {
     expect(html).toContain("h-16");
   });
 
+  it("Avatar bleibt neben einer Textzeile ein Kreis 40 × 40 – er schrumpft in einer Zeile nicht (docs/09 §13)", () => {
+    const classes = (/class="([^"]*)"/.exec(renderToStaticMarkup(h(Skeleton, { shape: "avatar" })))?.[1] ?? "").split(
+      " ",
+    );
+    expect(classes).toEqual(expect.arrayContaining(["size-10", "shrink-0", "rounded-full"]));
+  });
+
   it("zeigt Icon 40 in text-3, eine Zeile und optional eine Aktion", () => {
     const html = renderToStaticMarkup(
       h(EmptyState, {

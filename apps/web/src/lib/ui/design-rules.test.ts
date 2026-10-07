@@ -114,6 +114,19 @@ describe("Design-Abnahme docs/09 §13", () => {
     expect(found).toEqual([]);
   });
 
+  it("schneidet Spielernamen nie ab – sie brechen um (docs/09 §12 „Zoom bis 200 % ohne Verlust“, WCAG 1.4.4)", () => {
+    // Element mit `truncate`/`line-clamp`, dessen Inhalt der Name einer Person ist (`{name}`, `{player.name}` …);
+    // die Entwickler-Übersichten unter app/dev zeigen Token- statt Personennamen.
+    const clipped =
+      /<span\b[^>]*\b(?:truncate|line-clamp-\d)\b[^>]*>\s*\{\s*(?:(?:player|entry|self|host|winner)\??\.)?name\s*\}/g;
+    const found = violations((path, source) =>
+      isUiCode(path) && !path.startsWith("app/dev/")
+        ? [...withoutComments(source).matchAll(clipped)].map((match) => match[0].slice(0, 60))
+        : [],
+    );
+    expect(found).toEqual([]);
+  });
+
   it("importiert Icons nur über lib/ui/icons (Kategorie-Icons: lib/ui/category)", () => {
     const allowed = new Set(["lib/ui/icons.ts", "lib/ui/category.ts"]);
     const found = violations((path, source) =>

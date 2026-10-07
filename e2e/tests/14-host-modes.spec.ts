@@ -5,7 +5,14 @@
 
 import { expect, test } from "./support/fixtures.ts";
 import { stageOverlay } from "./support/game.ts";
-import { openAnswers, pickFirstCategory, pickRoles, playQuicklyUntil, waitForOverlay } from "./support/phases.ts";
+import {
+  openAnswers,
+  pickFirstCategory,
+  pickRoles,
+  pickUntilQuestion,
+  playQuicklyUntil,
+  waitForOverlay,
+} from "./support/phases.ts";
 import { stageEvents } from "./support/stage-recorder.ts";
 
 test("Anzeige-Modus: Host zeigt nur an, zwei spielen am Handy (ADR-046)", async ({ players }) => {
@@ -37,6 +44,45 @@ test("Anzeige-Modus: Host zeigt nur an, zwei spielen am Handy (ADR-046)", async 
   await playQuicklyUntil([ben, lea], "game-over");
   await waitForOverlay(host, "game-over");
   await expect(host.page.getByTestId("game-over-headline")).not.toHaveText(/^(Gewonnen|Verloren|Platz \d)$/);
+});
+
+test("Anzeige-Modus am großen Bildschirm, Frage ohne Countdown: Streifen mit den Mitspielenden, darunter „Auflösen“ (ADR-060)", async ({
+  players,
+}) => {
+  // Am Fernseher soll die Runde sehen, wer noch fehlt (docs/09 §7.4 „geantwortet“-Ringe, §6 Anzeige-Modus).
+  const host = await players.create("Mia", {
+    viewport: { width: 1280, height: 800 },
+    isMobile: false,
+    hasTouch: false,
+  });
+  const ben = await players.create("Ben");
+  const lea = await players.create("Lea");
+  const code = await host.createLobby();
+  await ben.joinByCode(code);
+  await lea.joinByCode(code);
+  await host.changeSettings({ Runden: 1, "Fragen pro Kategorie": 1, "Zeit pro Frage": 0 });
+  await host.page.getByRole("button", { name: "Einstellungen", exact: true }).click();
+  const sheet = host.page.getByRole("dialog", { name: "Einstellungen" });
+  await sheet.getByRole("button", { name: "Du zeigst nur an (großer Bildschirm)" }).click();
+  await sheet.getByRole("button", { name: "Fertig" }).click();
+  await expect(sheet).toBeHidden();
+
+  await host.startGame();
+  await pickUntilQuestion([host, ben, lea]);
+  await waitForOverlay(host, "question");
+  const strip = host.page.getByTestId("player-strip");
+  await expect(strip).toHaveAttribute("data-action-layout", "stacked");
+  await expect(host.stripPlayers).toHaveCount(2);
+  for (const entry of await host.stripPlayers.all()) await expect(entry).toBeVisible();
+  const resolve = strip.getByTestId("game-continue");
+  await expect(resolve).toHaveText("Auflösen (0/2 Antworten)");
+  // Ben antwortet: Sein Avatar bekommt am Anzeige-Gerät den „geantwortet“-Ring, die Beschriftung zählt mit.
+  await openAnswers(ben).first().click();
+  const benEntry = host.stripPlayers.filter({ has: host.page.getByRole("img", { name: /^Ben\b/ }) });
+  await expect(benEntry).toHaveAttribute("data-answered", "true");
+  await expect(resolve).toHaveText("Auflösen (1/2 Antworten)");
+  await resolve.click();
+  for (const player of [host, ben, lea]) await waitForOverlay(player, "answer-reveal");
 });
 
 test("Host übertragen: Ben wird Host, Mia wartet (ADR-047)", async ({ players }) => {

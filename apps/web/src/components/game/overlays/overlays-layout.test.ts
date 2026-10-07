@@ -293,6 +293,45 @@ describe("Frage → Auflösung: Karte und Antworten stehen still (ADR-034)", () 
     }
   });
 
+  it("hält unter der Antwortgruppe in Frage und Auflösung gleich viel Platz für die Avatare frei (≥ 12 px)", () => {
+    // Die Avatare an den Antworten ragen 12 px unter die Karte (`-bottom-3`): unter der letzten Antwort fängt sie der
+    // untere Innenabstand des Bühnen-Rahmens auf – in beiden Phasen derselbe, nichts springt (ADR-034).
+    for (const [name, view] of Object.entries(views)) {
+      expect(view.column.attrs.class, name).toMatch(/(?:^|\s)py-4(?:\s|$)/);
+      const group = view.children.at(-1);
+      expect(group?.tag, name).toBe("fieldset");
+      expect(
+        layoutClasses(group ?? view.column).filter((token) => /^-?[mp][tby]?-/.test(token)),
+        name,
+      ).toEqual(["mt-2"]);
+    }
+    const reveal = render(AnswerRevealOverlay, {
+      question: { ...base, correct: 0, picks: { p1: 3, p2: 3 } },
+      players: [mia, ben],
+      selfId: "p1",
+      phaseStartedAt: NOW - 2_000,
+      phaseEndsAt: null,
+    });
+    // Avatarreihe an Antwort D (beide wählten D): absolut am rechten Rand, 12 px unter der Kante
+    const answerD = findNode(parseHtml(reveal), (node) => node.attrs["data-testid"] === "answer-3");
+    const pickers = answerD && findNode(answerD, (node) => (node.attrs.class ?? "").split(" ").includes("-bottom-3"));
+    expect((pickers?.attrs.class ?? "").split(" ")).toEqual(expect.arrayContaining(["absolute", "right-3"]));
+  });
+
+  it("macht zweizeilige Antworten nicht höher als die Mindesthöhe (64 = 2 × 24 + 2 × 6 + 2 × 2)", () => {
+    // Sonst passen bei 360 × 740 Frage (140 Zeichen) und vier Antworten (je 40) samt Avataren an D nicht auf die
+    // Bühne (4 × 4 px zu viel – der Avatar an D wurde angeschnitten).
+    const answer = findNode(
+      parseHtml(question({ myChoice: null, open: true })),
+      (node) => node.attrs["data-testid"] === "answer-3",
+    );
+    const classes = layoutClasses(answer ?? { tag: "", attrs: {}, children: [] });
+    expect(classes).toEqual(expect.arrayContaining(["min-h-16", "py-1.5"]));
+    expect(answer?.attrs.class).toContain("border-2");
+    const text = answer && elements(answer).find((child) => (child.attrs.class ?? "").includes("text-answer"));
+    expect(text?.attrs.class).toContain("text-answer");
+  });
+
   it("nutzt in Frage und Auflösung dieselbe Statuszeile (caption, text-2, 16 px reserviert)", () => {
     const waiting = views["Frage eingeloggt („Warte auf …“)"].status;
     expect(waiting?.attrs["data-testid"]).toBe("question-waiting");

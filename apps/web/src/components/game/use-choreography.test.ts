@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMPACT_HEIGHT_REM, isCompactHeight } from "./use-choreography";
+import { COMPACT_HEIGHT_REM, isCompactHeight, isRoomyHeight, ROOMY_HEIGHT_REM } from "./use-choreography";
 
 describe("Niedriger Viewport (WCAG 1.4.10): Spielscreen scrollt als ein Dokument", () => {
   it("bleibt bei den Referenz-Viewports (360 × 740, 430 × 932, iPhone 15) bei der Bühne", () => {
@@ -20,5 +20,24 @@ describe("Niedriger Viewport (WCAG 1.4.10): Spielscreen scrollt als ein Dokument
   it("rechnet ohne lesbare Schriftgröße mit 16 px", () => {
     expect(isCompactHeight(500, Number.NaN)).toBe(true);
     expect(isCompactHeight(740, 0)).toBe(false);
+  });
+});
+
+describe("Hoher Viewport (ADR-060): Host-Aktion in einer zweiten Zeile des Spielerstreifens", () => {
+  it("nicht bei 360 × 740 – dort fehlte Antwort D samt Avataren die Höhe", () => {
+    expect(isRoomyHeight(740, 16)).toBe(false);
+    expect(isRoomyHeight(780, 16)).toBe(false);
+  });
+
+  it("bei 430 × 932, 360 × 800 und am 1280 × 800-Bildschirm (Anzeige-Modus)", () => {
+    expect(isRoomyHeight(932, 16)).toBe(true);
+    expect(isRoomyHeight(800, 16)).toBe(true);
+    expect(isRoomyHeight(ROOMY_HEIGHT_REM * 16, 16)).toBe(true);
+  });
+
+  it("rechnet in rem der Seite: große Schrift braucht mehr Höhe", () => {
+    expect(isRoomyHeight(932, 24)).toBe(false); // 430 × 932 mit 150 % Schrift: 39 rem
+    expect(isRoomyHeight(1600, 32)).toBe(true);
+    expect(isRoomyHeight(800, Number.NaN)).toBe(true);
   });
 });

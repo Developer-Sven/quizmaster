@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
 import { useLobbyActions } from "@/components/lobby/use-lobby-actions";
-import { Banner } from "@/components/ui/banner";
 import { isRunningPhase } from "@/lib/client/game-view";
 import { getSoundManager } from "@/lib/client/sound";
 import { writeStoredSoundOn } from "@/lib/client/storage";
@@ -127,7 +126,8 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
       syncGeneration={syncGeneration}
       soundOn={soundOn}
       busy={{ ...busy, continue: continuing === lobby.phaseStartedAt }}
-      banner={lobby.phase === "game_over" ? <StatusBanners /> : networkStalled ? <Banner tone="network" /> : null}
+      banner={lobby.phase === "game_over" ? <StatusBanners /> : null}
+      networkStalled={networkStalled}
       handlers={{
         onPick: (categoryId) => void pick(categoryId),
         onAnswer: (questionId, choice) => void answer(questionId, choice),

@@ -15,12 +15,12 @@ import type {
   PublicQuestion,
   ReviewItem,
 } from "@quizmaster/shared";
-import { DEFAULT_LOBBY_SETTINGS } from "@quizmaster/shared";
+import { DEFAULT_LOBBY_SETTINGS, MANUAL_ADVANCE, MANUAL_ANSWER_CAP_MS } from "@quizmaster/shared";
 import { placesFor } from "../../../lib/client/game-view";
 import type { LobbyExit, PendingAnswer } from "../../../stores/game-store";
 import { LONGEST_ANSWER, LONGEST_QUESTION } from "../ui/sample-data";
 
-export type PreviewPlayers = 2 | 6;
+export type PreviewPlayers = 2 | 6 | 8;
 
 export interface PreviewContext {
   /** eingefrorene Client-Zeit der Vorschau (ms) */
@@ -76,11 +76,14 @@ const PEOPLE: ReadonlyArray<Pick<PublicPlayer, "id" | "name" | "color">> = [
   { id: "p4", name: "Tom", color: "yellow" },
   { id: "p5", name: "Ida Sommer", color: "ochre" },
   { id: "p6", name: "Kai", color: "sand" },
+  { id: "p7", name: "Jo", color: "steel" },
+  { id: "p8", name: "Finn", color: "silver" },
 ];
 
 /** Wahl-Reihenfolge (ausgelost) der Beispiele. */
 function orderFor(count: PreviewPlayers): string[] {
-  return count === 2 ? ["p2", "p1"] : ["p3", "p1", "p5", "p2", "p6", "p4"];
+  if (count === 2) return ["p2", "p1"];
+  return count === 6 ? ["p3", "p1", "p5", "p2", "p6", "p4"] : ["p3", "p1", "p7", "p5", "p2", "p8", "p6", "p4"];
 }
 
 const K = 3;
@@ -252,11 +255,14 @@ function question(
 }
 
 function answeredFor(count: PreviewPlayers): string[] {
-  return count === 2 ? ["p2"] : ["p2", "p4", "p6"];
+  if (count === 2) return ["p2"];
+  return count === 6 ? ["p2", "p4", "p6"] : ["p2", "p4", "p6", "p7"];
 }
 
 function picksFor(count: PreviewPlayers, own: AnswerIndex | null): Record<string, AnswerIndex | null> {
-  return count === 2 ? { p1: own, p2: 1 } : { p1: own, p2: 1, p3: 0, p4: 1, p5: null, p6: 3 };
+  if (count === 2) return { p1: own, p2: 1 };
+  const six: Record<string, AnswerIndex | null> = { p1: own, p2: 1, p3: 0, p4: 1, p5: null, p6: 3 };
+  return count === 6 ? six : { ...six, p7: 3, p8: 2 };
 }
 
 // --- Szenen --------------------------------------------------------------------------------------
@@ -511,6 +517,84 @@ function withConnection(scene: PreviewScene, connectionMs: number): PreviewScene
   return scene.kind === "game" ? { ...scene, connectionMs } : scene;
 }
 
+// --- Host-Modi (ADR-045/049): Frage ohne Countdown, Auflösung und Zug-Ergebnis warten auf den Host -------------
+
+/** „Zeit pro Frage: Host“ und „Weiter: Host“ nach Frage, Kategorie und Zwischenstand. */
+function hostModeSettings(): PublicLobbyState["settings"] {
+  return {
+    ...DEFAULT_LOBBY_SETTINGS,
+    rounds: ROUNDS,
+    questionsPerCategory: K,
+    answerSec: MANUAL_ADVANCE,
+    afterQuestionSec: MANUAL_ADVANCE,
+    afterTurnSec: MANUAL_ADVANCE,
+    afterRoundSec: MANUAL_ADVANCE,
+  };
+}
+
+/** Szene aus Sicht der Person `selfId` (Host ist immer p1 „Mia“). */
+function asPerson(scene: PreviewScene, selfId: string): PreviewScene {
+  return scene.kind === "game" ? { ...scene, self: self(selfId) } : scene;
+}
+
+/** Längste Frage ohne Countdown (ADR-049): Der Host löst per „Auflösen (x/y Antworten)“ auf. */
+function untimedQuestionScene(ctx: PreviewContext): PreviewScene {
+  const startsAt = ctx.now - 6_000;
+  const board = makeBoard(ctx.count, 0, 1);
+  const questionState = {
+    ...question(LONG, 2, startsAt, answeredFor(ctx.count)),
+    deadline: startsAt + MANUAL_ANSWER_CAP_MS,
+  };
+  return {
+    kind: "game",
+    lobby: base(ctx, {
+      phase: "question",
+      phaseStartedAt: startsAt - 1_500,
+      phaseEndsAt: questionState.deadline,
+      settings: hostModeSettings(),
+      order: orderFor(ctx.count),
+      progress: progress(ctx, 1, 2),
+      turn: turnFor(LONG),
+      question: questionState,
+      board,
+      players: players(ctx.count, board),
+    }),
+    self: self("p1"),
+  };
+}
+
+/** Auflösung der längsten Frage, die auf „Weiter“ des Hosts wartet (ADR-045) – Avatare auch an Antwort D. */
+function waitingRevealScene(ctx: PreviewContext): PreviewScene {
+  const phaseStartedAt = ctx.now - 2_000;
+  const board = makeBoard(ctx.count, 0, 1);
+  return {
+    kind: "game",
+    lobby: base(ctx, {
+      phase: "reveal",
+      phaseStartedAt,
+      phaseEndsAt: null,
+      settings: hostModeSettings(),
+      order: orderFor(ctx.count),
+      progress: progress(ctx, 1, 2),
+      turn: turnFor(LONG),
+      question: question(LONG, 2, phaseStartedAt - 12_000, [], { ...picksFor(ctx.count, null), p2: 3 }),
+      board,
+      players: players(ctx.count, board),
+    }),
+    self: self("p1"),
+  };
+}
+
+/** Zug-Ergebnis, das auf „Weiter“ des Hosts wartet (ADR-045). */
+function waitingTurnSummaryScene(ctx: PreviewContext): PreviewScene {
+  const scene = turnSummaryScene(ctx);
+  if (scene.kind !== "game") return scene;
+  return {
+    ...scene,
+    lobby: { ...scene.lobby, phaseStartedAt: ctx.now - 2_000, phaseEndsAt: null, settings: hostModeSettings() },
+  };
+}
+
 // --- Registry --------------------------------------------------------------------------------------
 
 export interface PreviewDefinition {
@@ -559,6 +643,28 @@ export const PREVIEW_VIEWS = {
   "answer-wrong": { title: "Auflösung: falsch", byPlayers: true, build: (ctx) => answerScene(ctx, 2) },
   "answer-timeout": { title: "Auflösung: Zeit abgelaufen", byPlayers: false, build: (ctx) => answerScene(ctx, null) },
   "turn-summary": { title: "Zug-Ergebnis", byPlayers: true, build: turnSummaryScene },
+  "question-host": {
+    title: "Frage ohne Countdown (Host löst auf)",
+    byPlayers: true,
+    build: untimedQuestionScene,
+  },
+  "question-host-guest": {
+    title: "Frage ohne Countdown (Gast)",
+    byPlayers: true,
+    build: (ctx) => asPerson(untimedQuestionScene(ctx), "p2"),
+  },
+  "answer-host": { title: "Auflösung wartet (Host: Weiter)", byPlayers: true, build: waitingRevealScene },
+  "answer-host-guest": {
+    title: "Auflösung wartet (Gast: Warte auf Mia …)",
+    byPlayers: true,
+    build: (ctx) => asPerson(waitingRevealScene(ctx), "p2"),
+  },
+  "turn-summary-host": { title: "Zug-Ergebnis wartet (Host)", byPlayers: true, build: waitingTurnSummaryScene },
+  "turn-summary-host-guest": {
+    title: "Zug-Ergebnis wartet (Gast)",
+    byPlayers: true,
+    build: (ctx) => asPerson(waitingTurnSummaryScene(ctx), "p2"),
+  },
   "round-board": { title: "Rundentafel", byPlayers: true, build: roundBoardScene },
   "game-over": { title: "Spielende: gewonnen", byPlayers: true, build: (ctx) => gameOverScene(ctx, "won") },
   "game-over-lost": { title: "Spielende: verloren", byPlayers: true, build: (ctx) => gameOverScene(ctx, "lost") },

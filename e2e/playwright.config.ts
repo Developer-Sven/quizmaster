@@ -17,7 +17,7 @@ import { defineConfig, devices } from "@playwright/test";
  * Env: `E2E_WEB_PORT` / `E2E_REALTIME_PORT` (Standard 3200/4200), `E2E_NORMAL_WEB_PORT` /
  * `E2E_NORMAL_REALTIME_PORT` (Standard jeweils +1), `E2E_WORKERS` (1–2, Standard 2), `E2E_OUTPUT_DIR`,
  * `E2E_REUSE_STACK=1` (laufende Stacks mit denselben Ports nutzen), `E2E_NO_BUILD=1` (vorhandene Builds
- * nutzen), `E2E_SCREENSHOT_DIR` (Ablage der Phasen-Screenshots, Standard lokal `docs/screenshots/w3`).
+ * nutzen), `E2E_SCREENSHOT_DIR` (Ablage der Phasen-Screenshots, Standard lokal `docs/screenshots/e2e`).
  */
 const repoRoot = resolve(import.meta.dirname, "..");
 const webPort = Number(process.env.E2E_WEB_PORT ?? 3200);

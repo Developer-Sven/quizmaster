@@ -29,10 +29,10 @@ export interface CategoryRevealOverlayProps {
 const REVEAL = CHOREOGRAPHY.categoryReveal;
 
 /**
- * Kategorie-Reveal (Vorlauf der ersten Frage eines Zuges, 2 s, docs/09 §7.3): Die gewählte Kachel fliegt
- * in den Kategoriestreifen (Shared-Layout per FLIP, CategoryStrip); in der Bühnenmitte skaliert die
- * Reveal-Kachel 96 × 96 in Kategoriefarbe von 0,8 auf 1 (320 ms emphasized), darunter Name (`h2`) und
- * „3 Fragen · gewählt von Mia“ (`label`). Nach 80 % des Vorlaufs (1.600 von 2.000 ms) blendet das Overlay
+ * Kategorie-Reveal (Vorlauf der ersten Frage eines Zuges, 3 s, docs/09 §7.3): Die gewählte Kachel fliegt
+ * in den Kategoriestreifen (Shared-Layout per FLIP, CategoryStrip, 480 ms); in der Bühnenmitte skaliert die
+ * Reveal-Kachel 96 × 96 in Kategoriefarbe von 0,8 auf 1 (480 ms emphasized), darunter Name (`h2`) und
+ * „3 Fragen · gewählt von Mia“ (`label`). Nach 80 % des Vorlaufs (2.400 von 3.000 ms) blendet das Overlay
  * aus, die Frage erscheint ab `startsAt`.
  */
 export function CategoryRevealOverlay({

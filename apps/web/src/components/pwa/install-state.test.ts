@@ -83,6 +83,13 @@ describe("installMethod auf dem Handy (ADR-054)", () => {
     expect(installSteps("ios", "safari").map((step) => step.icon)).toEqual(["share", "add", null]);
     expect(installSteps("android", "chrome").map((step) => step.icon)).toEqual(["menu", "add", null]);
   });
+
+  it("Samsung Internet: Menü-Schritt ohne Symbol – sein Menü ist kein ⋮, und Zeichen ersetzen keine Icons im Text", () => {
+    const steps = installSteps("android", "samsung");
+    expect(steps.map((step) => step.icon)).toEqual([null, "add", null]);
+    expect(steps[0]?.text).toBe("Öffne das Menü des Browsers (unten rechts).");
+    expect(steps[0]?.text).not.toMatch(/[≡⋮]/);
+  });
 });
 
 describe("Plattform-Erkennung", () => {

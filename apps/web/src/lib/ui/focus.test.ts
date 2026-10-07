@@ -8,7 +8,7 @@ describe("focusTitleOnViewChange (Sheet-Unteransichten)", () => {
   });
 
   it("zieht den Fokus beim Schließen nicht zurück ins ausblendende Sheet", () => {
-    // /dev/ui und W2-Aufrufer setzen `view` zusammen mit `open={false}` zurück – useModalLayer hat den
+    // /dev/ui und die Sheets der Lobby setzen `view` zusammen mit `open={false}` zurück – useModalLayer hat den
     // Fokus da schon an den Auslöser gegeben; der Titel verschwindet nach der Exit-Animation (Fokus auf body).
     expect(focusTitleOnViewChange("settings", undefined, false)).toBe(false);
     expect(focusTitleOnViewChange("report", "review", false)).toBe(false);

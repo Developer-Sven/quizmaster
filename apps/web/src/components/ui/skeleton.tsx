@@ -14,8 +14,8 @@ const shapeClasses: Record<SkeletonShape, string> = {
   tile: "h-22 w-full rounded-lg",
   /** Karte (z. B. Fragekarte) */
   card: "h-40 w-full rounded-xl",
-  /** Avatar 40 */
-  avatar: "size-10 rounded-full",
+  /** Avatar 40 – schrumpft neben einer Textzeile nicht (sonst oval) */
+  avatar: "size-10 shrink-0 rounded-full",
 };
 
 export interface SkeletonProps {

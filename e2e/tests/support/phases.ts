@@ -67,6 +67,23 @@ export async function pickFirstCategory(player: Player): Promise<void> {
   await expect(pickButtons(player)).toHaveCount(0);
 }
 
+/**
+ * Kategoriewahl mit Dev-Bots, bis die erste Person die Frage sieht: Ist eine der Personen dran, wählt sie die erste
+ * Kategorie; sonst wählt ein Bot selbst. Niemand antwortet dabei.
+ */
+export async function pickUntilQuestion(players: readonly Player[], timeoutMs = 60_000): Promise<void> {
+  const first = players[0];
+  if (!first) throw new Error("keine Personen");
+  const deadline = Date.now() + timeoutMs;
+  while ((await stageOverlay(first.page, "question").count()) === 0) {
+    if (Date.now() > deadline) throw new Error("Frage nach der Kategoriewahl nicht erreicht");
+    for (const player of players) {
+      if ((await pickButtons(player).count()) > 0) await pickFirstCategory(player);
+    }
+    await first.page.waitForTimeout(250);
+  }
+}
+
 /** Bedienbare Antworten der laufenden Frage. */
 export function openAnswers(player: Player): Locator {
   return stageOverlay(player.page, "question").getByRole("button", { disabled: false });

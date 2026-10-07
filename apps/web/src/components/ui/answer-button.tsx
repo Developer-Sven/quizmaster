@@ -15,8 +15,8 @@ import { Avatar } from "./avatar";
  * - `dimmed`: übrige Antworten nach dem Einloggen (50 %)
  * - `correct` / `wrong`: Auflösung (Rahmen + Tönung + `circle-check` / `circle-x`)
  * - `disabled`: nicht bedienbar (z. B. Zuschauende)
+ * - `view`: nur anzeigen, voll lesbar, nicht bedienbar – das Gerät des anzeigenden Hosts (ADR-046)
  */
-/** `view`: nur anzeigen, voll lesbar, nicht bedienbar – das Gerät des anzeigenden Hosts (ADR-046). */
 export type AnswerState = "idle" | "locked" | "dimmed" | "correct" | "wrong" | "disabled" | "view";
 
 export interface AnswerPicker {
@@ -36,7 +36,8 @@ export interface AnswerButtonProps extends ForcedStateProps {
   /**
    * Personen, die diese Antwort gewählt haben (Auflösung): Avatare 24 gleiten gestaffelt an den rechten Rand,
    * max. 4 sichtbar, danach „+N“. Sie ragen 12 px unter die Karte – Antworten deshalb mit mindestens 16 px Abstand
-   * stapeln.
+   * stapeln; unter der letzten Antwort hält der Rahmen der Bühne in Frage und Auflösung gleich viel Platz frei
+   * (16 px Innenabstand, overlay-frame.tsx).
    */
   pickedBy?: readonly AnswerPicker[];
   /**
@@ -97,6 +98,9 @@ function StateIcon({ state }: { state: AnswerState }) {
  * - **Fester Icon-Slot rechts (20 × 20) in allen Zuständen** – leer bei idle/dimmed/disabled. Der Text hat so in
  *   jedem Zustand dieselbe Breite und bricht beim Einloggen und in der Auflösung nicht neu um (gleiche
  *   Zeilenzahl, nichts springt). Lange Komposita trennt der Browser (`hyphens: auto`, Sprache `de` aus `<html>`).
+ * - **Zwei Zeilen = Mindesthöhe:** 6 px Innenabstand oben und unten – eine zweizeilige Antwort ist genau 64 hoch
+ *   wie eine einzeilige (2 × 24 + 2 × 6 + 2 × 2 Rahmen). So passen bei 360 × 740 die längste Frage (140 Zeichen)
+ *   und vier Antworten mit 40 Zeichen samt der Avatare an Antwort D auf die Bühne, ohne dass sie scrollt.
  * - **Buchstabe im zugänglichen Namen** (WCAG 2.5.3 „Label in Name“): Sichtbar steht „C Canberra“, der Name
  *   beginnt deshalb mit dem Buchstaben – Sprachsteuerung trifft die Antwort auch mit „C“.
  * - **Nicht bedienbar = nicht im Tab-Pfad:** Außer `idle` sind alle Zustände `aria-disabled` und `tabIndex=-1`.
@@ -127,7 +131,7 @@ export function AnswerButton({
       aria-keyshortcuts={`${index + 1} ${letter}`}
       onClick={interactive ? onSelect : undefined}
       className={cx(
-        "relative flex min-h-16 w-full items-center gap-3 rounded-lg border-2 px-3 py-2 text-left select-none touch-manipulation transition-control is-focus:outline-2 is-focus:outline-offset-2 is-focus:outline-primary",
+        "relative flex min-h-16 w-full items-center gap-3 rounded-lg border-2 px-3 py-1.5 text-left select-none touch-manipulation transition-control is-focus:outline-2 is-focus:outline-offset-2 is-focus:outline-primary",
         stateClasses[state],
         shake && state === "wrong" && "motion-safe:animate-shake",
       )}

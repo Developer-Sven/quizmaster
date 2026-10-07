@@ -23,11 +23,11 @@ export interface IntroOverlayProps {
 const INTRO = CHOREOGRAPHY.intro;
 
 /**
- * Intro „Anpfiff“ (Phase `intro`, 4 s, docs/09 §7.1): 0–480 ms Scrim, dann fahren die Avatare 88 px
- * gestaffelt ein (60 ms, von unten 24 px, emphasized); 2 Personen links/rechts mit „VS“ (display, orange),
- * 3–8 im Raster plus Wahl-Reihenfolge. Bei 3.200 ms schiebt sich die Titelkarte „Runde 1“ hoch, bei 3.700 ms
- * blendet das Overlay aus. Alles relativ zu `phaseStartedAt` – nach einem Reconnect geht es an der richtigen
- * Stelle weiter (bereits gelaufene Bewegungen stehen sofort im Endzustand).
+ * Intro „Anpfiff“ (Phase `intro`, 5 s, docs/09 §7.1, Spieltempo ADR-044): 0–480 ms Scrim, dann fahren die
+ * Avatare 88 px gestaffelt ein (150 ms Abstand, je 480 ms, von unten 24 px, emphasized); 2 Personen links/rechts
+ * mit „VS“ (display, orange), 3–8 im Raster plus Wahl-Reihenfolge. Bei 3.500 ms schiebt sich die Titelkarte
+ * „Runde 1“ hoch, bei 4.600 ms blendet das Overlay aus. Alles relativ zu `phaseStartedAt` – nach einem Reconnect
+ * geht es an der richtigen Stelle weiter (bereits gelaufene Bewegungen stehen sofort im Endzustand).
  *
  * Die Personen blenden für die Titelkarte nur aus und behalten ihren Platz (unsichtbar, für Screenreader
  * verborgen): Würden sie entfernt, schrumpfte die mittig ausgerichtete Rasterzelle und die Titelkarte spränge
@@ -92,7 +92,7 @@ export function IntroOverlay({ players, phaseStartedAt, round }: IntroOverlayPro
                   }
                 >
                   <Avatar name={player.name} color={player.color} size={88} />
-                  <span className="max-w-28 truncate text-label text-text">{player.name}</span>
+                  <span className="max-w-28 text-center text-label text-text wrap-break-word">{player.name}</span>
                 </m.div>
               ))}
               <m.span {...afterAvatars} className="order-2 text-display text-primary">

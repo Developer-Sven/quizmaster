@@ -93,7 +93,7 @@ export function TurnstileSlot({ solver, variant = "inline", onRetry, rejected = 
     <div
       data-testid="turnstile"
       data-state={status}
-      // Muss über dem modalen Verbindungs-Overlay bedienbar bleiben (Ausnahme vom `inert`-Hintergrund, s. Bericht W4).
+      // Muss über dem modalen Verbindungs-Overlay bedienbar bleiben (bewusste Ausnahme vom `inert`-Hintergrund).
       data-modal-exempt=""
       className={cx("fixed inset-x-0 bottom-0 z-connection px-gutter pb-safe", !visible && "pointer-events-none")}
     >

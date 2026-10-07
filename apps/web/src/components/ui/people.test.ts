@@ -73,7 +73,39 @@ describe("PlayerRow", () => {
   });
 });
 
+describe("PlayerRow bei großer Schrift (docs/09 §12, WCAG 1.4.4)", () => {
+  it("schneidet den Namen nie ab – er bricht um und behält neben dem Avatar mindestens 10 rem", () => {
+    const html = renderToStaticMarkup(
+      h(PlayerRow, { name: "Ben Sommer", color: "sky", isHost: true, onKick: () => {} }),
+    );
+    expect(html).not.toMatch(/truncate|line-clamp|whitespace-nowrap/);
+    expect(html).toMatch(/<span class="min-w-0 text-body wrap-break-word text-text">Ben Sommer<\/span>/);
+    // Avatar und Name als Gruppe mit 10 rem Grundbreite; die Zeile darf umbrechen.
+    expect(html).toMatch(/^<div class="[^"]*\bflex-wrap\b/);
+    expect(html).toMatch(/<div class="[^"]*\bbasis-40\b[^"]*\bgrow\b|<div class="[^"]*\bgrow\b[^"]*\bbasis-40\b/);
+  });
+
+  it("„Host“ und die Tasten rücken als Gruppe rechtsbündig in die nächste Zeile – ohne Tasten keine leere Gruppe", () => {
+    const html = renderToStaticMarkup(h(PlayerRow, { name: "Lea", color: "cyan", isHost: true, onKick: () => {} }));
+    const group = /<div class="ml-auto flex shrink-0 items-center gap-3">(.*)<\/div><\/div>$/.exec(html)?.[1] ?? "";
+    expect(group).toContain(">Host<");
+    expect(group).toContain('aria-label="Lea entfernen"');
+    const plain = renderToStaticMarkup(h(PlayerRow, { name: "Tom", color: "yellow" }));
+    expect(plain).not.toContain("ml-auto");
+  });
+});
+
 describe("RankingList", () => {
+  it("schneidet Namen bei großer Schrift nicht ab (WCAG 1.4.4)", () => {
+    const html = renderToStaticMarkup(
+      h(RankingList, {
+        entries: [{ playerId: "a", place: 1, name: "Ben Sommer", color: "sky", score: 3, status: "active" }],
+      }),
+    );
+    expect(html).not.toMatch(/truncate|line-clamp|whitespace-nowrap/);
+    expect(html).toContain("wrap-break-word");
+  });
+
   it("listet Platz, Name und Punkte; Aufgegebene mit Hinweis", () => {
     const html = renderToStaticMarkup(
       h(RankingList, {

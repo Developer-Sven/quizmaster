@@ -105,6 +105,13 @@ describe("Texte (docs/09 §11)", () => {
       cancel: "Weiterspielen",
     });
     expect(de.dialogs.leaveLobby).toEqual({ title: "Lobby verlassen?", confirm: "Verlassen", cancel: "Bleiben" });
+    // ADR-051, gekürzt auf 2 Zeilen bei 360 px (Dialog: max. 2 Zeilen Text, docs/09 §5)
+    expect(de.dialogs.endGame).toEqual({
+      title: "Spiel für alle beenden?",
+      description: "Alle sehen den aktuellen Stand, danach geht es zurück in die Lobby.",
+      confirm: "Beenden",
+      cancel: "Weiterspielen",
+    });
     expect(de.connection.lost).toBe("Verbindung unterbrochen");
     expect([de.pwa.install, de.pwa.updateAvailable, de.pwa.update, de.pwa.offline]).toEqual([
       "Als App installieren",

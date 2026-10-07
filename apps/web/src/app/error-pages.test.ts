@@ -9,8 +9,8 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 /**
  * Die Fehler-Chunks (app/error.tsx, app/global-error.tsx samt ErrorView) laden mit dem Layout auf jeder Seite
  * (docs/07 Initial-JS). Sie bleiben schlank: schlichte `<button>`/`<a>` mit den Button-Klassen statt
- * `Button`/`ButtonLink` – deren Modul zieht `next/link` und weitere Icons in jeden Chunk (Befund W3: −13 KB
- * gzip auf `/`).
+ * `Button`/`ButtonLink` – deren Modul zieht `next/link` und weitere Icons in jeden Chunk (Messung im UI-Review:
+ * −13 KB gzip auf `/`).
  */
 describe("Fehlerseiten bleiben schlank (Initial-JS jeder Seite)", () => {
   it("importieren weder das Button-Modul noch next/link", () => {

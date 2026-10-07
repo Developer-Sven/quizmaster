@@ -43,6 +43,11 @@ export function stepOption(options: readonly number[], value: number, direction:
 /**
  * Stepper (docs/09 §5): Label links, rechts `minus` · Wert (`label`, tabular) · `plus`
  * (IconButtons 44). An den Grenzen ist die jeweilige Taste deaktiviert, bleibt aber fokussierbar.
+ *
+ * Große Schrift (docs/09 §12, WCAG 1.4.4): Das Label behält mindestens 8 rem und bricht um; reicht die Breite nicht für
+ * Label und Tasten, rücken die Tasten als Gruppe rechtsbündig in die nächste Zeile – nie überdeckt eine Taste das Label.
+ * In einem schmalen Stepper (unter 20 rem, also bei großer Schrift) rücken die Tasten enger zusammen, damit die Gruppe
+ * auch bei 200 % auf 360 px passt.
  */
 export function Stepper(props: StepperProps) {
   const { label, value, onChange, format, disabled = false, changedNote } = props;
@@ -64,48 +69,52 @@ export function Stepper(props: StepperProps) {
     <fieldset
       aria-labelledby={labelId}
       aria-describedby={changedNote === undefined ? undefined : noteId}
-      className="flex min-h-14 min-w-0 items-center gap-2"
+      className="@container min-w-0"
     >
-      {changedNote === undefined ? (
-        <span id={labelId} className="min-w-0 flex-1 text-body text-text">
-          {label}
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span id={labelId} className="text-body text-text">
+      <div className="flex min-h-14 flex-wrap items-center gap-x-2">
+        {changedNote === undefined ? (
+          <span id={labelId} className="min-w-32 flex-1 text-body text-text wrap-break-word">
             {label}
           </span>
-          <span id={noteId} className="text-caption text-text-2" data-testid="stepper-note">
-            {changedNote}
+        ) : (
+          <span className="flex min-w-32 flex-1 flex-col wrap-break-word">
+            <span id={labelId} className="text-body text-text">
+              {label}
+            </span>
+            <span id={noteId} className="text-caption text-text-2" data-testid="stepper-note">
+              {changedNote}
+            </span>
           </span>
-        </span>
-      )}
-      <IconButton
-        icon={MinusIcon}
-        label={de.settings.decrease(label)}
-        disabled={disabled || lower === null}
-        onClick={() => {
-          if (lower !== null) onChange(lower);
-        }}
-      />
-      {/* Gleiche Breite für Zahlen und „5 s“/„Host“: Die Tasten untereinanderliegender Stepper fluchten. */}
-      <output
-        aria-live="polite"
-        className={cx(
-          "w-12 text-center text-label tabular-nums",
-          changedNote === undefined ? "text-text" : "text-primary",
         )}
-      >
-        {format === undefined ? value : format(value)}
-      </output>
-      <IconButton
-        icon={PlusIcon}
-        label={de.settings.increase(label)}
-        disabled={disabled || higher === null}
-        onClick={() => {
-          if (higher !== null) onChange(higher);
-        }}
-      />
+        <span className="ml-auto flex shrink-0 items-center gap-2 @max-xs:gap-1" data-testid="stepper-controls">
+          <IconButton
+            icon={MinusIcon}
+            label={de.settings.decrease(label)}
+            disabled={disabled || lower === null}
+            onClick={() => {
+              if (lower !== null) onChange(lower);
+            }}
+          />
+          {/* Gleiche Breite für Zahlen und „5 s“/„Host“: Die Tasten untereinanderliegender Stepper fluchten. */}
+          <output
+            aria-live="polite"
+            className={cx(
+              "w-12 shrink-0 text-center text-label tabular-nums",
+              changedNote === undefined ? "text-text" : "text-primary",
+            )}
+          >
+            {format === undefined ? value : format(value)}
+          </output>
+          <IconButton
+            icon={PlusIcon}
+            label={de.settings.increase(label)}
+            disabled={disabled || higher === null}
+            onClick={() => {
+              if (higher !== null) onChange(higher);
+            }}
+          />
+        </span>
+      </div>
     </fieldset>
   );
 }

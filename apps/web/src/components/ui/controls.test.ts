@@ -227,6 +227,31 @@ describe("Stepper", () => {
   });
 });
 
+describe("Stepper bei großer Schrift (docs/09 §12, WCAG 1.4.4)", () => {
+  it("Label mit Mindestbreite bricht um; die Tasten rücken als Gruppe rechtsbündig in die nächste Zeile", () => {
+    const html = renderToStaticMarkup(
+      h(Stepper, { label: "Fragen pro Kategorie", value: 3, min: 1, max: 10, onChange: noop }),
+    );
+    // Zeile umbruchfähig, statt das Label auf Breite 0 zu drücken (Text lief unter die Minus-Taste).
+    expect(html).toMatch(/<div class="[^"]*\bflex-wrap\b[^"]*">/);
+    expect(html).toMatch(
+      /<span id="[^"]+" class="min-w-32 flex-1 text-body text-text wrap-break-word">Fragen pro Kategorie<\/span>/,
+    );
+    expect(html).not.toMatch(/\bmin-w-0 flex-1 text-body\b/);
+    const controls = /<span class="([^"]*)" data-testid="stepper-controls">/.exec(html)?.[1]?.split(" ") ?? [];
+    expect(controls).toEqual(expect.arrayContaining(["ml-auto", "shrink-0", "gap-2", "@max-xs:gap-1"]));
+    // Der Stepper ist der Bezugsrahmen der Container-Abfrage.
+    expect(html).toMatch(/^<fieldset[^>]*class="@container min-w-0"/);
+  });
+
+  it("auch mit „Aktuell: …“ (Vorschläge) behält das Label seine Mindestbreite", () => {
+    const html = renderToStaticMarkup(
+      h(Stepper, { label: "Runden", value: 5, min: 1, max: 10, onChange: noop, changedNote: "Aktuell: 3" }),
+    );
+    expect(html).toContain('<span class="flex min-w-32 flex-1 flex-col wrap-break-word">');
+  });
+});
+
 describe("ListRow", () => {
   it("ist als Button 56 hoch mit Trennlinie und zeigt ausgewählt ein check", () => {
     const html = renderHtml(ListRow, { onClick: noop, selected: true }, "Falsch");

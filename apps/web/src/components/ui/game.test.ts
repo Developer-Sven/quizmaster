@@ -43,10 +43,23 @@ describe("CategoryTile und CategoryBadge", () => {
   it("ist 88 hoch, bedienbar und zeigt die Auswahl mit 2 px primary", () => {
     const html = renderToStaticMarkup(h(CategoryTile, { category: books, selected: true, onSelect: () => {} }));
     expect(html).toMatch(/^<button[^>]*aria-pressed="true"/);
-    expect(html).toContain("h-22");
+    expect(html).toContain("min-h-22");
     expect(html).toContain("border-2");
     expect(html).toContain("border-primary");
     expect(html).toContain("text-title");
+  });
+
+  it("schneidet den Namen bei großer Schrift nicht ab: trennt bzw. bricht um, die Kachel wächst (WCAG 1.4.4)", () => {
+    const html = renderToStaticMarkup(h(CategoryTile, { category: books, onSelect: () => {} }));
+    expect(html).not.toMatch(/line-clamp|truncate|(?<![\w-])h-22\b/);
+    expect(html).toMatch(
+      /<span class="[^"]*\bhyphens-auto\b[^"]*\bwrap-break-word\b[^"]*">Bücher &amp; Wörter<\/span>/,
+    );
+    // feste Höhe nur als Mindestmaß: bei 100 % bleiben zwei Zeilen `title` (52 px) samt Innenabstand in 88 px
+    expect(html).toMatch(/class="[^"]*\bmin-h-22\b[^"]*\bpy-3\b/);
+    // schmale Kachel (große Schrift): Icon-Kachel über dem Namen, der Name bekommt die ganze Breite
+    expect(html).toMatch(/^<button[^>]*class="@container /);
+    expect(html).toMatch(/<span class="[^"]* @max-2xs:flex-col [^"]*">/);
   });
 
   it("ist für Zuschauende nicht bedienbar", () => {
@@ -62,6 +75,15 @@ describe("CategoryTile und CategoryBadge", () => {
     expect(html).toContain('role="img" aria-label="Bücher &amp; Wörter"');
     expect(html).toContain("size-8");
     expect(renderToStaticMarkup(h(CategoryBadge, { category: books }))).toContain("h-8");
+  });
+
+  it("kompakt neben dem sichtbaren Namen: dekorativ, damit der Name nicht doppelt vorgelesen wird", () => {
+    const html = renderToStaticMarkup(h(CategoryBadge, { category: books, compact: true, decorative: true }));
+    expect(html).toMatch(/^<span aria-hidden="true" class="[^"]*size-8/);
+    expect(html).not.toContain("role=");
+    expect(html).not.toContain("aria-label");
+    expect(html).not.toContain("title=");
+    expect(html).toContain("lucide-book-open");
   });
 });
 

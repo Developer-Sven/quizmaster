@@ -145,7 +145,6 @@
   --animate-spin: spin 1.2s linear infinite; /* loader-circle */
   --animate-pulse: pulse 1.2s var(--ease-standard) infinite; /* Skeleton: 1,2-s-Deckkraft-Puls */
   --animate-pop: pop var(--duration-fast) var(--ease-standard); /* „geantwortet“-Ring */
-  --animate-crown-pop: crown-pop var(--duration-slow) var(--ease-emphasized); /* Krone am Spielende */
   --animate-shake: shake 160ms var(--ease-standard); /* Ruck bei eigener falscher Antwort */
 
   @keyframes spin {
@@ -161,17 +160,6 @@
   @keyframes pop {
     50% {
       transform: scale(1.08);
-    }
-  }
-  @keyframes crown-pop {
-    0% {
-      transform: scale(0);
-    }
-    60% {
-      transform: scale(1.15);
-    }
-    100% {
-      transform: scale(1);
     }
   }
   /* x 0 → 4 → −4 → 0, zweimal */

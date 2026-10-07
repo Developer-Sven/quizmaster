@@ -1,5 +1,5 @@
 /**
- * Flaggenbild einer Bildfrage früh laden (Fairness, W4-Review): Die Frage steht ab Beginn der Phase `question` im
+ * Flaggenbild einer Bildfrage früh laden (Fairness): Die Frage steht ab Beginn der Phase `question` im
  * Zustand – mit 2 s (erste Frage im Zug) bzw. 800 ms (weitere) Vorlauf vor `startsAt` (docs/05 §Phasen). Ohne
  * Vorladen fordert erst die Fragekarte beim Einhängen zu `startsAt` das SVG an; große Flaggen (bis ~50 KB gzip)
  * erscheinen dann auf langsamen Verbindungen sichtbar nach dem Start des 20-s-Timers. Die Flagge ist Teil der
