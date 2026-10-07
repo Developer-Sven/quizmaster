@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { StatusBanners } from "@/components/app/status-banners";
 import { useLobbyActions } from "@/components/lobby/use-lobby-actions";
+import { Banner } from "@/components/ui/banner";
 import { isRunningPhase } from "@/lib/client/game-view";
 import { getSoundManager } from "@/lib/client/sound";
 import { writeStoredSoundOn } from "@/lib/client/storage";
@@ -13,6 +14,7 @@ import {
   gameActions,
   selectCategories,
   selectLobby,
+  selectNetworkStalled,
   selectPendingAnswer,
   selectPendingPick,
   selectSelf,
@@ -41,6 +43,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
   const pendingAnswer = useGameStore(selectPendingAnswer);
   const pendingPick = useGameStore(selectPendingPick);
   const syncGeneration = useGameStore(selectSyncGeneration);
+  const networkStalled = useGameStore(selectNetworkStalled);
   const soundOn = useGameStore(selectSoundOn);
   const actions = useLobbyActions(realtimeUrl);
   const [busy, setBusy] = useState<{ leave?: boolean; resign?: boolean; end?: boolean }>({});
@@ -124,7 +127,7 @@ export function LiveGame({ realtimeUrl }: LiveGameProps) {
       syncGeneration={syncGeneration}
       soundOn={soundOn}
       busy={{ ...busy, continue: continuing === lobby.phaseStartedAt }}
-      banner={lobby.phase === "game_over" ? <StatusBanners /> : null}
+      banner={lobby.phase === "game_over" ? <StatusBanners /> : networkStalled ? <Banner tone="network" /> : null}
       handlers={{
         onPick: (categoryId) => void pick(categoryId),
         onAnswer: (questionId, choice) => void answer(questionId, choice),

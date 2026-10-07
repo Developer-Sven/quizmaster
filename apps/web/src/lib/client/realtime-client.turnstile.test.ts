@@ -29,6 +29,20 @@ class FakeSocket {
     return { ok: false, error: { code: "INTERNAL", message: "x" } };
   };
   private readonly handlers = new Map<string, Handler[]>();
+  private readonly managerHandlers = new Map<string, Handler[]>();
+  /** Manager (`socket.io`): meldet den Ping vom Server (ADR-057). */
+  readonly io = {
+    on: (event: string, handler: Handler) => {
+      this.managerHandlers.set(event, [...(this.managerHandlers.get(event) ?? []), handler]);
+    },
+    off: (event: string, handler: Handler) => {
+      this.managerHandlers.set(
+        event,
+        (this.managerHandlers.get(event) ?? []).filter((entry) => entry !== handler),
+      );
+    },
+  };
+  private readonly anyHandlers: Handler[] = [];
   private readonly auth: (send: (data: object) => void) => void;
 
   constructor(options: { auth: (send: (data: object) => void) => void }) {
@@ -51,6 +65,16 @@ class FakeSocket {
     this.connected = false;
     if (wasConnected) this.fire("disconnect", "io client disconnect");
     return this;
+  }
+
+  onAny(handler: Handler): this {
+    this.anyHandlers.push(handler);
+    return this;
+  }
+
+  /** Ping vom Server (Manager-Ereignis). */
+  ping(): void {
+    for (const handler of this.managerHandlers.get("ping") ?? []) handler();
   }
 
   on(event: string, handler: Handler): this {

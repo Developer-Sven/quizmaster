@@ -205,6 +205,23 @@ export interface QuestionsReadyCommand {
   questions: readonly QuestionInput[];
 }
 
+/**
+ * Shell: Von keiner aktiven Person der Lobby kommt mehr etwas an (Netzaussetzer, ADR-057) – Spielzeit anhalten.
+ */
+export interface FreezeCommand {
+  type: "FREEZE";
+  /**
+   * Letztes Lebenszeichen der Mitspielenden (Serverzeit): Die Stille fällt erst nach `SILENCE_MS` auf – eingefroren
+   * wird rückwirkend ab hier (höchstens bis zum Beginn der laufenden Phase), damit auch diese Sekunden zurückkommen.
+   */
+  since?: number;
+}
+
+/** Shell: Es kommt wieder etwas an – Spielzeit läuft weiter, Fristen um die Pause verschoben (ADR-057). */
+export interface ThawCommand {
+  type: "THAW";
+}
+
 /** Die Shell kann `offerCategories`/`loadQuestions` endgültig nicht erfüllen → Spiel endet mit Ergebnis. */
 export interface LoadFailedCommand {
   type: "LOAD_FAILED";
@@ -236,15 +253,30 @@ export type Command =
   | TimeoutCommand
   | OptionsReadyCommand
   | QuestionsReadyCommand
-  | LoadFailedCommand;
+  | LoadFailedCommand
+  | FreezeCommand
+  | ThawCommand;
 
 export type CommandType = Command["type"];
 
 /** Commands, die die Shell selbst erzeugt (keine Aktion einer Person, keine Aktivität). */
-export const SHELL_COMMAND_TYPES = ["TIMEOUT", "OPTIONS_READY", "QUESTIONS_READY", "LOAD_FAILED"] as const;
+export const SHELL_COMMAND_TYPES = [
+  "TIMEOUT",
+  "OPTIONS_READY",
+  "QUESTIONS_READY",
+  "LOAD_FAILED",
+  "FREEZE",
+  "THAW",
+] as const;
 
 export function isShellCommand(
   command: Command,
-): command is TimeoutCommand | OptionsReadyCommand | QuestionsReadyCommand | LoadFailedCommand {
+): command is
+  | TimeoutCommand
+  | OptionsReadyCommand
+  | QuestionsReadyCommand
+  | LoadFailedCommand
+  | FreezeCommand
+  | ThawCommand {
   return (SHELL_COMMAND_TYPES as readonly string[]).includes(command.type);
 }

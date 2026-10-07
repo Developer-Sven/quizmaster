@@ -113,6 +113,11 @@ export interface GameStoreState {
   /** Letztes Spielende dieser Lobby für die Karte „Letztes Spiel“ (ADR-038) */
   lastGame: LastGameSnapshot | null;
   /**
+   * Seit `SILENCE_MS` kein Paket vom Server, obwohl verbunden (ADR-057): Netzaussetzer – im Spiel steht dann
+   * „Verbindung hakt“ (der Server friert das Spiel ein, sobald er niemanden mehr hört).
+   */
+  stale: boolean;
+  /**
    * Regeln-Sheet offen (Lobby und Spielende, ADR-052) – liegt hier statt in der Ansicht, damit es den Wechsel
    * Spielende → Lobby übersteht; schließt beim Spielstart und beim Verlassen der Lobby.
    */
@@ -151,6 +156,7 @@ function initialState(): GameStoreState {
     updateRequired: false,
     lastGame: null,
     rulesOpen: false,
+    stale: false,
   };
 }
 
@@ -344,6 +350,11 @@ export const gameActions = {
     });
   },
 
+  /** Netzaussetzer (ADR-057): seit `SILENCE_MS` kein Paket vom Server bzw. wieder eins. */
+  setStale(stale: boolean): void {
+    if (useGameStore.getState().stale !== stale) useGameStore.setState({ stale });
+  },
+
   /** Regeln-Sheet öffnen (Lobby, Spielende – ADR-052). */
   openRules(): void {
     useGameStore.setState({ rulesOpen: true });
@@ -379,6 +390,7 @@ export const gameActions = {
   /** Verbunden: Overlay aus, Fehler vergessen; eine neue Verbindung beendet auch den Wartungshinweis. */
   connected(): void {
     useGameStore.setState((state) => ({
+      stale: false,
       connection: { status: "connected", lostAt: null, graceUntil: null, lastError: null, fatal: null },
       maintenance: state.connection.status === "connected" ? state.maintenance : false,
     }));
@@ -504,6 +516,17 @@ export const selectPendingPick = (state: GameStoreState) => state.pendingPick;
 export const selectCurrentToast = (state: GameStoreState) => state.toasts[0] ?? null;
 export const selectAnnouncement = (state: GameStoreState) => state.announcement;
 export const selectRulesOpen = (state: GameStoreState) => state.rulesOpen;
+
+/**
+ * Hinweis „Verbindung hakt“ im laufenden Spiel (ADR-057): verbunden, aber seit `SILENCE_MS` nichts vom Server –
+ * oder der Server meldet, dass er gerade niemanden hört und das Spiel eingefroren hat. Ohne Verbindung zeigt
+ * stattdessen das Verbindungs-Overlay den Stand.
+ */
+export function selectNetworkStalled(state: GameStoreState): boolean {
+  const lobby = state.lobby;
+  if (lobby === null || state.connection.status !== "connected" || !isRunningPhase(lobby.phase)) return false;
+  return state.stale || lobby.frozen;
+}
 /** Kam für die aktuelle Lobby schon ein Zustand an? Bleibt nach dem Ende (`exit`) gesetzt, bis die Lobby wechselt. */
 export const selectSawState = (state: GameStoreState) => state.lastRev !== null;
 export const selectMaintenance = (state: GameStoreState) => state.maintenance;

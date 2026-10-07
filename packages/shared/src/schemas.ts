@@ -177,6 +177,8 @@ export const publicLobbyStateSchema = z.strictObject({
   /** Bisherige Züge (nur aufgelöste Fragen). */
   board: z.array(boardRowSchema).max(MAX_TURNS),
   results: gameResultsSchema.nullable(),
+  /** Eingefroren (ADR-057): von keiner aktiven Person kommt etwas an – die Spielzeit steht. */
+  frozen: z.boolean(),
   /** Vorschläge für die Einstellungen (ADR-053) – außerhalb der Lobby leer. */
   suggestions: z.array(settingsSuggestionSchema).max(MAX_PLAYERS),
 });

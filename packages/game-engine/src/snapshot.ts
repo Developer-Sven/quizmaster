@@ -437,6 +437,8 @@ export function fromLobbySnapshot(raw: unknown, ctx: RestoreContext): RestoreRes
       bannedGuestIds: [...doc.bannedGuestIds],
       // Vorschläge (ADR-053) sind flüchtig: nach einem Neustart gibt es keine.
       suggestions: [],
+      // Eingefroren (ADR-057) ebenso – laufende Phasen beginnen nach dem Neustart ohnehin neu.
+      frozen: null,
       seq: 0,
       timers: [],
       game: game === null ? null : toGameState(game),

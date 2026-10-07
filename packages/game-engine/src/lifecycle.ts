@@ -196,6 +196,8 @@ export function normalize(state: LobbyState, tx: Tx): LobbyState {
   next = ensureEarlyReveal(next, tx);
   next = ensureHost(next, tx);
   next = pruneSuggestions(next);
+  // Eingefroren gibt es nur im laufenden Spiel (ADR-057) – Spielende oder Lobby hebt es auf.
+  if (next.frozen !== null && !isRunningPhase(next.phase)) next = { ...next, frozen: null };
   next = syncReconnectTimers(next, tx);
   next = syncHostTimer(next, tx);
   next = syncEmptyTimer(next, tx);

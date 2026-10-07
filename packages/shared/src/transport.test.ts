@@ -24,7 +24,7 @@ describe("Transport (docs/05 §Verbindung)", () => {
       path: "/socket.io",
       serveClient: false,
       maxHttpBufferSize: 8_192,
-      pingInterval: 20_000,
+      pingInterval: 5_000,
       pingTimeout: 20_000,
       connectTimeout: 10_000,
     });
@@ -45,7 +45,7 @@ describe("Session und Tickets (docs/05, docs/06)", () => {
   it("hat die Konstanten aus docs/06", () => {
     expect(SESSION_COOKIE).toMatchObject({ name: "kd_sid", maxAgeSec: 180 * 86_400, renewBelowSec: 30 * 86_400 });
     expect(REALTIME_TICKET).toEqual({ audience: "realtime", issuer: "web", algorithm: "HS256", ttlSec: 60 });
-    expect(PROTOCOL_VERSION).toBe(6);
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 
   it("validiert den Handshake und die Ticket-Claims", () => {

@@ -31,11 +31,13 @@
  */
 import type { Repositories } from "@quizmaster/db";
 import {
+  activePlayers,
   type Command,
   type Effect,
   findPlayerByGuestId,
   type GameStats,
   humanMembers,
+  isRunningPhase,
   type LobbyState,
   type ReduceResult,
   type Rng,
@@ -46,7 +48,7 @@ import {
   toPrivateState,
   toPublicState,
 } from "@quizmaster/game-engine";
-import { type ErrorCode, isProtocolError, type KickReason } from "@quizmaster/shared";
+import { type ErrorCode, isProtocolError, type KickReason, SILENCE_MS } from "@quizmaster/shared";
 import type { GameDoc } from "@quizmaster/shared/documents";
 import { createBotDriver } from "../bots/bot-driver.ts";
 import type { Logger } from "../logger.ts";
@@ -56,6 +58,7 @@ import type { AppServer, AppSocket, Clock } from "../registry/types.ts";
 import type { QuestionService } from "../services/questions.ts";
 import { type FinishQueue, finishGameInput, isAbortedGame, playedQuestionIds } from "./game-finish.ts";
 import { appendHistory, loadSeenQuestions } from "./seen-questions.ts";
+import { isLobbySilent } from "./silence.ts";
 import { createSnapshotWriter, type SnapshotWriter } from "./snapshots.ts";
 import { createTimerSet } from "./timers.ts";
 
@@ -193,6 +196,9 @@ const sleep = (ms: number) =>
     setTimeout(resolve, ms).unref();
   });
 
+/** So oft prüft jede Lobby, ob sie still ist (ADR-057). */
+const SILENCE_CHECK_INTERVAL_MS = 1_000;
+
 /** Wartet auf `promise`, höchstens aber `ms` (Fehler zählen als erledigt). */
 function waitAtMost(promise: Promise<unknown>, ms: number): Promise<void> {
   return Promise.race([promise.then(noop, noop), sleep(ms)]);
@@ -240,6 +246,92 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
 
   const hasSocket = (socket: AppSocket) => sockets.get(socket.data.guestId)?.has(socket) ?? false;
 
+  // --- Netzaussetzer (ADR-057) ------------------------------------------------------------------------------
+
+  /** Letztes Paket je Socket (auch die Antwort auf den Ping alle 5 s). */
+  const heardAt = new WeakMap<AppSocket, number>();
+  const packetListeners = new WeakMap<AppSocket, () => void>();
+
+  const lastHeardOf = (guestId: string): number | null => {
+    let latest: number | null = null;
+    for (const socket of sockets.get(guestId) ?? []) {
+      const at = heardAt.get(socket);
+      if (at !== undefined && (latest === null || at > latest)) latest = at;
+    }
+    return latest;
+  };
+
+  const activeHumanGuestIds = () =>
+    activePlayers(state)
+      .filter((player) => !player.isBot)
+      .map((player) => player.guestId);
+
+  const silent = () => isLobbySilent(activeHumanGuestIds(), lastHeardOf, deps.clock.now(), SILENCE_MS);
+
+  /** Letztes Lebenszeichen irgendeiner aktiven Person (rückwirkendes Einfrieren). */
+  const lastHeardOfActive = (): number | undefined => {
+    let latest: number | undefined;
+    for (const guestId of activeHumanGuestIds()) {
+      const heard = lastHeardOf(guestId);
+      if (heard !== null && (latest === undefined || heard > latest)) latest = heard;
+    }
+    return latest;
+  };
+
+  const freeze = () => {
+    const since = lastHeardOfActive();
+    dispatch(since === undefined ? { type: "FREEZE" } : { type: "FREEZE", since })
+      .then((result) => {
+        if (result.ok && state.frozen !== null) {
+          log.info("Netzaussetzer: von keiner aktiven Person etwas gehört – Spielzeit angehalten");
+        }
+      })
+      .catch((error: unknown) => {
+        log.error({ err: error }, "FREEZE fehlgeschlagen");
+      });
+  };
+
+  const thaw = () => {
+    const since = state.frozen?.since ?? null;
+    dispatch({ type: "THAW" })
+      .then((result) => {
+        if (result.ok && since !== null && state.frozen === null) {
+          log.info({ pausedMs: deps.clock.now() - since }, "Verbindung wieder da – Spiel läuft weiter");
+        }
+      })
+      .catch((error: unknown) => {
+        log.error({ err: error }, "THAW fehlgeschlagen");
+      });
+  };
+
+  /** Jede Sekunde: still → einfrieren, wieder zu hören → auftauen (nur im laufenden Spiel). */
+  const checkSilence = () => {
+    if (closed || frozen || state.game === null || !isRunningPhase(state.phase)) return;
+    const isSilent = silent();
+    if (isSilent && state.frozen === null) freeze();
+    else if (!isSilent && state.frozen !== null) thaw();
+  };
+  const silenceTimer = setInterval(checkSilence, SILENCE_CHECK_INTERVAL_MS);
+  silenceTimer.unref();
+
+  const listenForPackets = (socket: AppSocket) => {
+    heardAt.set(socket, deps.clock.now());
+    const onPacket = () => {
+      heardAt.set(socket, deps.clock.now());
+      // Wieder zu hören: sofort auftauen – noch bevor ein mitgeschicktes Event (z. B. eine Antwort) eingereiht wird.
+      if (state.frozen !== null && !silent()) thaw();
+    };
+    packetListeners.set(socket, onPacket);
+    socket.conn.on("packet", onPacket);
+  };
+
+  const stopListening = (socket: AppSocket) => {
+    const listener = packetListeners.get(socket);
+    if (listener === undefined) return;
+    packetListeners.delete(socket);
+    socket.conn.off("packet", listener);
+  };
+
   /** In den Index und den Raum aufnehmen (vor dem Command, damit der erste Zustand ankommt). */
   const addSocket = async (socket: AppSocket) => {
     const guestId = socket.data.guestId;
@@ -249,6 +341,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
       sockets.set(guestId, set);
     }
     set.add(socket);
+    listenForPackets(socket);
     try {
       await socket.join(room);
     } catch (error) {
@@ -262,6 +355,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
     const set = sockets.get(guestId);
     if (set === undefined || !set.delete(socket)) return false;
     if (set.size === 0) sockets.delete(guestId);
+    stopListening(socket);
     Promise.resolve(socket.leave(room)).catch((error: unknown) => {
       log.warn({ err: error }, "Socket hat den Lobby-Raum nicht verlassen");
     });
@@ -379,6 +473,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
 
   const close = (reason: string) => {
     closed = true;
+    clearInterval(silenceTimer);
     timers.clear();
     bots.stop();
     for (const set of [...sockets.values()]) {
@@ -614,6 +709,7 @@ export function createLobbyActor(deps: LobbyActorDeps, initial: LobbyState): Lob
 
     async shutdown() {
       frozen = true;
+      clearInterval(silenceTimer);
       timers.clear();
       bots.stop();
       await waitAtMost(tail, QUEUE_DRAIN_TIMEOUT_MS);

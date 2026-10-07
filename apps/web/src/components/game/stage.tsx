@@ -168,7 +168,7 @@ function StageOverlay({
           untimed={lobby.settings.answerSec === 0}
           presenting={selfPlayer?.status === "spectator"}
           waitingCount={answerWaitingCount(lobby, selfId)}
-          runId={`${question.id}:${syncGeneration}`}
+          runId={`${question.id}:${question.deadline}:${syncGeneration}`}
           onAnswer={(choice) => onAnswer(question.id, choice)}
           onPromptUnfocused={onPromptUnfocused}
         />

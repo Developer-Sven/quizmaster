@@ -151,6 +151,7 @@ function questionState(): PublicLobbyState {
     },
     board: [{ round: 1, pickerId: "p1", categoryId: "rund-um-die-welt", results: { p1: [true], p2: [null] } }],
     results: null,
+    frozen: false,
     suggestions: [],
   };
 }

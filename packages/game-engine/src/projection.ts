@@ -115,6 +115,7 @@ export function toPublicState(state: LobbyState): PublicLobbyState {
     question: projectQuestion(state),
     board: buildBoard(game),
     results: results ? { ranking: results.ranking.map((entry) => ({ ...entry })), outcome: results.outcome } : null,
+    frozen: state.frozen !== null,
     suggestions: state.suggestions.map((entry) => ({
       id: entry.id,
       playerId: entry.playerId,

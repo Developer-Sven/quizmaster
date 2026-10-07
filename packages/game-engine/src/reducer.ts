@@ -13,6 +13,7 @@ import { type ErrorCode, ProtocolError } from "@quizmaster/shared";
 import { type Command, type CreateLobbyInput, isShellCommand } from "./commands.ts";
 import { assertNow, createTx, type EngineContext, type Tx } from "./context.ts";
 import { EFFECT_ORDER, type Effect } from "./effects.ts";
+import { onFreeze, onThaw } from "./freeze.ts";
 import { onAnswer, onLoadFailed, onOptionsReady, onPick, onQuestionsReady } from "./game-commands.ts";
 import { normalize, onTimerFired } from "./lifecycle.ts";
 import {
@@ -148,6 +149,10 @@ function dispatch(state: LobbyState, command: Command, tx: Tx, timer: PendingTim
       return onTransferHost(state, command, tx);
     case "END_GAME":
       return onEndGame(state, command, tx);
+    case "FREEZE":
+      return onFreeze(state, command, tx);
+    case "THAW":
+      return onThaw(state, tx);
     case "SUGGEST_SETTINGS":
       return onSuggestSettings(state, command, tx);
     case "WITHDRAW_SUGGESTION":

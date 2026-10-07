@@ -7,6 +7,7 @@ import {
   selectAnnouncement,
   selectConnectionOverlayVisible,
   selectCurrentToast,
+  selectNetworkStalled,
   selectPhase,
   selectRulesOpen,
   useGameStore,
@@ -283,6 +284,22 @@ describe("Hinweise und Kategorien", () => {
       testLobby({ rev: 2, players: [mia, ben], suggestions: [{ ...open, status: "accepted" }] }),
     );
     expect(state().toasts.at(-1)?.text).toBe("Mia hat deinen Vorschlag übernommen.");
+  });
+
+  it("„Verbindung hakt“ nur im laufenden Spiel bei bestehender Verbindung: lange Stille oder Server eingefroren (ADR-057)", () => {
+    gameActions.connected();
+    gameActions.applyPublicState(testLobby({ rev: 1, phase: "lobby" }));
+    gameActions.setStale(true);
+    expect(selectNetworkStalled(state())).toBe(false);
+    gameActions.applyPublicState(testLobby({ rev: 2, phase: "question", phaseEndsAt: 30_000 }));
+    expect(selectNetworkStalled(state())).toBe(true);
+    gameActions.setStale(false);
+    expect(selectNetworkStalled(state())).toBe(false);
+    gameActions.applyPublicState(testLobby({ rev: 3, phase: "question", phaseEndsAt: 30_000, frozen: true }));
+    expect(selectNetworkStalled(state())).toBe(true);
+    // Getrennt: Das Verbindungs-Overlay übernimmt.
+    gameActions.connectionLost(1_000);
+    expect(selectNetworkStalled(state())).toBe(false);
   });
 
   it("Regeln-Sheet (ADR-052): bleibt vom Spielende in die Lobby offen, schließt beim Spielstart und beim Verlassen", () => {

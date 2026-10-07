@@ -1,11 +1,11 @@
 "use client";
 
 import { de } from "../../i18n/de";
-import { TriangleAlertIcon } from "../../lib/ui/icons";
+import { TriangleAlertIcon, WifiOffIcon } from "../../lib/ui/icons";
 import { Button } from "./button";
 
-/** Wartung oder Update verfügbar (docs/09 §5, docs/10). */
-export type BannerTone = "maintenance" | "update";
+/** Wartung, Update verfügbar (docs/09 §5, docs/10) oder Netzaussetzer im Spiel (ADR-057). */
+export type BannerTone = "maintenance" | "update" | "network";
 
 export interface BannerProps {
   tone: BannerTone;
@@ -24,10 +24,13 @@ export interface BannerProps {
  * bietet „Aktualisieren“ an (docs/10: Tippen sendet SKIP_WAITING).
  */
 export function Banner({ tone, message, onAction, actionLabel = de.pwa.update }: BannerProps) {
-  const text = message ?? (tone === "update" ? de.pwa.updateAvailable : de.maintenance.fallback);
+  const text =
+    message ??
+    (tone === "update" ? de.pwa.updateAvailable : tone === "network" ? de.network.stalled : de.maintenance.fallback);
   return (
     <div role="status" className="flex min-h-14 items-center gap-3 border-b border-line bg-surface-1 px-gutter py-2">
       {tone === "maintenance" ? <TriangleAlertIcon size={20} className="shrink-0 text-text-2" /> : null}
+      {tone === "network" ? <WifiOffIcon size={20} className="shrink-0 text-text-2" /> : null}
       {/* Stil `caption` (Hinweise, docs/09 §3): passt mit Aktion bei 360 px in eine Zeile;
           überlange Wartungstexte brechen um, statt abgeschnitten zu werden (kein line-clamp) */}
       <p className="min-w-0 flex-1 text-caption text-text">{text}</p>

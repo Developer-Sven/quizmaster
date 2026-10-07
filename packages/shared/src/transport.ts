@@ -15,11 +15,19 @@ export function socketServerOptions() {
     path: SOCKET_PATH,
     serveClient: false,
     maxHttpBufferSize: 8_192,
-    pingInterval: 20_000,
+    // Ping alle 5 s (ADR-057): hält gesunde Verbindungen frisch, damit der Server Netzaussetzer nach `SILENCE_MS`
+    // erkennt und das Spiel einfriert. Getrennt wird wie bisher erst nach weiteren 20 s ohne Antwort.
+    pingInterval: 5_000,
     pingTimeout: 20_000,
     connectTimeout: 10_000,
   };
 }
+
+/**
+ * Netzaussetzer (ADR-057): Kommt so lange von keiner aktiven Person einer Lobby ein Paket an, friert der Server das
+ * Spiel ein; ein Client zeigt nach derselben Zeit ohne Paket vom Server „Verbindung hakt“.
+ */
+export const SILENCE_MS = 8_000;
 
 /** Client-Optionen: WebSocket zuerst, Long-Polling als Fallback (ADR-028), Backoff bis 5 s. */
 export function socketClientOptions() {

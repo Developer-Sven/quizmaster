@@ -224,6 +224,12 @@ export interface LobbyState {
    * im Snapshot – nach einem Neustart sind sie weg. `normalize` räumt sie nach jedem Command auf.
    */
   suggestions: SettingsSuggestion[];
+  /**
+   * Eingefroren (ADR-057): Die Shell hört von keiner aktiven Person mehr etwas (Netzaussetzer) – die Spielzeit
+   * steht, der Phasen-Timer ist angehalten (`phaseTimerAt` = sein Zeitpunkt beim Einfrieren). Beim Auftauen rücken
+   * Phase, Frage und Timer um die Pause nach hinten. Nicht im Snapshot.
+   */
+  frozen: { since: number; phaseTimerAt: number | null } | null;
   /** Zuletzt vergebenes Token (Timer, Anfragen, Phasen). */
   seq: number;
   timers: PendingTimer[];

@@ -418,6 +418,11 @@ export const de = {
     },
   },
 
+  /** Netzaussetzer (ADR-057) */
+  network: {
+    stalled: "Verbindung hakt – das Spiel ist angehalten und läuft gleich hier weiter.",
+  },
+
   maintenance: {
     fallback: MAINTENANCE_FALLBACK,
     /** Text aus `appConfig.maintenance.message`, sonst der Standardtext (docs/09 §11) */

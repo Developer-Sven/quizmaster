@@ -131,6 +131,7 @@ export function createLobbyState(input: CreateLobbyInput, tx: Tx): LobbyState {
     players: [host],
     bannedGuestIds: [],
     suggestions: [],
+    frozen: null,
     seq: 0,
     timers: [],
     game: null,
@@ -256,6 +257,8 @@ export function onRename(state: LobbyState, command: RenameCommand, tx: Tx): Lob
 export function onContinue(state: LobbyState, command: ContinueCommand, tx: Tx): LobbyState {
   requireHost(state, command.guestId);
   if (state.game === null || state.phase !== command.phase) reject("INVALID_PHASE", "Diese Phase läuft nicht");
+  // Eingefroren (ADR-057): erst weiter, wenn die Mitspielenden wieder zu hören sind.
+  if (state.frozen !== null) reject("INVALID_PHASE", "Spiel ist angehalten");
   // Frage auflösen bei „Zeit pro Frage: Host“ (ADR-049) – erst, wenn die Frage zu sehen ist.
   if (command.phase === "question") {
     if (state.settings.answerSec !== MANUAL_ADVANCE) reject("INVALID_PHASE", "Die Frage hat einen Countdown");

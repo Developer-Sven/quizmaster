@@ -34,6 +34,7 @@ import {
   privatePlayerStateSchema,
   publicLobbyStateSchema,
   type ServerToClientEvents,
+  SILENCE_MS,
   socketClientOptions,
 } from "@quizmaster/shared";
 import { io, type Socket } from "socket.io-client";
@@ -485,7 +486,21 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     else fail("UPDATE_REQUIRED");
   }
 
+  // Netzaussetzer (ADR-057): Jede Sekunde prüfen, ob seit `SILENCE_MS` ein Paket vom Server kam (Ping alle 5 s,
+  // jedes Event). Bleibt es aus, obwohl verbunden, hakt die Leitung – das Spiel zeigt „Verbindung hakt“.
+  let lastHeardAt = Date.now();
+  const heardFromServer = () => {
+    lastHeardAt = Date.now();
+    gameActions.setStale(false);
+  };
+  socket.io.on("ping", heardFromServer);
+  socket.onAny(heardFromServer);
+  const staleTimer = setInterval(() => {
+    if (socket.connected) gameActions.setStale(Date.now() - lastHeardAt >= SILENCE_MS);
+  }, 1_000);
+
   socket.on("connect", () => {
+    heardFromServer();
     reauthAttempted = false;
     turnstileNeeded = false;
     lastRejection = null;
@@ -746,6 +761,8 @@ function createRealtimeClient(config: RealtimeClientConfig): RealtimeClient {
     },
     disconnect,
     dispose() {
+      clearInterval(staleTimer);
+      socket.io.off("ping", heardFromServer);
       disconnect();
       unsubscribeCategories();
       socket.removeAllListeners();
