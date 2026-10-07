@@ -1,6 +1,7 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { de } from "../../i18n/de";
 import { PlayIcon, SmartphoneIcon } from "../../lib/ui/icons";
 import { Button, ButtonLink } from "./button";
 import { CodeInput } from "./code-input";
@@ -238,6 +239,17 @@ describe("ListRow", () => {
   it("rendert Link und statische Zeile", () => {
     expect(renderHtml(ListRow, { href: "/regeln" }, "Regeln")).toMatch(/^<a[^>]*href="\/regeln"/);
     expect(renderHtml(ListRow, {}, "Regeln")).toMatch(/^<div/);
+  });
+
+  it("nennt die Auswahl einer statischen Zeile auch Screenreadern (Nur-Lesen-Einstellungen, ADR-050)", () => {
+    // Das `check` ist aria-hidden; ohne Button gibt es kein aria-pressed – also ein Text nur für Screenreader.
+    const selected = renderHtml(ListRow, { selected: true }, "Mia spielt mit");
+    expect(selected).toMatch(/^<div/);
+    expect(selected).toContain("lucide-check");
+    expect(selected).toContain(`<span class="sr-only">${de.a11y.selected}</span>`);
+    expect(renderHtml(ListRow, {}, "Mia zeigt nur an")).not.toContain("sr-only");
+    // Der Button meldet die Auswahl schon über aria-pressed.
+    expect(renderHtml(ListRow, { onClick: noop, selected: true }, "Sport")).not.toContain("sr-only");
   });
 });
 

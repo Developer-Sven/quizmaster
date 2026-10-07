@@ -75,8 +75,10 @@ export const CHOREOGRAPHY = {
   /** 6 · Auflösung (Phase `reveal`, Standard 5 s bzw. Weiter-Einstellung, ADR-045) */
   answerReveal: {
     shakeMs: 160,
+    /** Avatare an den gewählten Antworten: ab 500 ms, gestaffelt 150 ms, je 480 ms (ADR-044, docs/09 §7.6/§8) */
     pickersAtMs: 500,
     pickerStaggerMs: STAGGER_MS.pickers,
+    pickerMs: DURATION_MS.overlay,
     maxPickers: 4,
     pointsAtMs: 1_200,
     /** Ausblenden 500 ms vor dem Phasenende (wartet die Auflösung auf den Host: gar nicht) */
@@ -179,6 +181,23 @@ export function enterMotion(spec: EntranceSpec, enteredAt: number, reduce: boole
     animate,
     transition: { duration: seconds(duration), ease, delay: seconds(spec.at - enteredAt) },
   };
+}
+
+/**
+ * Avatar Nr. `position` an einer Antwort der Auflösung (docs/09 §7.6): gleitet ab 500 ms gestaffelt (150 ms) 12 px von
+ * links herein, 480 ms `ease-emphasized` – relativ zum Phasenbeginn, also auch nach einem späten Einhängen pünktlich.
+ */
+export function answerRevealPickerMotion(position: number, enteredAt: number, reduce: boolean): EntranceMotion {
+  const reveal = CHOREOGRAPHY.answerReveal;
+  return enterMotion(
+    {
+      at: reveal.pickersAtMs + position * reveal.pickerStaggerMs,
+      duration: reveal.pickerMs,
+      from: { opacity: 0, x: -OFFSET_PX.enter },
+    },
+    enteredAt,
+    reduce,
+  );
 }
 
 /** Verzögerung für Bausteine mit eigener Einblendung (z. B. ResultSquare): `undefined` = schon gefüllt. */

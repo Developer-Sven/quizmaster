@@ -5,6 +5,7 @@
 
 import { expect, test } from "./support/fixtures.ts";
 import type { Player } from "./support/player.ts";
+import { axeReport, BLOCKING_IMPACTS } from "./support/screen-checks.ts";
 
 /** Ben öffnet die Einstellungen, ändert per Stepper-Tipp und sendet den Vorschlag. */
 async function suggest(guest: Player, button: string): Promise<void> {
@@ -75,7 +76,14 @@ test("Ablehnen, Zurückziehen und Vorschläge ausschalten (ADR-053)", async ({ p
   // Zurückziehen: Mias Liste leert sich.
   await suggest(guest, "Zeit pro Frage erhöhen");
   await expect(host.page.getByTestId("lobby-suggestion")).toHaveCount(1);
-  await guest.page.getByTestId("lobby-withdraw-suggestion").click();
+  // Referenz-Viewport (docs/09 §4): „Zurückziehen“ bleibt einzeilig, der Hinweis daneben bricht um.
+  await guest.page.setViewportSize({ width: 360, height: 740 });
+  const withdraw = guest.page.getByTestId("lobby-withdraw-suggestion");
+  await expect(withdraw).toBeVisible();
+  const box = await withdraw.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.height ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(48);
+  await withdraw.click();
   await expect(guest.page.getByTestId("lobby-own-suggestion")).toHaveCount(0);
   await expect(host.page.getByTestId("lobby-suggestions")).toHaveCount(0);
 
@@ -88,4 +96,19 @@ test("Ablehnen, Zurückziehen und Vorschläge ausschalten (ADR-053)", async ({ p
   const view = guest.page.getByRole("dialog", { name: "Einstellungen" });
   await expect(view.getByText("Nur Mia kann die Einstellungen ändern.")).toBeVisible();
   await expect(view.getByRole("button", { name: "Runden erhöhen" })).toHaveAttribute("aria-disabled", "true");
+
+  // Nur lesbar (ADR-050, docs/09 §12): Die Unteransicht „Kategorien“ besteht aus statischen Zeilen. Die Auswahl hören
+  // auch Screenreader, und der Inhalt bleibt per Tastatur scrollbar (axe „scrollable-region-focusable“).
+  await view.getByTestId("settings-categories-row").click();
+  const categories = guest.page.getByRole("dialog", { name: "Kategorien" });
+  const body = categories.getByTestId("sheet-body");
+  await expect(body.getByText("Alle Kategorien")).toBeVisible();
+  await expect(body.getByText("ausgewählt", { exact: true })).toHaveCount(1);
+  const scrolls = await body.evaluate((element) => element.scrollHeight > element.clientHeight + 1);
+  if (scrolls) {
+    await expect(body).toHaveAttribute("tabindex", "0");
+    await expect(body).toHaveAccessibleName("Kategorien");
+  }
+  const axe = await axeReport(guest.page);
+  expect(axe.violations.filter((finding) => BLOCKING_IMPACTS.includes(finding.impact))).toEqual([]);
 });

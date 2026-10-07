@@ -1,15 +1,12 @@
 "use client";
 
-import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
 import type { ForcedStateProps } from "../../lib/ui/forced-state";
 import { CircleCheckIcon, CircleXIcon, LockIcon } from "../../lib/ui/icons";
 import { MotionProvider } from "../../lib/ui/motion";
-import { transitions } from "../../lib/ui/motion-presets";
 import type { PlayerColor } from "../../lib/ui/player";
-import { DURATION_MS, OFFSET_PX, STAGGER_MS, seconds } from "../../lib/ui/tokens";
 import { Avatar } from "./avatar";
 
 /**
@@ -37,11 +34,23 @@ export interface AnswerButtonProps extends ForcedStateProps {
   /** Kurzer Seitwärtsruck – nur für die eigene falsche Antwort (`state="wrong"`) */
   shake?: boolean;
   /**
-   * Personen, die diese Antwort gewählt haben (Auflösung): Avatare 24 gleiten ab 200 ms gestaffelt
-   * an den rechten Rand, max. 4 sichtbar, danach „+N“. Sie ragen 12 px unter die Karte –
-   * Antworten deshalb mit mindestens 16 px Abstand stapeln.
+   * Personen, die diese Antwort gewählt haben (Auflösung): Avatare 24 gleiten gestaffelt an den rechten Rand,
+   * max. 4 sichtbar, danach „+N“. Sie ragen 12 px unter die Karte – Antworten deshalb mit mindestens 16 px Abstand
+   * stapeln.
    */
   pickedBy?: readonly AnswerPicker[];
+  /**
+   * Einblendung des Avatars Nr. `position` (motion-Props). Die Bühne plant sie relativ zum Phasenbeginn
+   * (docs/09 §7.6: ab 500 ms, 150 ms gestaffelt, 480 ms – `answerRevealPickerMotion`); ohne: sofort sichtbar.
+   */
+  pickerMotion?: (position: number) => PickerMotion;
+}
+
+/** motion-Props einer Avatar-Einblendung (Teilmenge von `EntranceMotion` aus der Choreografie). */
+export interface PickerMotion {
+  initial: false | { opacity?: number; x?: number };
+  animate: { opacity?: number; x?: number };
+  transition: { duration: number; ease: readonly [number, number, number, number]; delay: number };
 }
 
 const stateClasses: Record<AnswerState, string> = {
@@ -101,6 +110,7 @@ export function AnswerButton({
   onSelect,
   shake = false,
   pickedBy = [],
+  pickerMotion,
   ...rest
 }: AnswerButtonProps) {
   const letter = de.game.answerLetters[index];
@@ -137,23 +147,28 @@ export function AnswerButton({
       <span aria-hidden="true" data-slot="answer-icon" className="flex size-5 shrink-0 items-center justify-center">
         <StateIcon state={state} />
       </span>
-      {pickedBy.length > 0 ? <Pickers pickers={pickedBy} /> : null}
+      {pickedBy.length > 0 ? <Pickers pickers={pickedBy} motion={pickerMotion} /> : null}
     </button>
   );
 }
 
-function Pickers({ pickers }: { pickers: readonly AnswerPicker[] }) {
-  const reduce = useReducedMotion() ?? false;
+/** Ohne Choreografie der Bühne (z. B. Galerie): sofort im Endzustand. */
+const RESTING_PICKER: PickerMotion = {
+  initial: false,
+  animate: { opacity: 1, x: 0 },
+  transition: { duration: 0, ease: [0, 0, 1, 1], delay: 0 },
+};
+
+function Pickers({
+  pickers,
+  motion,
+}: {
+  pickers: readonly AnswerPicker[];
+  motion: ((position: number) => PickerMotion) | undefined;
+}) {
   const visible = pickers.slice(0, MAX_VISIBLE_PICKERS);
   const hidden = pickers.length - visible.length;
-  const enter = (position: number) => ({
-    initial: { opacity: 0, x: reduce ? 0 : -OFFSET_PX.enter },
-    animate: { opacity: 1, x: 0 },
-    transition: {
-      ...(reduce ? transitions.fade : transitions.enter),
-      delay: seconds(DURATION_MS.base + position * STAGGER_MS.pickers),
-    },
-  });
+  const enter = (position: number): PickerMotion => (motion ? motion(position) : RESTING_PICKER);
   return (
     <MotionProvider>
       <span aria-hidden="true" className="pointer-events-none absolute right-3 -bottom-3 flex items-center gap-1">

@@ -1,6 +1,8 @@
 "use client";
 
+import { useReducedMotion } from "motion/react";
 import { useState } from "react";
+import { answerRevealPickerMotion } from "../../../components/game/choreography";
 import { AnswerButton, type AnswerState } from "../../../components/ui/answer-button";
 import { Board, type BoardPlayer, type BoardRowData } from "../../../components/ui/board";
 import { Button } from "../../../components/ui/button";
@@ -55,8 +57,11 @@ function boardPlayers(count: number): BoardPlayer[] {
 
 /** Kategorie-, Frage-, Timer- und Tafel-Komponenten in allen Zuständen. */
 export function GameSection() {
+  const reduce = useReducedMotion() ?? false;
   const [timerRun, setTimerRun] = useState(0);
   const [shakeRun, setShakeRun] = useState(0);
+  // Avatare wie auf der Bühne (docs/09 §7.6): ab 500 ms nach dem Einhängen, gestaffelt, je 480 ms.
+  const pickerMotion = (position: number) => answerRevealPickerMotion(position, 0, reduce);
   const [boardRun, setBoardRun] = useState(0);
   const [picked, setPicked] = useState<number | null>(null);
   const pickers = [
@@ -150,13 +155,21 @@ export function GameSection() {
         </Demo>
         <Demo label="Auflösung: eigene falsche Antwort mit Ruck, Avatare der Wählenden">
           <div className="flex flex-col gap-4 pb-3">
-            <AnswerButton index={0} text="Canberra" state="correct" pickedBy={pickers} key={`c-${shakeRun}`} />
+            <AnswerButton
+              index={0}
+              text="Canberra"
+              state="correct"
+              pickedBy={pickers}
+              pickerMotion={pickerMotion}
+              key={`c-${shakeRun}`}
+            />
             <AnswerButton
               index={1}
               text="Sydney"
               state="wrong"
               shake
               pickedBy={[samplePlayer(0)]}
+              pickerMotion={pickerMotion}
               key={`w-${shakeRun}`}
             />
           </div>

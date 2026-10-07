@@ -2,7 +2,7 @@
 
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, type RefObject, useEffect, useId, useRef, useState } from "react";
 import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
 import { focusTitleOnViewChange } from "../../lib/ui/focus";
@@ -31,6 +31,41 @@ export interface SheetProps {
   footer?: ReactNode;
 }
 
+/** Was per Tab erreichbar ist (deaktivierte Bedienelemente nicht). */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Tastatur (WCAG 2.1.1, axe „scrollable-region-focusable“): Scrollt der Inhalt des Sheets und enthält er kein
+ * bedienbares Element – etwa die Kategorien der Nur-Lesen-Einstellungen (ADR-050), lauter statische Zeilen –, wird
+ * er selbst zum Tab-Stopp; sonst ließe er sich per Tastatur nicht scrollen. Wie der Bühnen-Rahmen (overlay-frame.tsx).
+ * Mit bedienbaren Elementen scrollt der Fokus den Inhalt ohnehin mit – dann kein zusätzlicher Tab-Stopp.
+ */
+function useKeyboardScroll(ref: RefObject<HTMLElement | null>, active: boolean): boolean {
+  const [needed, setNeeded] = useState(false);
+  useEffect(() => {
+    const body = ref.current;
+    if (!active || !body) return;
+    const check = () => setNeeded(body.scrollHeight > body.clientHeight + 1 && body.querySelector(FOCUSABLE) === null);
+    // Größe des Sheets (Viewport, Tastatur) und Wechsel des Inhalts (Unteransicht, Host-Wechsel, ADR-050).
+    const resize = new ResizeObserver(check);
+    resize.observe(body);
+    const mutations = new MutationObserver(check);
+    mutations.observe(body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["disabled", "tabindex", "href"],
+    });
+    check();
+    return () => {
+      resize.disconnect();
+      mutations.disconnect();
+    };
+  }, [ref, active]);
+  return active && needed;
+}
+
 /**
  * Sheet (docs/09 §5): von unten, `radius-xl` oben, Griff 36 × 4, Titel `h2`, Ebene 2 mit Scrim.
  * Modal mit Fokusfalle, Escape, `aria-modal` und Fokus-Rückgabe. Nie zwei Sheets übereinander –
@@ -42,6 +77,8 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const bodyRef = useRef<HTMLElement>(null);
+  const bodyNeedsFocus = useKeyboardScroll(bodyRef, open && isClient);
 
   useModalLayer({
     active: open && isClient,
@@ -90,14 +127,20 @@ export function Sheet({ open, onClose, title, children, onBack, view, footer }: 
                   </h2>
                   <IconButton icon={ChevronDownIcon} label={de.actions.close} onClick={onClose} />
                 </div>
-                <div
+                <section
+                  ref={bodyRef}
+                  // Nur solange er scrollt und nichts Bedienbares enthält: Tab-Stopp zum Scrollen (WCAG 2.1.1), dann
+                  // mit Namen ein Bereich (`region`) – sonst ein schlichter Abschnitt ohne Rolle.
+                  tabIndex={bodyNeedsFocus ? 0 : undefined}
+                  aria-label={bodyNeedsFocus ? title : undefined}
+                  data-testid="sheet-body"
                   className={cx(
                     "min-h-0 flex-1 overflow-y-auto overscroll-contain px-gutter",
                     footer ? "pb-4" : "pb-safe",
                   )}
                 >
                   {children}
-                </div>
+                </section>
                 {footer ? <div className="shrink-0 border-t border-line px-gutter pt-4 pb-safe">{footer}</div> : null}
               </m.div>
             </div>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { de } from "../../i18n/de";
 import { cx } from "../../lib/ui/cx";
 import type { ForcedStateProps } from "../../lib/ui/forced-state";
 import { CheckIcon, type LucideIcon } from "../../lib/ui/icons";
@@ -65,5 +66,12 @@ export function ListRow({ children, icon: Icon, selected, onClick, href, disable
     );
   }
 
-  return <div className={rowClasses}>{content}</div>;
+  // Statisch (z. B. Nur-Lesen-Einstellungen, ADR-050): ohne aria-pressed nennt ein Text die Auswahl – das `check` ist
+  // nur für die Augen.
+  return (
+    <div className={rowClasses}>
+      {content}
+      {selected ? <span className="sr-only">{de.a11y.selected}</span> : null}
+    </div>
+  );
 }

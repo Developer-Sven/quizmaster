@@ -4,6 +4,7 @@ import { INTRO_TIMELINE, introStage, stageAt } from "../../lib/client/phase-cloc
 import { testLobby, testPlayer, testQuestion } from "../../lib/client/test-support";
 import { DURATION_MS, EASING } from "../../lib/ui/tokens";
 import {
+  answerRevealPickerMotion,
   CHOREOGRAPHY,
   type CueSchedulerDeps,
   categoryRevealLeaveAt,
@@ -58,6 +59,23 @@ describe("Einblendungen relativ zum Anker (docs/09 §7–8)", () => {
     expect(remainingDelayMs(320, 200, 0)).toBe(320);
     expect(remainingDelayMs(320, 200, 400)).toBe(0);
     expect(remainingDelayMs(320, 200, 520)).toBeUndefined();
+  });
+
+  it("Avatare an den Antworten der Auflösung: ab 500 ms, 150 ms gestaffelt, je 480 ms emphasized (docs/09 §7.6)", () => {
+    const first = answerRevealPickerMotion(0, 0, false);
+    expect(first.initial).toEqual({ opacity: 0, x: -12 });
+    expect(first.animate).toEqual({ opacity: 1, x: 0 });
+    expect(first.transition).toEqual({ duration: 0.48, ease: EASING.emphasized, delay: 0.5 });
+    expect(answerRevealPickerMotion(2, 0, false).transition.delay).toBeCloseTo(0.8);
+    // Relativ zum Phasenbeginn: 150 ms später eingehängt → trotzdem pünktlich bei 500 ms Serverzeit.
+    expect(answerRevealPickerMotion(0, 150, false).transition.delay).toBeCloseTo(0.35);
+    // Schon vorbei (Reconnect): sofort im Endzustand.
+    expect(answerRevealPickerMotion(0, 2_000, false).initial).toBe(false);
+    // Reduzierte Bewegung: nur Überblendung, höchstens 200 ms.
+    const reduced = answerRevealPickerMotion(0, 0, true);
+    expect(reduced.initial).toEqual({ opacity: 0 });
+    expect(reduced.transition.duration).toBeLessThanOrEqual(REDUCED_FADE_MS / 1_000);
+    expect(CHOREOGRAPHY.answerReveal.pickerMs).toBe(DURATION_MS.overlay);
   });
 
   it("erkennt, ob ein Moment beim Einstieg noch bevorstand (Ruck, Pop, Flug)", () => {

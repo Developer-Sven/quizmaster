@@ -246,15 +246,18 @@ export function LobbyView({
           ) : null}
           {ownSuggestion !== null && onWithdrawSuggestion ? (
             <div data-testid="lobby-own-suggestion" className="flex items-center justify-between gap-3">
-              <p className="min-w-0 text-body text-text-2">{de.suggestions.waiting(host?.name ?? "")}</p>
-              <Button
-                variant="ghost"
-                size="compact"
-                onClick={onWithdrawSuggestion}
-                data-testid="lobby-withdraw-suggestion"
-              >
-                {de.suggestions.withdraw}
-              </Button>
+              <p className="min-w-0 flex-1 text-body text-text-2">{de.suggestions.waiting(host?.name ?? "")}</p>
+              {/* Der Text bricht um, nie die Beschriftung des Buttons (360 px: „Zurückzieh-en“, docs/09 §4) */}
+              <div className="shrink-0">
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={onWithdrawSuggestion}
+                  data-testid="lobby-withdraw-suggestion"
+                >
+                  {de.suggestions.withdraw}
+                </Button>
+              </div>
             </div>
           ) : null}
           {lastGame}

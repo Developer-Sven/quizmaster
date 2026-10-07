@@ -9,7 +9,14 @@ import { missedAnswer, pickersByAnswer, revealAnswerStates } from "../../../lib/
 import { TimerIcon } from "../../../lib/ui/icons";
 import { AnswerButton } from "../../ui/answer-button";
 import { QuestionCard } from "../../ui/question-card";
-import { CHOREOGRAPHY, enterMotion, momentAhead, motionPlan, overlayLeaveAt } from "../choreography";
+import {
+  answerRevealPickerMotion,
+  CHOREOGRAPHY,
+  enterMotion,
+  momentAhead,
+  motionPlan,
+  overlayLeaveAt,
+} from "../choreography";
 import { useOverlayClock } from "../use-choreography";
 import { OverlayFrame } from "./overlay-frame";
 import { StatusLine } from "./status-line";
@@ -33,8 +40,8 @@ const SHAKE_LATE_MS = 120;
 /**
  * Auflösung (Phase `reveal`, 3,5 s, docs/09 §7.6) – die Karte der Frage bleibt stehen (Übergang „cut“):
  * 0 ms richtige Antwort `correct`, eigene falsche `wrong` mit Seitwärtsruck (2 × 4 px, 160 ms – nur bei
- * eigener falscher Antwort, nicht bei reduzierter Bewegung); ab 200 ms gleiten die Avatare 24 px gestaffelt
- * (150 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 1.200 ms der Spielerstreifen
+ * eigener falscher Antwort, nicht bei reduzierter Bewegung); ab 500 ms gleiten die Avatare 24 px gestaffelt
+ * (150 ms, je 480 ms) an die gewählten Antworten (max. 4, dann „+3“). Das „+1“ zeigt ab 1.200 ms der Spielerstreifen
  * (ScorePill), Ton und Haptik kommen als Cues der Bühne. Ausblenden 500 ms vor dem Phasenende (wartet die
  * Auflösung auf den Host, bleibt sie stehen – ADR-045). Wer erst mitten in der
  * Auflösung einsteigt, sieht den Endzustand ohne Wiederholung.
@@ -61,8 +68,10 @@ export function AnswerRevealOverlay({
   const pickers = pickersByAnswer(picks, players);
   const missed = missedAnswer(picks, selfId);
   const shake = motionPlan(reduce).shake && momentAhead(0, enteredAt, SHAKE_LATE_MS);
-  // Avatare an den Antworten gleiten ab 200 ms ein – nach einem späten Einstieg stehen sie sofort da.
+  // Avatare an den Antworten gleiten ab 500 ms ein (relativ zum Phasenbeginn) – nach einem späten Einstieg stehen
+  // sie sofort da.
   const pickersFresh = momentAhead(REVEAL.pickersAtMs, enteredAt, 0);
+  const pickerMotion = (position: number) => answerRevealPickerMotion(position, enteredAt, reduce);
   const hint = enterMotion({ at: 0, duration: REVEAL.pickersAtMs, from: { opacity: 0 } }, enteredAt, reduce);
 
   return (
@@ -101,6 +110,7 @@ export function AnswerRevealOverlay({
               state={states[choice] ?? "dimmed"}
               shake={shake && states[choice] === "wrong"}
               pickedBy={pickers[choice] ?? []}
+              pickerMotion={pickerMotion}
               data-testid={`answer-${choice}`}
               data-state={states[choice]}
             />
