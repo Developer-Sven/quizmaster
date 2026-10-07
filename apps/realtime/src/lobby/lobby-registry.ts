@@ -57,6 +57,13 @@ export interface CreateLobbyRequest {
   name: string;
   /** Nach dem Anlegen, vor dem ersten Zustand – hier sendet der Handler sein Ack. */
   onCreated(code: string): void;
+  /**
+   * Bisherige Lobbys der Person verlassen (ADR-042) – erst, wenn die neue Lobby sicher angelegt ist: Scheitert die
+   * Erstellung (Kill-Switch, Lastabwurf, Datenbank nicht erreichbar), bleibt die alte Mitgliedschaft unberührt (im
+   * laufenden Spiel hieße Verlassen „Aufgegeben“). Mit dieser Option zählen bestehende Mitgliedschaften nicht gegen
+   * „eine aktive Lobby je Gast“ – sie enden ja gleich.
+   */
+  leavePrevious?: () => Promise<void>;
 }
 
 /** Bilanz von `LobbyRegistry.shutdown()`. */
@@ -233,10 +240,11 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
     async create(request) {
       const { guestId } = request;
       if (shuttingDown) throw new ProtocolError("SERVER_BUSY", "Server startet neu");
-      if (creating.has(guestId) || hostsActiveLobby(guestId)) {
+      const replacing = request.leavePrevious !== undefined;
+      if (creating.has(guestId) || (!replacing && hostsActiveLobby(guestId))) {
         throw new ProtocolError("RATE_LIMITED", "Höchstens eine aktive gehostete Lobby je Gast");
       }
-      if (indexedMemberships(guestId).length > 0) {
+      if (!replacing && indexedMemberships(guestId).length > 0) {
         throw new ProtocolError("RATE_LIMITED", "Bereits Mitglied einer aktiven Lobby");
       }
       const admission = deps.admission.lobbyCreation(actors.size + creating.size);
@@ -270,14 +278,26 @@ export function createLobbyRegistry(deps: LobbyRegistryDeps): LobbyRegistry {
             log.info({ attempt }, "Lobby-Code kollidiert – neuer Code");
             continue;
           }
-          if (actors.has(code)) {
-            // Nur möglich, wenn die Datenbank den Code einer noch laufenden Lobby schon freigegeben hat (TTL):
-            // das eben eingefügte Dokument wieder schließen und neu ziehen.
-            log.warn({ attempt }, "Lobby-Code im Speicher noch belegt – neuer Code");
+          const discard = () => {
             deps.repos.lobbies.close(created.state.lobbyId, new Date(deps.clock.now())).catch((error: unknown) => {
               deps.metrics.recordMongoError("lobby_close");
               log.warn({ err: error }, "Verworfene Lobby nicht geschlossen");
             });
+          };
+          // Erst jetzt steht die neue Lobby fest: die bisherigen verlassen (ADR-042).
+          if (request.leavePrevious !== undefined) {
+            try {
+              await request.leavePrevious();
+            } catch (error) {
+              discard();
+              throw error;
+            }
+          }
+          if (actors.has(code)) {
+            // Nur möglich, wenn die Datenbank den Code einer noch laufenden Lobby schon freigegeben hat (TTL):
+            // das eben eingefügte Dokument wieder schließen und neu ziehen.
+            log.warn({ attempt }, "Lobby-Code im Speicher noch belegt – neuer Code");
+            discard();
             continue;
           }
           // Ab hier gibt es das Dokument: die Lobby immer übernehmen (auch in einem gerade beginnenden Shutdown –

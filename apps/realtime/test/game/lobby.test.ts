@@ -19,6 +19,7 @@ import {
   runtimeOf,
   serverSocketOf,
   startGameServer,
+  waitForPhase,
 } from "./support.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 });
@@ -372,6 +373,58 @@ describe("Kontingente und Kill-Switches", () => {
         .map((actor) => actor.code),
     ).toEqual([again.data.code]);
     for (const client of [host, member, otherDevice]) client.close();
+  });
+
+  it("lobby:create, die abgelehnt wird, lässt die bisherige Lobby unberührt – auch mitten im Spiel (ADR-042)", async () => {
+    const config = server.app.services.appConfig;
+    const host = await connectGuest(server);
+    const code = await createLobby(host, "Mia");
+    const ben = await connectGuest(server);
+    await joinLobby(ben, code, "Ben");
+    const running = waitForPhase(ben, "intro");
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    await running;
+    const membership = () => {
+      const player = actorOf(server, code).state.players.find((entry) => entry.guestId === ben.guestId);
+      return { left: player?.left, status: player?.status };
+    };
+    // Kill-Switch: abgelehnt, bevor jemand eine Lobby verlässt (im Spiel hieße das „Aufgegeben“).
+    config.apply({ ...config.get(), lobbyCreationEnabled: false });
+    try {
+      expect(await ben.emit("lobby:create", { name: "Ben" })).toMatchObject({
+        ok: false,
+        error: { code: "LOBBY_CREATION_DISABLED" },
+      });
+    } finally {
+      config.apply({ ...config.get(), lobbyCreationEnabled: true });
+    }
+    expect(membership()).toEqual({ left: false, status: "active" });
+    // Datenbank nicht erreichbar (Netzaussetzer, ADR-057): ebenso – verlassen wird erst, wenn die neue Lobby steht.
+    const insert = vi.spyOn(server.db.repos.lobbies, "insert").mockRejectedValueOnce(new Error("Netz weg"));
+    try {
+      expect(await ben.emit("lobby:create", { name: "Ben" })).toMatchObject({
+        ok: false,
+        error: { code: "SERVER_BUSY" },
+      });
+    } finally {
+      insert.mockRestore();
+    }
+    expect(membership()).toEqual({ left: false, status: "active" });
+    expect(
+      runtimeOf(server)
+        .lobbies.membershipsOf(ben.guestId)
+        .map((actor) => actor.code),
+    ).toEqual([code]);
+    // Klappt die Erstellung, verlässt Ben das laufende Spiel wie gewohnt (Aufgeben).
+    const created = await ben.emit("lobby:create", { name: "Ben" });
+    if (!created.ok) throw new Error(created.error.code);
+    expect(
+      runtimeOf(server)
+        .lobbies.membershipsOf(ben.guestId)
+        .map((actor) => actor.code),
+    ).toEqual([created.data.code]);
+    host.close();
+    ben.close();
   });
 
   it("lobbyCreationEnabled=false → LOBBY_CREATION_DISABLED; maxActiveLobbies erreicht → SERVER_BUSY", async () => {

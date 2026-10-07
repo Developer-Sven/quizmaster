@@ -76,9 +76,10 @@ async function leaveLobby(actor: LobbyActor, guestId: string): Promise<void> {
 }
 
 /**
- * Wer eine neue Lobby erstellt, verlässt vorher alle bisherigen (ADR-042): Eine liegen gebliebene Mitgliedschaft
+ * Wer eine neue Lobby erstellt, verlässt alle bisherigen (ADR-042): Eine liegen gebliebene Mitgliedschaft
  * (Tab geschlossen, Fehler beim Wechsel) sperrte sonst mit „Zu viele Versuche“, bis die alte Lobby schließt. Im
- * laufenden Spiel heißt Verlassen Aufgeben – wie beim Tippen auf „Lobby verlassen“.
+ * laufenden Spiel heißt Verlassen Aufgeben – wie beim Tippen auf „Lobby verlassen“. Deshalb erst, wenn die neue
+ * Lobby angelegt ist (Zulassung und Datenbank haben zugestimmt) – eine abgelehnte Erstellung kostet nichts.
  */
 async function leaveAllLobbies(rt: HandlerRuntime, guestId: string): Promise<void> {
   for (const actor of rt.lobbies.membershipsOf(guestId)) await leaveLobby(actor, guestId);
@@ -90,7 +91,6 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
     const config = rt.appConfig.get();
     requireTurnstile(config, ctx.socket.data.ticketTsv, ctx.now);
     const name = moderateName(payload.name, config.blockedTerms);
-    await leaveAllLobbies(rt, ctx.guestId);
     let sent: AckSent | undefined;
     await rt.lobbies.create({
       socket: ctx.socket,
@@ -99,6 +99,7 @@ export function registerLobbyHandlers(registerEvent: RegisterEvent, runtime: Run
       onCreated: (code) => {
         sent = ctx.ack({ code });
       },
+      leavePrevious: () => leaveAllLobbies(rt, ctx.guestId),
     });
     if (sent === undefined) throw new Error("Ack wurde nicht gesendet");
     return sent;
