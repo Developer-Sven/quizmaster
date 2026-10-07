@@ -1,16 +1,28 @@
 /**
  * Property-Tests der Engine (docs/11 §Sicherheits-Invarianten 1, §Pflicht-Tests): fast-check erzeugt
  * zufällige Spielverläufe (Personen, Bots, Einstellungen, Antworten, Kategoriewahl, Timeouts, Reconnects,
- * Aufgeben, Kicks, veraltete Tokens). Nach JEDEM Command werden die Invarianten geprüft.
+ * Aufgeben, Kicks, veraltete Tokens) – auch mit den Commands und Einstellungen seit ADR-045 … ADR-057: Weiter bzw.
+ * Auflösen per Host, Spiel beenden, Host übertragen, Namen ändern, Vorschläge, Einfrieren/Auftauen; Anzeige-Modus,
+ * Zeit pro Frage (auch „Host“), Weiter-Sekunden (auch „Host“), Kategorien begrenzt/fest/der Reihe nach,
+ * Schwierigkeitsbereich. Nach JEDEM Command werden die Invarianten geprüft.
  */
 import {
+  ADVANCE_SECONDS,
+  ANSWER_SECONDS,
   type AnswerIndex,
+  CATEGORY_MODES,
   CLIENT_FORBIDDEN_KEYS,
+  CONTINUE_PHASES,
+  type ContinuePhase,
+  DIFFICULTIES,
+  DIFFICULTY_BASES,
+  DIFFICULTY_ORDERS,
   findKeysDeep,
   type GameTimingMode,
   PRE_REVEAL_FORBIDDEN_KEYS,
   privatePlayerStateSchema,
   publicLobbyStateSchema,
+  type SettingsUpdate,
 } from "@quizmaster/shared";
 import { gameDocSchema, lobbyDocSchema } from "@quizmaster/shared/documents";
 import fc from "fast-check";
@@ -19,6 +31,7 @@ import {
   computeScores,
   currentQuestion,
   currentTurn,
+  isRunningPhase,
   type LobbyState,
   toLobbySnapshot,
   toPrivateState,
@@ -42,6 +55,10 @@ const ALLOWED = new Set([
   "game_over>intro",
   // nach `gameOverMs` automatisch zurück in die Lobby (ADR-038)
   "game_over>lobby",
+  // genau eine Kategorie bzw. „der Reihe nach“ (ADR-048/056): keine Wahl, gleich die Fragen
+  "intro>question",
+  "turn_summary>question",
+  "round_board>question",
   ...RUNNING.map((phase) => `${phase}>game_over`),
 ]);
 
@@ -59,7 +76,17 @@ type Action =
   | { kind: "wait"; ms: number }
   | { kind: "next" }
   | { kind: "stale"; which: number }
-  | { kind: "rematch" };
+  | { kind: "rematch" }
+  | { kind: "continue"; phase: ContinuePhase | "current"; who: number }
+  | { kind: "endGame"; who: number }
+  | { kind: "freeze"; backMs: number }
+  | { kind: "thaw" }
+  | { kind: "transferHost"; who: number }
+  | { kind: "rename"; who: number; name: string }
+  | { kind: "suggest"; who: number; rounds: number; answerSec: number }
+  | { kind: "accept"; which: number; adjust: boolean }
+  | { kind: "decline"; which: number }
+  | { kind: "withdraw"; who: number };
 
 const who = fc.nat({ max: 7 });
 const actionArb: fc.Arbitrary<Action> = fc.oneof(
@@ -83,7 +110,95 @@ const actionArb: fc.Arbitrary<Action> = fc.oneof(
   { weight: 10, arbitrary: fc.record({ kind: fc.constant("next") }) },
   { weight: 2, arbitrary: fc.record({ kind: fc.constant("stale"), which: fc.nat() }) },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("rematch") }) },
+  ...newerActions(),
 );
+
+/** Commands seit ADR-045 (Weiter, Spiel beenden, Host übertragen, Namen, Vorschläge, Einfrieren). */
+function newerActions() {
+  return [
+    {
+      weight: 4,
+      arbitrary: fc.record({
+        kind: fc.constant("continue" as const),
+        phase: fc.constantFrom<ContinuePhase | "current">("current", "current", ...CONTINUE_PHASES),
+        who,
+      }),
+    },
+    { weight: 1, arbitrary: fc.record({ kind: fc.constant("endGame" as const), who }) },
+    {
+      weight: 2,
+      arbitrary: fc.record({ kind: fc.constant("freeze" as const), backMs: fc.integer({ min: 0, max: 20_000 }) }),
+    },
+    { weight: 2, arbitrary: fc.record({ kind: fc.constant("thaw" as const) }) },
+    { weight: 1, arbitrary: fc.record({ kind: fc.constant("transferHost" as const), who }) },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        kind: fc.constant("rename" as const),
+        who,
+        name: fc.constantFrom("Mia", "Ben", "Neo", "Gast-123456", "Lea Sophie"),
+      }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        kind: fc.constant("suggest" as const),
+        who,
+        rounds: fc.integer({ min: 1, max: 3 }),
+        answerSec: fc.constantFrom(...ANSWER_SECONDS),
+      }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({ kind: fc.constant("accept" as const), which: fc.nat(), adjust: fc.boolean() }),
+    },
+    { weight: 1, arbitrary: fc.record({ kind: fc.constant("decline" as const), which: fc.nat() }) },
+    { weight: 1, arbitrary: fc.record({ kind: fc.constant("withdraw" as const), who }) },
+  ];
+}
+
+const categoryIds = catalog.categories.map((category) => category.id);
+
+/** Einstellungen seit ADR-045 … ADR-056 (vor dem Start als UPDATE_SETTINGS; ungültige Kombinationen lehnt die Engine ab). */
+const settingsArb = fc.record({
+  answerSec: fc.constantFrom(...ANSWER_SECONDS),
+  afterQuestionSec: fc.constantFrom(...ADVANCE_SECONDS),
+  afterTurnSec: fc.constantFrom(...ADVANCE_SECONDS),
+  afterRoundSec: fc.constantFrom(...ADVANCE_SECONDS),
+  hostPlays: fc.boolean(),
+  categoryIds: fc.oneof(
+    fc.constant(null),
+    fc.subarray(categoryIds, { minLength: 1, maxLength: 4 }),
+    fc.constantFrom(...categoryIds).map((id) => [id]),
+  ),
+  categoryMode: fc.constantFrom(...CATEGORY_MODES),
+  difficulty: fc
+    .tuple(fc.constantFrom(...DIFFICULTIES), fc.constantFrom(...DIFFICULTIES))
+    .map(([a, b]) => (a <= b ? ([a, b] as const) : ([b, a] as const))),
+  difficultyBasis: fc.constantFrom(...DIFFICULTY_BASES),
+  difficultyOrder: fc.constantFrom(...DIFFICULTY_ORDERS),
+});
+type ScenarioSettings = typeof settingsArb extends fc.Arbitrary<infer T> ? T : never;
+
+function settingsUpdate(settings: ScenarioSettings | null, rounds: number, k: number): SettingsUpdate {
+  if (settings === null) return { rounds, questionsPerCategory: k };
+  const [difficultyMin, difficultyMax] = settings.difficulty;
+  return {
+    rounds,
+    questionsPerCategory: k,
+    answerSec: settings.answerSec,
+    afterQuestionSec: settings.afterQuestionSec,
+    afterTurnSec: settings.afterTurnSec,
+    afterRoundSec: settings.afterRoundSec,
+    hostPlays: settings.hostPlays,
+    categoryIds: settings.categoryIds,
+    categoryMode: settings.categoryMode,
+    difficultyMin,
+    difficultyMax,
+    difficultyBasis: settings.difficultyBasis,
+    difficultyOrder: settings.difficultyOrder,
+  };
+}
 
 const scenarioArb = fc.record({
   seed: fc.integer(),
@@ -92,6 +207,8 @@ const scenarioArb = fc.record({
   rounds: fc.integer({ min: 1, max: 3 }),
   questionsPerCategory: fc.integer({ min: 1, max: 3 }),
   timing: fc.constantFrom<GameTimingMode>("normal", "fast"),
+  // Je zur Hälfte Standard bzw. zufällige Einstellungen seit ADR-045.
+  settings: fc.option(settingsArb, { freq: 2 }),
   // size "max": sonst begrenzt fast-check Arrays auf ~10 Elemente und Verläufe kämen kaum über den ersten Zug.
   actions: fc.array(actionArb, { minLength: 20, maxLength: 160, size: "max" }),
   afterRematch: fc.array(actionArb, { maxLength: 60, size: "max" }),
@@ -154,6 +271,26 @@ function checkPayloads(state: LobbyState): void {
   expect(state.players.length).toBeLessThanOrEqual(8);
 }
 
+function resolvedQuestions(state: LobbyState): number {
+  return (state.game?.turns ?? []).reduce(
+    (sum, turn) => sum + turn.questions.filter((question) => question.outcomes !== null).length,
+    0,
+  );
+}
+
+/**
+ * Einfrieren (ADR-057): höchstens ein Phasen-Timer; eingefroren nur im laufenden Spiel, ohne Phasen-Timer und für
+ * genau die laufende Phase; solange es eingefroren bleibt, löst sich keine Frage auf (auch nicht früh).
+ */
+function checkFreeze(before: LobbyState, after: LobbyState): void {
+  expect(after.timers.filter((timer) => timer.kind === "phase").length).toBeLessThanOrEqual(1);
+  if (after.frozen === null) return;
+  expect(isRunningPhase(after.phase)).toBe(true);
+  expect(after.frozen.phaseToken).toBe(after.phaseToken);
+  expect(after.timers.some((timer) => timer.kind === "phase")).toBe(false);
+  if (before.frozen !== null) expect(resolvedQuestions(after)).toBe(resolvedQuestions(before));
+}
+
 function checkStep(sim: Simulation, step: SimulationStep): void {
   const { before, result } = step;
   if (!result.ok) {
@@ -175,6 +312,7 @@ function checkStep(sim: Simulation, step: SimulationStep): void {
   const broadcast = result.effects.some((effect) => effect.type === "broadcast");
   if (after.rev > before.rev) expect(broadcast || after.closed !== null).toBe(true);
   expect(result.effects.filter((effect) => effect.type === "persist").length).toBeLessThanOrEqual(1);
+  checkFreeze(before, after);
   // Timer der Shell = Timer im Zustand (Effects vollständig abgeleitet).
   if (step === sim.steps.at(-1)) {
     expect([...sim.timers.keys()].sort((a, b) => a - b)).toEqual(
@@ -263,6 +401,81 @@ function apply(sim: Simulation, action: Action): void {
     case "rematch":
       if (!sim.state.closed) sim.dispatch({ type: "REMATCH", guestId: sim.host });
       return;
+    case "continue": {
+      if (sim.state.closed !== null) return;
+      const phase = action.phase === "current" ? sim.state.phase : action.phase;
+      if (phase === "question" && sim.state.phase === "question") sim.toQuestionStart();
+      const actor = action.who % 3 === 0 ? guest : sim.host;
+      if (!(CONTINUE_PHASES as readonly string[]).includes(phase)) return;
+      sim.dispatch({ type: "CONTINUE", guestId: actor, phase: phase as ContinuePhase });
+      return;
+    }
+    case "endGame":
+      if (sim.state.closed !== null) return;
+      sim.dispatch({ type: "END_GAME", guestId: action.who % 3 === 0 ? guest : sim.host });
+      return;
+    case "freeze":
+      sim.dispatch({ type: "FREEZE", since: sim.now - action.backMs });
+      return;
+    case "thaw":
+      sim.dispatch({ type: "THAW" });
+      return;
+    case "transferHost": {
+      if (sim.state.closed !== null) return;
+      const target = sim.state.players[action.who % sim.state.players.length];
+      sim.dispatch({ type: "TRANSFER_HOST", guestId: sim.host, targetPlayerId: target?.playerId ?? "x" });
+      return;
+    }
+    case "rename":
+      sim.dispatch({ type: "RENAME", guestId: guest, name: action.name });
+      return;
+    case "suggest":
+      sim.dispatch({
+        type: "SUGGEST_SETTINGS",
+        guestId: guest,
+        changes: { rounds: action.rounds, answerSec: action.answerSec },
+      });
+      return;
+    case "accept": {
+      if (sim.state.closed !== null) return;
+      const suggestion = sim.state.suggestions[action.which % Math.max(1, sim.state.suggestions.length)];
+      sim.dispatch({
+        type: "ACCEPT_SUGGESTION",
+        guestId: sim.host,
+        suggestionId: suggestion?.id ?? "unbekannt1234",
+        ...(action.adjust ? { changes: { questionsPerCategory: 1 } } : {}),
+      });
+      return;
+    }
+    case "decline": {
+      if (sim.state.closed !== null) return;
+      const suggestion = sim.state.suggestions[action.which % Math.max(1, sim.state.suggestions.length)];
+      sim.dispatch({ type: "DECLINE_SUGGESTION", guestId: sim.host, suggestionId: suggestion?.id ?? "unbekannt1234" });
+      return;
+    }
+    case "withdraw":
+      sim.dispatch({ type: "WITHDRAW_SUGGESTION", guestId: guest });
+      return;
+  }
+}
+
+/**
+ * Zu Ende laufen lassen: Timer und Bots; wartet eine Phase auf den Host („Weiter“/„Auflösen“, ADR-045/049) oder ist
+ * das Spiel eingefroren, tippt der Host bzw. taut die Shell auf – als letztes Mittel beendet der Host das Spiel.
+ */
+function finish(sim: Simulation): void {
+  for (let i = 0; i < 20_000 && sim.state.closed === null && RUNNING.includes(sim.state.phase); i++) {
+    if (sim.fireNext()) continue;
+    if (sim.state.frozen !== null) {
+      sim.dispatch({ type: "THAW" });
+      continue;
+    }
+    const phase = sim.state.phase;
+    if (phase === "question") sim.toQuestionStart();
+    if ((CONTINUE_PHASES as readonly string[]).includes(phase)) {
+      if (sim.dispatch({ type: "CONTINUE", guestId: sim.host, phase: phase as ContinuePhase }).ok) continue;
+    }
+    if (!sim.dispatch({ type: "END_GAME", guestId: sim.host }).ok) break;
   }
 }
 
@@ -283,18 +496,16 @@ describe("Property: zufällige Spielverläufe", () => {
         const names = ["Ben", "Lea", "Tom", "Ida"];
         for (let i = 1; i < scenario.humans; i++) sim.join(names[i - 1] ?? `Gast ${i}`);
         for (let i = 0; i < Math.min(scenario.bots, 8 - scenario.humans); i++) sim.addBot();
-        sim.ok({
-          type: "UPDATE_SETTINGS",
-          guestId: sim.host,
-          update: { rounds: scenario.rounds, questionsPerCategory: scenario.questionsPerCategory },
-        });
+        const update = settingsUpdate(scenario.settings, scenario.rounds, scenario.questionsPerCategory);
+        // Ungültige Kombinationen (z. B. mehr Kategorien der Reihe nach als möglich) lehnt die Engine ab – dann Standard.
+        if (!sim.dispatch({ type: "UPDATE_SETTINGS", guestId: sim.host, update }).ok) {
+          sim.ok({
+            type: "UPDATE_SETTINGS",
+            guestId: sim.host,
+            update: { rounds: scenario.rounds, questionsPerCategory: scenario.questionsPerCategory },
+          });
+        }
         sim.dispatch({ type: "START", guestId: sim.host });
-        const finish = (current: Simulation) => {
-          // Zu Ende laufen lassen: nur noch Timer und Bots.
-          for (let i = 0; i < 20_000 && current.state.closed === null && RUNNING.includes(current.state.phase); i++) {
-            if (!current.fireNext()) break;
-          }
-        };
         for (const action of scenario.actions) apply(sim, action);
         finish(sim);
         // Zweites Spiel per Revanche (gleiche Personen, neue Reihenfolge) mit weiteren Störungen.

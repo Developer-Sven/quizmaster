@@ -13,7 +13,7 @@ import {
   type PublicLobbyState,
 } from "@quizmaster/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { TestClient, TestServer } from "../helpers/index.ts";
+import { eventually, type TestClient, type TestServer } from "../helpers/index.ts";
 import {
   actorOf,
   autoPlay,
@@ -232,6 +232,74 @@ describe("Spiel mit 3 Personen", () => {
     const cDoc = await server.db.collections.guests.findOne({ _id: c.guestId });
     expect(cDoc?.stats).toEqual({ games: 1, wins: 0, draws: 0, answers: 6, correct: 0 });
     for (const client of [a, b, c]) {
+      expectCleanPayloads(client);
+      client.close();
+    }
+  });
+});
+
+describe("Spiel mit den Host-Modi (ADR-045/046/049/051)", () => {
+  it("Auflösen und Weiter per Host, Anzeige-Modus, Spielende mitten in einer offenen Frage – Invarianten über alle Payloads", async () => {
+    const [host, ben, lea] = await Promise.all([
+      connectGuest(server, { guestDoc: true }),
+      connectGuest(server, { guestDoc: true }),
+      connectGuest(server, { guestDoc: true }),
+    ]);
+    if (host === undefined || ben === undefined || lea === undefined) throw new Error("Clients fehlen");
+    const code = await createLobby(host, "Mia");
+    await joinLobby(ben, code, "Ben");
+    await joinLobby(lea, code, "Lea");
+    // Zeit pro Frage „Host“, nach jeder Frage „Host“, der Host zeigt nur an (spielt nicht mit).
+    const settings = { rounds: 1, questionsPerCategory: 2, answerSec: 0, afterQuestionSec: 0, hostPlays: false };
+    expect(await host.emit("lobby:update-settings", settings)).toEqual({ ok: true, data: null });
+    const players = [
+      autoPlay(server, ben, code, { answer: "correct" }),
+      autoPlay(server, lea, code, { answer: () => null }),
+    ];
+    expect(await host.emit("lobby:start", {})).toEqual({ ok: true, data: null });
+    const benId = lastSelf(ben)?.playerId ?? "";
+    const leaId = lastSelf(lea)?.playerId ?? "";
+    const hostId = lastSelf(host)?.playerId ?? "";
+
+    // Frage 1: Ben antwortet, Lea nicht – ohne Countdown wartet die Frage auf „Auflösen“ des Hosts.
+    const first = await host.waitFor(
+      "lobby:state",
+      (state) => state.phase === "question" && state.question?.index === 1 && state.question.answeredBy.includes(benId),
+      30_000,
+    );
+    expect(first.order).not.toContain(hostId);
+    const revealed = host.waitFor("lobby:state", (state) => state.phase === "reveal", 10_000);
+    expect(await host.emit("game:continue", { phase: "question" })).toEqual({ ok: true, data: null });
+    const reveal = await revealed;
+    expect(reveal.phaseEndsAt).toBeNull();
+    expect(reveal.question?.picks?.[leaId]).toBeNull();
+    // Weiter erst auf Tipp des Hosts.
+    const next = host.waitFor(
+      "lobby:state",
+      (state) => state.phase === "question" && state.question?.index === 2 && state.question.answeredBy.includes(benId),
+      15_000,
+    );
+    expect(await host.emit("game:continue", { phase: "reveal" })).toEqual({ ok: true, data: null });
+
+    // Frage 2 ist offen (Ben hat schon geantwortet): Der Host beendet das Spiel – sie zählt nicht.
+    const second = await next;
+    await eventually(() => (second.question?.startsAt ?? 0) <= Date.now(), 10_000);
+    const over = waitForPhase(host, "game_over", 10_000);
+    expect(await host.emit("game:end", {})).toEqual({ ok: true, data: null });
+    const final = await over;
+    for (const player of players) player.stop();
+    expect(final.results?.ranking.map((entry) => [entry.playerId, entry.score])).toEqual([
+      [benId, 1],
+      [leaId, 0],
+    ]);
+    expect(final.board.flatMap((row) => Object.values(row.results).map((list) => list.length))).toEqual([1, 1]);
+    for (const player of players) expect(player.rejected).toEqual([]);
+    const actor = actorOf(server, code);
+    // Nach dem Ergebnis geht es automatisch zurück in die Lobby (ADR-038) – dann steht das Spiel in `lastGame`.
+    expect((actor.state.game ?? actor.state.lastGame)?.endReason).toBe("host_ended");
+    const [game] = await waitForGameDoc(server, actor.lobbyId);
+    expect(game?.players.map((player) => player.playerId).sort()).toEqual([benId, leaId].sort());
+    for (const client of [host, ben, lea]) {
       expectCleanPayloads(client);
       client.close();
     }
