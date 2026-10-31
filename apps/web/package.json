@@ -14,21 +14,21 @@
   "dependencies": {
     "@quizmaster/db": "workspace:*",
     "@quizmaster/shared": "workspace:*",
-    "jose": "6.2.12",
+    "jose": "6.2.13",
     "jsqr": "1.4.0",
-    "lucide-react": "1.48.0",
+    "lucide-react": "1.61.0",
     "mongodb": "7.7.0",
     "motion": "13.4.6",
     "next": "16.4.3",
-    "pino": "10.3.1",
+    "pino": "10.4.0",
     "qrcode": "1.5.4",
-    "rate-limiter-flexible": "11.2.1",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "serwist": "9.5.12",
+    "rate-limiter-flexible": "11.2.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "serwist": "9.5.13",
     "socket.io-client": "4.8.4",
     "zod": "4.6.7",
-    "zustand": "5.0.15"
+    "zustand": "5.0.16"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
@@ -37,7 +37,7 @@
     "@types/react-dom": "19.3.0",
     "babel-plugin-react-compiler": "1.0.0",
     "esbuild": "0.28.2",
-    "flag-icons": "7.5.0",
+    "flag-icons": "7.6.0",
     "sharp": "0.35.5",
     "tailwindcss": "4.3.3"
   }
