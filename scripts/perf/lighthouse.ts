@@ -11,8 +11,7 @@
 //   --resolve quiz.example=203.0.113.7 (Chromium --host-resolver-rules) und --insecure (Origin-Zertifikat).
 // Berichte (JSON + HTML) und Zusammenfassung nach reports/lighthouse/<zeit>/.
 // Exit 1 bei Unterschreitung (mit --warn-only nur Warnungen, Exit 0), Exit 2 bei Aufruf-/Startfehlern.
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createTestDatabase, type TestDatabase } from "@quizmaster/db/testing";
@@ -28,16 +27,21 @@ import {
 } from "../dev/lib/processes.ts";
 import { createStackSecrets, realtimeStackEnv, redactSecrets, webStackEnv } from "../dev/lib/stack-config.ts";
 import {
+  chromeFlags,
   findChromium,
   LIGHTHOUSE_THRESHOLDS,
   type LighthouseRun,
   lighthouseArgs,
   medianRun,
-  parseReport,
   parseResolve,
   VITALS_TARGETS,
   violations,
 } from "./lib/lighthouse.ts";
+import {
+  LighthouseInterruptedError,
+  readLighthouseReport,
+  runLighthouseMeasurement,
+} from "./lib/lighthouse-process.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const LIGHTHOUSE_CLI = join(REPO_ROOT, "scripts", "node_modules", "lighthouse", "cli", "index.js");
@@ -143,25 +147,24 @@ async function startStack(options: {
   }
 }
 
-function runLighthouse(url: string, outputBase: string, args: string[], chrome: string): Promise<number | null> {
-  return new Promise((resolveRun) => {
-    const child = spawn(process.execPath, [LIGHTHOUSE_CLI, ...args], {
-      env: { ...process.env, CHROME_PATH: chrome },
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString("utf8")).slice(-4_000);
-    });
-    child.on("exit", (code) => {
-      if (code !== 0) log(`Lighthouse ${new URL(url).pathname}: Exit ${code}\n${stderr.trim().slice(-1_000)}`);
-      resolveRun(code);
-    });
-    child.on("error", (error) => {
-      log(`Lighthouse nicht startbar: ${error.message} (${outputBase})`);
-      resolveRun(null);
-    });
+async function runLighthouse(
+  url: string,
+  outputBase: string,
+  args: string[],
+  chrome: string,
+  flags: string[],
+): Promise<number | null> {
+  const result = await runLighthouseMeasurement(process.execPath, [LIGHTHOUSE_CLI, ...args], {
+    env: { ...process.env, CHROME_PATH: chrome },
+    chromePath: chrome,
+    chromeFlags: flags,
   });
+  if (result.timedOut) log(`Lighthouse ${new URL(url).pathname}: Gesamtfrist von 4 Minuten überschritten`);
+  if (result.error !== null) log(`Lighthouse nicht startbar: ${result.error.message} (${outputBase})`);
+  else if (result.code !== 0) {
+    log(`Lighthouse ${new URL(url).pathname}: Exit ${result.code}\n${result.stderr.trim().slice(-1_000)}`);
+  }
+  return result.timedOut ? null : result.code;
 }
 
 const percent = (score: number | null) => (score === null ? "–" : String(Math.round(score * 100)));
@@ -265,14 +268,17 @@ async function main(): Promise<number> {
       for (let index = 1; index <= runs; index++) {
         const slug = target.path === "/" ? "start" : "lobby";
         const outputBase = join(runDir, `${slug}-${index}`);
-        await runLighthouse(url, outputBase, lighthouseArgs(url, outputBase, chromeOptions), chrome);
+        const exitCode = await runLighthouse(
+          url,
+          outputBase,
+          lighthouseArgs(url, outputBase, chromeOptions),
+          chrome,
+          chromeFlags(chromeOptions),
+        );
         const reportPath = `${outputBase}.report.json`;
-        if (!existsSync(reportPath)) {
-          all.push(parseReport(target.page, url, { runtimeError: { code: "KEIN_BERICHT" } }, null));
-          continue;
-        }
-        const run = parseReport(target.page, url, JSON.parse(readFileSync(reportPath, "utf8")), reportPath);
+        const run = readLighthouseReport(exitCode, target.page, url, reportPath);
         all.push(run);
+        if (run.reportPath === null) continue;
         log(
           `${target.page} #${index}: P ${percent(run.scores.performance)} · A11y ${percent(run.scores.accessibility)} · BP ${percent(run.scores["best-practices"])} · LCP ${seconds(run.lcpMs)} · CLS ${run.cls?.toFixed(3) ?? "–"} · TBT ${run.tbtMs === null ? "–" : Math.round(run.tbtMs)} ms`,
         );
@@ -315,6 +321,7 @@ main().then(
   (error: unknown) => {
     console.error(`perf:lighthouse – ${error instanceof Error ? error.message : String(error)}`);
     if (error instanceof UsageError) console.error(`Aufruf: ${USAGE}`);
+    if (error instanceof LighthouseInterruptedError) process.exit(error.signal === "SIGINT" ? 130 : 143);
     process.exit(2);
   },
 );
