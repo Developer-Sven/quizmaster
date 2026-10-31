@@ -1,7 +1,7 @@
 {
   "name": "quizmaster",
   "private": true,
-  "description": "Live-Quiz-Duelle für 2–8 Personen als PWA – Web (Next.js) + Realtime (Socket.IO) + MongoDB.",
+  "description": "Live-Quiz-Duelle f\u00fcr 2\u20138 Personen als PWA \u2013 Web (Next.js) + Realtime (Socket.IO) + MongoDB.",
   "license": "MIT",
   "packageManager": "pnpm@12.8.1+sha512.f64ba907507f5ceafe06c8d38e6052d0179444580ec1279ddd5bfc11cb48aa8a2644b66598e07e761da84872a9fc57d5f902b87fa49d024198d558612aabbe45",
   "engines": {
@@ -56,7 +56,7 @@
     "tsx": "4.23.15",
     "turbo": "2.11.5",
     "typescript": "7.0.2",
-    "vite": "8.3.1",
-    "vitest": "5.0.2"
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
   }
 }

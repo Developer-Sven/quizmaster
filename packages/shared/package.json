@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "obscenity": "0.4.6",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "sideEffects": false
 }
