@@ -544,6 +544,17 @@ pnpm loadtest --lobbies 375 --players 8 --duration 4m --ramp 90s --catalog conte
 Budgets für das initiale JS (gzip): Startseite ≤ 165 KB, Lobby ≤ 180 KB (Werte in `scripts/perf/lib/bundle.ts`).
 Ergebnisse landen in `reports/` (lokal, gitignored); der Lasttest läuft nur gegen die Test-Datenbank.
 
+Lighthouse steuert Chromium über CDP. Der dafür ungenutzte WebDriver-BiDi-Mapper wird gezielt aus
+Puppeteer 25.12.0 entfernt (`pnpm-workspace.yaml`): Er enthält neben seiner Zod-3-Abhängigkeit auch eine
+eingebettete verwundbare Kopie (GHSA-mrhx-c7xc-m3w5). Alle Quiz-Lighthouse-Befehle bleiben verfügbar;
+direkte BiDi-Aufrufe über diese interne Puppeteer-Installation werden nicht unterstützt. Beim nächsten
+Puppeteer-Update den Override und den CDP-Pfad erneut prüfen. Der Regressionstest unter
+`scripts/perf/lib/lighthouse-dependencies.test.ts` prüft die tatsächliche Installation und die echten
+Moduleinstiege. `pnpm audit` prüft auch die Entwicklungsabhängigkeiten, `pnpm audit --prod` die Produktion.
+pnpm kann nach einem Update unreferenzierte Paketordner im virtuellen Store behalten. Falls der Test solche
+Altbestände meldet, die Entwicklungsinstallation aus dem gefrorenen Lockfile frisch aufbauen; auf einem laufenden
+Server die Paketordner nur nach Prüfung aller Verweise und mit Sicherung bereinigen.
+
 ### Admin-Werkzeuge (Kill-Switches, Sperren)
 
 Realtime übernimmt Änderungen per Change Stream sofort, ein Neustart ist nicht nötig. Verbindung aus `.env.prod`
