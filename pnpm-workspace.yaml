@@ -19,3 +19,7 @@ overrides:
   follow-redirects: 1.16.2
   fast-uri@3: 3.1.9
   fast-uri@4: 4.2.3
+  # Lighthouse uses CDP only. Remove the unused BiDi mapper, including its bundled
+  # vulnerable Zod 3 (GHSA-mrhx-c7xc-m3w5); an external Zod override cannot fix it.
+  # Version-scoped deliberately: recheck the CDP path when upgrading Puppeteer.
+  "puppeteer-core@25.12.0>chromium-bidi": "-"
