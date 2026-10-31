@@ -14,16 +14,16 @@
     "@quizmaster/db": "workspace:*",
     "@quizmaster/game-engine": "workspace:*",
     "@quizmaster/shared": "workspace:*",
-    "jose": "6.2.12",
+    "jose": "6.2.13",
     "mongodb": "7.7.0",
-    "pino": "10.3.1",
-    "rate-limiter-flexible": "11.2.1",
+    "pino": "10.4.0",
+    "rate-limiter-flexible": "11.2.3",
     "socket.io": "4.8.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "mongodb-memory-server-core": "11.3.0",
     "socket.io-client": "4.8.4",
-    "tsdown": "0.23.0"
+    "tsdown": "0.23.3"
   }
 }
