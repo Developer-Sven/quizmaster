@@ -12,3 +12,10 @@ trustPolicy: no-downgrade
 verifyDepsBeforeRun: error
 allowBuilds:
   esbuild: true
+
+# Pin security fixes for transitive tooling dependencies.
+overrides:
+  semver@6: 7.8.5
+  follow-redirects: 1.16.2
+  fast-uri@3: 3.1.9
+  fast-uri@4: 4.2.3
