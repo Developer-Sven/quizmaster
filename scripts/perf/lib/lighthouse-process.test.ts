@@ -103,6 +103,49 @@ async function within<T>(value: Promise<T>, ms: number): Promise<T | "STILL_RUNN
 
 describe("Lighthouse-Prozessfrist", () => {
   it.skipIf(process.platform === "win32")(
+    "verwendet den von Chromium gewählten Debug-Port",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "qm-browser-port-"));
+      const browser = join(root, "chrome");
+      const profileMarker = join(root, "profile");
+      writeFileSync(
+        browser,
+        `#!/usr/bin/env node
+const { createServer } = require('node:http');
+const { writeFileSync } = require('node:fs');
+const { join } = require('node:path');
+const flag = (name) => process.argv.find((arg) => arg.startsWith(name + '=')).split('=').slice(1).join('=');
+const profile = flag('--user-data-dir');
+const server = createServer((_request, response) => response.end('fixture'));
+server.listen(Number(flag('--remote-debugging-port')), '127.0.0.1', () => {
+  writeFileSync(${JSON.stringify(profileMarker)}, profile);
+  writeFileSync(join(profile, 'DevToolsActivePort'), server.address().port + '\\n/devtools/browser/fixture\\n');
+});`,
+        { mode: 0o700 },
+      );
+      try {
+        const result = await runLighthouseMeasurement(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `const port = process.argv[1].split('=')[1];
+          const response = await fetch('http://127.0.0.1:' + port);
+          process.exitCode = await response.text() === 'fixture' ? 0 : 1;`,
+            "--",
+          ],
+          { env: process.env, chromePath: browser, chromeFlags: [], timeoutMs: 3_000, killGraceMs: 100 },
+        );
+        expect(result).toMatchObject({ code: 0, timedOut: false, error: null });
+        expect(existsSync(readFileSync(profileMarker, "utf8"))).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    5_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "besitzt einen separat detached gestarteten Browser samt Enkeln, ohne fremde Gruppen zu beenden",
     async () => {
       const root = mkdtempSync(join(tmpdir(), "qm-owned-browser-"));
