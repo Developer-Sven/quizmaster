@@ -132,7 +132,7 @@ export interface LayoutReport {
 /** Layout- und Design-Regeln im gerenderten DOM (docs/09 §1 Regeln 5, 8, 9; §4; §13). */
 export async function layoutReport(page: Page, allowHorizontalScroll: readonly string[] = []): Promise<LayoutReport> {
   return page.evaluate((allowed) => {
-    const describe = (element: Element) => {
+    const describeElement = (element: Element) => {
       const testId = element.closest("[data-testid]")?.getAttribute("data-testid");
       const classes = (element.getAttribute("class") ?? "").split(/\s+/).slice(0, 3).join(".");
       return `${element.tagName.toLowerCase()}${classes ? `.${classes}` : ""}${testId ? ` (in ${testId})` : ""}`;
@@ -154,7 +154,7 @@ export async function layoutReport(page: Page, allowHorizontalScroll: readonly s
       if (overflowX !== "auto" && overflowX !== "scroll") continue;
       if (element.scrollWidth <= element.clientWidth + 1) continue;
       if (allowed.some((selector) => element.matches(selector))) continue;
-      horizontalScroll.push(`${describe(element)}: scrollWidth ${element.scrollWidth} > ${element.clientWidth}`);
+      horizontalScroll.push(`${describeElement(element)}: scrollWidth ${element.scrollWidth} > ${element.clientWidth}`);
     }
 
     // Oberste Ebene: offenes Modal (Sheet/Dialog, aria-modal) – sonst die ganze Seite. Inerte (ausblendende)
@@ -444,7 +444,7 @@ export interface TextZoomReport {
  */
 export async function textZoomReport(page: Page): Promise<TextZoomReport> {
   return page.evaluate(() => {
-    const describe = (element: Element, text: string) => {
+    const describeElement = (element: Element, text: string) => {
       const testId = element.closest("[data-testid]")?.getAttribute("data-testid");
       return `„${text.slice(0, 40)}“ ${element.tagName.toLowerCase()}${testId ? ` (in ${testId})` : ""}`;
     };
@@ -464,14 +464,14 @@ export async function textZoomReport(page: Page): Promise<TextZoomReport> {
       if (text === "") continue;
       const box = element.getBoundingClientRect();
       if (box.height === 0 && box.width === 0) continue;
-      if (box.width < 1) collapsed.push(describe(element, text));
+      if (box.width < 1) collapsed.push(describeElement(element, text));
       const style = getComputedStyle(element);
       if (
         (clips(style.overflowX) && element.scrollWidth > element.clientWidth + 1) ||
         (clips(style.overflowY) && element.scrollHeight > element.clientHeight + 1)
       ) {
         clipped.push(
-          `${describe(element, text)}: ${element.scrollWidth}×${element.scrollHeight} > ${element.clientWidth}×${element.clientHeight}`,
+          `${describeElement(element, text)}: ${element.scrollWidth}×${element.scrollHeight} > ${element.clientWidth}×${element.clientHeight}`,
         );
       }
     }
@@ -493,7 +493,7 @@ export async function textZoomReport(page: Page): Promise<TextZoomReport> {
       .map((element) => {
         const box = element.getBoundingClientRect();
         const name = element.getAttribute("aria-label") ?? element.textContent ?? "";
-        return `${describe(element, name.trim())}: ${Math.round(box.left)}–${Math.round(box.right)} bei ${window.innerWidth}`;
+        return `${describeElement(element, name.trim())}: ${Math.round(box.left)}–${Math.round(box.right)} bei ${window.innerWidth}`;
       });
     const root = document.documentElement;
     return {

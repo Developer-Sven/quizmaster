@@ -197,18 +197,29 @@ function ownedBrowser(options: ChromeOptions, overrides: ModuleOverrides, signal
   const browser = new Launcher(options, overrides);
   // The upstream readiness loop has no cancellation; use the same local debug endpoint with bounded waits.
   browser.waitUntilReady = async () => {
+    const activePortPath = browser.userDataDir ? join(browser.userDataDir, "DevToolsActivePort") : undefined;
     const readyDeadline = Date.now() + 25_000;
     while (Date.now() < readyDeadline) {
       signal.throwIfAborted();
-      try {
-        const response = await fetch(`http://127.0.0.1:${browser.port}/json/version`, {
-          signal: AbortSignal.any([signal, AbortSignal.timeout(500)]),
-        });
-        const ready = response.ok;
-        await response.body?.cancel();
-        if (ready) return;
-      } catch {
-        signal.throwIfAborted();
+      if (!browser.port && activePortPath) {
+        try {
+          const port = Number(readFileSync(activePortPath, "utf8").split("\n", 1)[0]);
+          if (Number.isInteger(port) && port > 0 && port <= 65_535) browser.port = port;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+      }
+      if (browser.port) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${browser.port}/json/version`, {
+            signal: AbortSignal.any([signal, AbortSignal.timeout(500)]),
+          });
+          const ready = response.ok;
+          await response.body?.cancel();
+          if (ready) return;
+        } catch {
+          signal.throwIfAborted();
+        }
       }
       await delay(100, undefined, { signal });
     }

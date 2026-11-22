@@ -45,14 +45,14 @@ Env-Dateien werden nie committet und von den Werkzeugen nie ausgegeben.
 
 ## Entwicklung
 
-| Befehl | Zweck |
-|---|---|
-| `pnpm dev` | Web und Realtime mit `.env.dev` (Standard: Web :3000, Realtime :4000) |
-| `pnpm check` | Biome, Typecheck, alle Tests und Content-Validierung |
-| `pnpm test` | Unit-, Property- und Integrationstests (Vitest) |
-| `pnpm test:e2e` | Playwright gegen zwei Test-Stacks (siehe „Test-Stack & E2E“) |
+| Befehl            | Zweck                                                                                |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `pnpm dev`        | Web und Realtime mit `.env.dev` (Standard: Web :3000, Realtime :4000)                |
+| `pnpm check`      | Biome, Typecheck, alle Tests und Content-Validierung                                 |
+| `pnpm test`       | Unit-, Property- und Integrationstests (Vitest)                                      |
+| `pnpm test:e2e`   | Playwright gegen zwei Test-Stacks (siehe „Test-Stack & E2E“)                         |
 | `pnpm stack:test` | Test-Stack (Test-Datenbank, Fixtures, Web + Realtime) für E2E und manuelle Prüfungen |
-| `pnpm build` | Produktions-Build (Next standalone inkl. Service Worker, Realtime-Bundle) |
+| `pnpm build`      | Produktions-Build (Next standalone inkl. Service Worker, Realtime-Bundle)            |
 
 Automatische Tests laufen nie gegen Dev- oder Produktionsdaten: lokal in `quizmaster_test` mit eigenem
 Collection-Präfix je Lauf, in der CI gegen `MongoMemoryReplSet` 8.0.32 (Verbindung: `TEST_MONGODB_URI`, siehe
@@ -63,9 +63,9 @@ Content-Validierung, Build, E2E, `pnpm audit --prod` (hohe/kritische Befunde bre
 Secret-Scan über das Repo und ein Schwachstellen-Scan des Projekt-Lockfiles. pnpm ≥ 11 schreibt `pnpm-lock.yaml`
 als zwei YAML-Dokumente (zuerst nur pnpm selbst, dann das Projekt) und Trivy liest nur das erste – die CI
 extrahiert deshalb das Projekt-Dokument und scannt es separat. Actions sind per Commit-SHA gepinnt, Dependabot
-schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Unter *Insights → Dependency graph* sollten
+schlägt Updates wöchentlich mit Wartezeit vor. Die CI deployt nicht. Unter _Insights → Dependency graph_ sollten
 die Projektpakete (z. B. `next`, `socket.io`) erscheinen und nicht nur pnpm – sonst liest GitHub das Lockfile nicht.
-Täglich (05:17 UTC) laufen nur Audit und Trivy gegen `main` (per *Run workflow* läuft die ganze CI für den gewählten
+Täglich (05:17 UTC) laufen nur Audit und Trivy gegen `main` (per _Run workflow_ läuft die ganze CI für den gewählten
 Branch): Neue Advisories zu unveränderten
 Abhängigkeiten fallen so auch ohne Push auf (ein roter Lauf benachrichtigt) – Dependabot unterstützt laut GitHub-Doku
 pnpm nur bis Version 10 und meldet für das pnpm-12-Lockfile womöglich nichts. GitHub pausiert Zeitpläne nach 60 Tagen
@@ -77,10 +77,10 @@ ohne Aktivität im Repo.
 Browser wie üblich über `PLAYWRIGHT_BROWSERS_PATH`) mit Mobil-Viewports gegen zwei Test-Stacks. Beide startet Playwright
 selbst als `webServer` und beendet sie am Ende mit `SIGTERM`; sie räumen ihre Test-Collections dabei selbst ab.
 
-| Stack | Skript | Ports (Standard) | Timing | Szenarien (Projekte) |
-|---|---|---|---|---|
-| Test-Stack | `pnpm stack:test` (`scripts/dev/stack-test.ts`) | Web 3200, Realtime 4200 | `GAME_TIMING=fast` | 1–8, 10, 11 (`pixel-7`, `iphone-15`) |
-| Normal-Stack | `node e2e/stack/normal-stack.ts` | Web 3201, Realtime 4201 | `GAME_TIMING=normal` | 9 (`a11y-360`, `a11y-430`), 12 (`sync`) |
+| Stack        | Skript                                          | Ports (Standard)        | Timing               | Szenarien (Projekte)                    |
+| ------------ | ----------------------------------------------- | ----------------------- | -------------------- | --------------------------------------- |
+| Test-Stack   | `pnpm stack:test` (`scripts/dev/stack-test.ts`) | Web 3200, Realtime 4200 | `GAME_TIMING=fast`   | 1–8, 10, 11 (`pixel-7`, `iphone-15`)    |
+| Normal-Stack | `node e2e/stack/normal-stack.ts`                | Web 3201, Realtime 4201 | `GAME_TIMING=normal` | 9 (`a11y-360`, `a11y-430`), 12 (`sync`) |
 
 ```bash
 pnpm test:e2e                     # alle Projekte; sync läuft zuletzt und allein (nach allen anderen Projekten)
@@ -118,18 +118,18 @@ Phasen laufen in Originallänge (`GAME_TIMING=normal`). Standard-Logs: `e2e/test
 
 Umgebungsvariablen für Tests, Test-Stacks und E2E:
 
-| Variable | Standard | Wirkung |
-|---|---|---|
-| `TEST_MONGODB_URI` | leer | Verbindung zur Test-Datenbank für `pnpm test`, die Test-Stacks (also auch E2E) und `pnpm loadtest`; nur aus der Prozessumgebung (Shell, CI), nie aus `.env.dev`. Leer: `MONGODB_URI` + `TEST_MONGODB_DB` aus `.env.dev`, ohne `.env.dev` (CI) ein `MongoMemoryReplSet` |
-| `TEST_MONGODB_DB` | `quizmaster_test` | Name der Test-Datenbank (mit `TEST_MONGODB_URI` aus der Shell, sonst aus `.env.dev`); muss auf `_test` enden, sonst bricht der Lauf ab. Jeder Lauf nutzt ein eigenes Collection-Präfix |
-| `RATE_LIMIT_MODE` | `normal` | `relaxed` multipliziert alle Rate-Limits und die Verbindungsgrenzen je Gast und IP mit 100; die Test-Stacks und der Lasttest setzen es selbst. Web und Realtime lehnen `relaxed` außerhalb einer `*_test`-Datenbank ab |
-| `E2E_WEB_PORT`, `E2E_REALTIME_PORT` | 3200, 4200 | Ports des Test-Stacks |
-| `E2E_NORMAL_WEB_PORT`, `E2E_NORMAL_REALTIME_PORT` | jeweils +1 (3201, 4201) | Ports des Normal-Stacks |
-| `E2E_WORKERS` | 2 | parallele Worker (1–2) |
-| `E2E_REUSE_STACK=1` | aus | laufende Stacks mit denselben Ports nutzen |
-| `E2E_NO_BUILD=1` | aus | Test-Stack mit `--no-build` (vorhandene Builds) |
-| `E2E_OUTPUT_DIR` | `e2e/test-results` | Ordner für Artefakte (relativ zu `e2e/`) |
-| `E2E_SCREENSHOT_DIR` | `docs/screenshots/w3`, falls ein lokales `docs/` existiert (nicht im Repo), sonst `<Artefakte>/screenshots` | Phasen-Screenshots aus Szenario 9 |
+| Variable                                          | Standard                                                                                                    | Wirkung                                                                                                                                                                                                                                                                |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TEST_MONGODB_URI`                                | leer                                                                                                        | Verbindung zur Test-Datenbank für `pnpm test`, die Test-Stacks (also auch E2E) und `pnpm loadtest`; nur aus der Prozessumgebung (Shell, CI), nie aus `.env.dev`. Leer: `MONGODB_URI` + `TEST_MONGODB_DB` aus `.env.dev`, ohne `.env.dev` (CI) ein `MongoMemoryReplSet` |
+| `TEST_MONGODB_DB`                                 | `quizmaster_test`                                                                                           | Name der Test-Datenbank (mit `TEST_MONGODB_URI` aus der Shell, sonst aus `.env.dev`); muss auf `_test` enden, sonst bricht der Lauf ab. Jeder Lauf nutzt ein eigenes Collection-Präfix                                                                                 |
+| `RATE_LIMIT_MODE`                                 | `normal`                                                                                                    | `relaxed` multipliziert alle Rate-Limits und die Verbindungsgrenzen je Gast und IP mit 100; die Test-Stacks und der Lasttest setzen es selbst. Web und Realtime lehnen `relaxed` außerhalb einer `*_test`-Datenbank ab                                                 |
+| `E2E_WEB_PORT`, `E2E_REALTIME_PORT`               | 3200, 4200                                                                                                  | Ports des Test-Stacks                                                                                                                                                                                                                                                  |
+| `E2E_NORMAL_WEB_PORT`, `E2E_NORMAL_REALTIME_PORT` | jeweils +1 (3201, 4201)                                                                                     | Ports des Normal-Stacks                                                                                                                                                                                                                                                |
+| `E2E_WORKERS`                                     | 2                                                                                                           | parallele Worker (1–2)                                                                                                                                                                                                                                                 |
+| `E2E_REUSE_STACK=1`                               | aus                                                                                                         | laufende Stacks mit denselben Ports nutzen                                                                                                                                                                                                                             |
+| `E2E_NO_BUILD=1`                                  | aus                                                                                                         | Test-Stack mit `--no-build` (vorhandene Builds)                                                                                                                                                                                                                        |
+| `E2E_OUTPUT_DIR`                                  | `e2e/test-results`                                                                                          | Ordner für Artefakte (relativ zu `e2e/`)                                                                                                                                                                                                                               |
+| `E2E_SCREENSHOT_DIR`                              | `docs/screenshots/w3`, falls ein lokales `docs/` existiert (nicht im Repo), sonst `<Artefakte>/screenshots` | Phasen-Screenshots aus Szenario 9                                                                                                                                                                                                                                      |
 
 **Artefakte:** `e2e/playwright-report/` (HTML-Bericht, öffnet nicht automatisch) und `e2e/test-results/` – Traces und
 Screenshots fehlgeschlagener Tests (`trace: retain-on-failure`, `screenshot: only-on-failure`) sowie die Stack-Logs in
@@ -143,12 +143,12 @@ Der Katalog (über 22.000 Fragen in 19 Kategorien) ist nicht Teil dieses Repos u
 Content-Befehle erwarten ihn unter `content/`. Für CI und E2E enthält das Repo synthetische Fixtures in
 `test/fixtures/content/`.
 
-| Befehl | Zweck |
-|---|---|
-| `pnpm content:validate` | Schema und Regeln aller Fragen (`content/`, falls vorhanden, und die Fixtures) |
-| `pnpm content:dedupe` / `content:stats` | Dubletten suchen, Abdeckung auswerten |
-| `pnpm content:seed --env dev` | Katalog idempotent in die Datenbank übernehmen |
-| `pnpm content:seed --env prod --confirm-prod` | dasselbe für Produktion (bricht bei auffällig vielen Rückzügen ab) |
+| Befehl                                        | Zweck                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------ |
+| `pnpm content:validate`                       | Schema und Regeln aller Fragen (`content/`, falls vorhanden, und die Fixtures) |
+| `pnpm content:dedupe` / `content:stats`       | Dubletten suchen, Abdeckung auswerten                                          |
+| `pnpm content:seed --env dev`                 | Katalog idempotent in die Datenbank übernehmen                                 |
+| `pnpm content:seed --env prod --confirm-prod` | dasselbe für Produktion (bricht bei auffällig vielen Rückzügen ab)             |
 
 Änderungen am Katalog werden per Change Stream sofort live – ein Neustart ist nicht nötig. Fragen, die mehrere
 unabhängige Spielende melden oder schlecht bewerten, nimmt die Schutzautomatik selbst aus dem Pool (siehe
@@ -192,13 +192,13 @@ Deploy, `scripts/deploy/service-user.cjs`) und gibt pm2 dessen uid/gid; der pm2-
 und ohne Zusatzgruppen. Vor jeder Aktivierung (`deploy:prod`, `deploy:rollback`, `deploy:restart`) setzt und prüft
 der Deploy die Rechte – passt etwas nicht, bricht er mit `SERVICE_ACCESS` ab, bevor etwas umgeschaltet wird:
 
-| Pfad | Rechte |
-|---|---|
-| `.deploy` | 0711 root – erreichbar, aber nicht auflistbar |
-| `.deploy/env`, `.deploy/env/*.env` | 0750 bzw. 0640 root:quizmaster – lesbar, nicht änderbar |
-| `.deploy/releases` | 0750 root:quizmaster – nur für die Gruppe: der Next.js-Build enthält Schlüssel (Preview-Modus, Server Actions) |
-| `.deploy/releases/<sha>`, `.deploy/runtime` | 0755/0644 root – lesbar; dass `quizmaster` nichts davon ändern kann, prüft der Deploy Datei für Datei |
-| `.deploy/releases/<sha>/web/apps/web/.next/cache` | 0700 quizmaster – die einzige beschreibbare Stelle (Next.js-Cache) |
+| Pfad                                              | Rechte                                                                                                         |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `.deploy`                                         | 0711 root – erreichbar, aber nicht auflistbar                                                                  |
+| `.deploy/env`, `.deploy/env/*.env`                | 0750 bzw. 0640 root:quizmaster – lesbar, nicht änderbar                                                        |
+| `.deploy/releases`                                | 0750 root:quizmaster – nur für die Gruppe: der Next.js-Build enthält Schlüssel (Preview-Modus, Server Actions) |
+| `.deploy/releases/<sha>`, `.deploy/runtime`       | 0755/0644 root – lesbar; dass `quizmaster` nichts davon ändern kann, prüft der Deploy Datei für Datei          |
+| `.deploy/releases/<sha>/web/apps/web/.next/cache` | 0700 quizmaster – die einzige beschreibbare Stelle (Next.js-Cache)                                             |
 
 Dateien, auf die `MONGODB_URI` verweist (`tlsCAFile`, `tlsCertificateKeyFile`, `tlsCRLFile`), müssen für
 `quizmaster` lesbar sein, und was der pm2-CLI als root lädt (`ecosystem.config.js`, `scripts/deploy/service-user.cjs`),
@@ -254,12 +254,12 @@ den Host-Caddy `https://<domain>/api/health` kontrolliert (nur Warnung) und es b
 Nicht abgedeckt sind ein vollständiger Lobby-Durchlauf (Session, Ticket, `lobby:create`) und die Bereitschaft von
 Mongo/Change Streams – das gehört in den Watchdog (siehe Monitoring).
 
-**Gemeinsamer pm2-Daemon:** `pm2 save` würde den Zustand *aller* Apps des Servers als Boot-Zustand speichern
+**Gemeinsamer pm2-Daemon:** `pm2 save` würde den Zustand _aller_ Apps des Servers als Boot-Zustand speichern
 (auch eine gerade manuell gestoppte fremde App). Der Deploy übernimmt deshalb nach dem Save für alle fremden Apps
 wieder exakt die vorher gespeicherten Einträge; nur `quizmaster-*` ändert sich. Abweichungen fremder Apps vom
 gespeicherten Stand werden mit Name und Status gemeldet, aber nie verändert.
 
-**Abbruch und SSH-Verbindung:** Strg+C, `SIGTERM` und ein Verbindungsabbruch (`SIGHUP`) brechen nur *vor* der
+**Abbruch und SSH-Verbindung:** Strg+C, `SIGTERM` und ein Verbindungsabbruch (`SIGHUP`) brechen nur _vor_ der
 Aktivierung ab. Eine begonnene Aktivierung läuft immer zu Ende – inklusive Rückweg, `state.json` und `pm2 save`;
 ein zweites Strg+C wird dann nur gemeldet (Notfall: `kill -9 <pid>`). Weil die Ausgabe bei einem
 Verbindungsabbruch verloren ist, den Deploy in `tmux`/`screen` starten. `pnpm deploy:status` (und jeder neue
@@ -316,12 +316,12 @@ SMOKE_BASE_URL=https://quizmaster.dev-sven.de pnpm --filter e2e test:smoke \
   --grep "Startseite|Installierbarkeit"                                                   # legt nichts an
 ```
 
-| Variable | Pflicht | Wirkung |
-|---|---|---|
-| `SMOKE_BASE_URL` | ja | Origin der Instanz (`http(s)://host[:port]`, ohne Pfad). Fehlt sie oder ist ein Wert ungültig, bricht der Lauf mit Meldung ab, bevor ein Browser startet (Playwright endet mit Code 2) |
-| `SMOKE_RESOLVE_TO` | nein | IP, auf die Chromium den Host auflöst (`--host-resolver-rules`, gilt auch für WebSockets) – Test am Cloudflare-Proxy vorbei. Nur dann werden Zertifikatsfehler ignoriert (`ignoreHTTPSErrors` und `--ignore-certificate-errors`; ohne das Flag scheitert die Service-Worker-Registrierung am Origin-Zertifikat). Caddy lässt außer Cloudflare nur Loopback zu, auf dem Server also `127.0.0.1` |
-| `SMOKE_OUTPUT` | nein | Ordner für Bericht und Artefakte, Standard `e2e/smoke-results`; relative Pfade gelten ab dem Aufrufverzeichnis (z. B. `reports/smoke-prod`). Nur ein neuer, leerer oder schon vom Smoke-Test markierter Ordner – Playwright leert darin `artifacts/` und `html/`. Eine `.gitignore` mit `*` im Ordner hält ihn aus Git heraus |
-| `SMOKE_PLAY` | nein | `0` = ohne Spiel (Kaltstart, Beitritt, Lobby und Verlassen laufen trotzdem) |
+| Variable           | Pflicht | Wirkung                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SMOKE_BASE_URL`   | ja      | Origin der Instanz (`http(s)://host[:port]`, ohne Pfad). Fehlt sie oder ist ein Wert ungültig, bricht der Lauf mit Meldung ab, bevor ein Browser startet (Playwright endet mit Code 2)                                                                                                                                                                                                         |
+| `SMOKE_RESOLVE_TO` | nein    | IP, auf die Chromium den Host auflöst (`--host-resolver-rules`, gilt auch für WebSockets) – Test am Cloudflare-Proxy vorbei. Nur dann werden Zertifikatsfehler ignoriert (`ignoreHTTPSErrors` und `--ignore-certificate-errors`; ohne das Flag scheitert die Service-Worker-Registrierung am Origin-Zertifikat). Caddy lässt außer Cloudflare nur Loopback zu, auf dem Server also `127.0.0.1` |
+| `SMOKE_OUTPUT`     | nein    | Ordner für Bericht und Artefakte, Standard `e2e/smoke-results`; relative Pfade gelten ab dem Aufrufverzeichnis (z. B. `reports/smoke-prod`). Nur ein neuer, leerer oder schon vom Smoke-Test markierter Ordner – Playwright leert darin `artifacts/` und `html/`. Eine `.gitignore` mit `*` im Ordner hält ihn aus Git heraus                                                                  |
+| `SMOKE_PLAY`       | nein    | `0` = ohne Spiel (Kaltstart, Beitritt, Lobby und Verlassen laufen trotzdem)                                                                                                                                                                                                                                                                                                                    |
 
 Prüfungen (ein Worker, keine Wiederholung – jede Wiederholung legte weitere Gäste und Lobbys an):
 
@@ -373,12 +373,12 @@ Turnstile fahren oder den Schalter kurz umlegen (siehe Schalter umlegen) und dan
 
 ### pm2
 
-| Befehl | Zweck |
-|---|---|
-| `pm2 status` | Zustand von `quizmaster-web`, `quizmaster-realtime`, `quizmaster-watchdog` |
-| `pm2 logs quizmaster-realtime --lines 200` | Logs (JSON von pino); Rotation über `pm2-logrotate` |
-| `pm2 restart quizmaster-web` | Neustart mit unveränderter Env |
-| `pnpm deploy:restart --apps …` | Neustart mit neu erzeugter Env (z. B. nach Secret-Rotation) |
+| Befehl                                     | Zweck                                                                      |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `pm2 status`                               | Zustand von `quizmaster-web`, `quizmaster-realtime`, `quizmaster-watchdog` |
+| `pm2 logs quizmaster-realtime --lines 200` | Logs (JSON von pino); Rotation über `pm2-logrotate`                        |
+| `pm2 restart quizmaster-web`               | Neustart mit unveränderter Env                                             |
+| `pnpm deploy:restart --apps …`             | Neustart mit neu erzeugter Env (z. B. nach Secret-Rotation)                |
 
 Secrets stehen weder in `ecosystem.config.js` noch in `dump.pm2`: Node liest sie beim Start aus der Env-Datei.
 Nie `pm2 restart … --update-env` verwenden – pm2 übernähme dann die Umgebung der aufrufenden Shell, und dort
@@ -426,11 +426,11 @@ pnpm setup:env prod --set TURNSTILE_ENABLED=true   # Turnstile beim Anlegen der 
 pnpm deploy:restart --apps web                     # Env neu aufteilen, nur web neu starten
 ```
 
-| Schalter | Werte | Neu starten |
-|---|---|---|
-| `TURNSTILE_ENABLED` | `true` \| `false` | `web` (Site- und Secret-Key müssen eingetragen sein) |
-| `SEARCH_INDEXING` | `true` \| `false` | `web` (`false` = `robots.txt` sperrt alles, Seiten mit `noindex`) |
-| `LOG_LEVEL` | `fatal` … `trace`, `silent` | betroffene Apps |
+| Schalter            | Werte                       | Neu starten                                                       |
+| ------------------- | --------------------------- | ----------------------------------------------------------------- |
+| `TURNSTILE_ENABLED` | `true` \| `false`           | `web` (Site- und Secret-Key müssen eingetragen sein)              |
+| `SEARCH_INDEXING`   | `true` \| `false`           | `web` (`false` = `robots.txt` sperrt alles, Seiten mit `noindex`) |
+| `LOG_LEVEL`         | `fatal` … `trace`, `silent` | betroffene Apps                                                   |
 
 ### Secrets rotieren
 
@@ -439,15 +439,15 @@ pnpm setup:env prod --rotate <SCHLÜSSEL>     # erzeugt genau diesen Wert neu, g
 pnpm deploy:restart --apps <apps>            # neue Env-Dateien erzeugen und die betroffenen Apps neu starten
 ```
 
-| Secret | Neu starten | Hinweis |
-|---|---|---|
-| `SESSION_SECRET` | `web` | alle Gast-Sessions werden neu angelegt |
-| `REALTIME_TICKET_SECRET` | `web,realtime` | beide gleichzeitig in einem Aufruf; offene Verbindungen verbinden sich neu |
-| `IP_HASH_SECRET` | `web,realtime` | Rate-Limit-Zähler beginnen neu; bestehende IP-Sperren greifen nicht mehr (neu setzen) |
-| `METRICS_TOKEN` | `realtime,watchdog` | externes Monitoring anpassen |
-| `TURNSTILE_SECRET_KEY` | `web` | im Cloudflare-Dashboard erzeugen und in `.env.prod` eintragen |
-| Passwort in `MONGODB_URI` | `web,realtime` | zuerst im Cluster ändern; Backups lesen die URI automatisch |
-| `BACKUP_PASSPHRASE` | – | alte Passphrase aufheben, bis die alten Backups abgelaufen sind (14 Tage) |
+| Secret                    | Neu starten         | Hinweis                                                                               |
+| ------------------------- | ------------------- | ------------------------------------------------------------------------------------- |
+| `SESSION_SECRET`          | `web`               | alle Gast-Sessions werden neu angelegt                                                |
+| `REALTIME_TICKET_SECRET`  | `web,realtime`      | beide gleichzeitig in einem Aufruf; offene Verbindungen verbinden sich neu            |
+| `IP_HASH_SECRET`          | `web,realtime`      | Rate-Limit-Zähler beginnen neu; bestehende IP-Sperren greifen nicht mehr (neu setzen) |
+| `METRICS_TOKEN`           | `realtime,watchdog` | externes Monitoring anpassen                                                          |
+| `TURNSTILE_SECRET_KEY`    | `web`               | im Cloudflare-Dashboard erzeugen und in `.env.prod` eintragen                         |
+| Passwort in `MONGODB_URI` | `web,realtime`      | zuerst im Cluster ändern; Backups lesen die URI automatisch                           |
+| `BACKUP_PASSPHRASE`       | –                   | alte Passphrase aufheben, bis die alten Backups abgelaufen sind (14 Tage)             |
 
 ### Backups, Restore-Test und Wiederherstellung
 
@@ -515,18 +515,18 @@ pnpm ops:install-cron    # als root: Health jede Minute, Backup 03:30, Kontrolle
   anderen Host).
 - `/metrics` (Prometheus-Format) ist nur lokal mit `METRICS_TOKEN` erreichbar.
 
-| Watchdog-Regel | Alarm, wenn … |
-|---|---|
-| `web_health`, `realtime_health` | `/api/health` bzw. `/healthz` länger als 2 min gestört ist (`ok: false`, 5xx, keine Antwort; 429 gilt als „lebt“) |
-| `event_loop` | der Event-Loop-p99 von Realtime 5 min lang über 200 ms liegt |
-| `error_rate` | mehr als 1 % der Client-Events in 5 min mit `INTERNAL` enden (ab 200 Events) |
-| `limit_spike` | in 5 min ≥ 200 Rate-Limit-Treffer anfallen (Angriff?) |
-| `change_stream` | Change Streams in 15 min ≥ 3-mal neu starten – und das länger als 16 min anhält |
-| `mongo` | in 5 min ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler auftreten – und das länger als 6 min anhält |
-| `restart_loop` | Realtime in 15 min ≥ 3-mal neu startet |
-| `auto_retire` | die Schutzautomatik in 15 min ≥ 5 Fragen zurückzieht oder einen fälligen Rückzug wegen ihres Tagesbudgets zurückhält |
-| `origin_retention` | die 30-Tage-Löschung der IP-Schlüssel an Meldungen und Bewertungen seit über 3 h nicht erfolgreich lief (ohne Erfolg: seit dem Start von Realtime) – Logs und die Teilindizes `createdAt_origin`/`updatedAt_origin` prüfen |
-| `metrics` | `/metrics` 5 min lang nicht lesbar ist, obwohl `/healthz` antwortet (z. B. falscher `METRICS_TOKEN`) |
+| Watchdog-Regel                  | Alarm, wenn …                                                                                                                                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web_health`, `realtime_health` | `/api/health` bzw. `/healthz` länger als 2 min gestört ist (`ok: false`, 5xx, keine Antwort; 429 gilt als „lebt“)                                                                                                          |
+| `event_loop`                    | der Event-Loop-p99 von Realtime 5 min lang über 200 ms liegt                                                                                                                                                               |
+| `error_rate`                    | mehr als 1 % der Client-Events in 5 min mit `INTERNAL` enden (ab 200 Events)                                                                                                                                               |
+| `limit_spike`                   | in 5 min ≥ 200 Rate-Limit-Treffer anfallen (Angriff?)                                                                                                                                                                      |
+| `change_stream`                 | Change Streams in 15 min ≥ 3-mal neu starten – und das länger als 16 min anhält                                                                                                                                            |
+| `mongo`                         | in 5 min ≥ 3 Verbindungsfehler (`heartbeat`, `pool_cleared`) oder ≥ 10 sonstige Mongo-Fehler auftreten – und das länger als 6 min anhält                                                                                   |
+| `restart_loop`                  | Realtime in 15 min ≥ 3-mal neu startet                                                                                                                                                                                     |
+| `auto_retire`                   | die Schutzautomatik in 15 min ≥ 5 Fragen zurückzieht oder einen fälligen Rückzug wegen ihres Tagesbudgets zurückhält                                                                                                       |
+| `origin_retention`              | die 30-Tage-Löschung der IP-Schlüssel an Meldungen und Bewertungen seit über 3 h nicht erfolgreich lief (ohne Erfolg: seit dem Start von Realtime) – Logs und die Teilindizes `createdAt_origin`/`updatedAt_origin` prüfen |
+| `metrics`                       | `/metrics` 5 min lang nicht lesbar ist, obwohl `/healthz` antwortet (z. B. falscher `METRICS_TOKEN`)                                                                                                                       |
 
 `change_stream` und `mongo` melden nur eine Störung, die länger als ihr Zählfenster anhält: Der Fehlerschub eines
 kurzen Netzaussetzers (5–60 s) bleibt nur ein Fenster lang im Zähler und ist kein Alarm; eine anhaltende Störung meldet
@@ -631,30 +631,30 @@ zählen nach der Wiederherstellung aber nicht mehr für die Schutzautomatik.
 
 ### Runbooks
 
-| Lage | Vorgehen |
-|---|---|
-| Deploy fehlerhaft | `pnpm deploy:rollback`, danach Ursache in `pm2 logs` suchen |
-| Deploy-Sitzung abgebrochen | `pnpm deploy:status` – bei „unvollständige Aktivierung“: `pnpm deploy:prod --sha <sha>` erneut oder `pnpm deploy:rollback` |
-| Alarm „gestört seit … min“ | `pm2 status`, `pm2 logs <app> --lines 100`, `pnpm deploy:status`; Status `errored` → `pnpm deploy:restart --apps <app>`, sonst `pnpm deploy:rollback` |
-| Realtime hängt, hohe CPU | Metriken prüfen → `pnpm admin:config set maxActiveLobbies=<n> lobbyCreationEnabled=false --confirm-prod` → `pm2 restart quizmaster-realtime` (Clients verbinden neu) → Ursache im Profil suchen |
-| MongoDB nicht erreichbar | laufende Spiele laufen im Speicher weiter, neue Sessions/Lobbys schlagen fehl → Wartungsbanner, sobald die DB wieder schreibbar ist (`pnpm admin:config set maintenance=on …`), Cluster-Status prüfen |
-| Datenverlust/Fehlbedienung in der DB | `pnpm ops:restore` (Plan) → `pnpm ops:restore --archive <datei> --confirm-prod` |
-| Bot-Welle erstellt Lobbys | `pnpm admin:config set lobbyCreationEnabled=false --confirm-prod` oder `turnstileOnJoin=true`; einzelne Quellen `pnpm admin:ban add --ip …`; Cloudflare-Rate-Limit-Regel verschärfen |
-| DDoS | Cloudflare „Under Attack Mode“, `pnpm admin:config set maxActiveLobbies=<n> --confirm-prod`, Caddy-Allowlist prüfen (`pnpm caddy:dry-run`) |
-| Beleidigende Namen | `pnpm admin:config block-term add <begriff> --confirm-prod` (wirkt beim nächsten Beitritt), betroffene Gäste `pnpm admin:ban add --guest <guestId> …` |
-| Falsche Frage verbreitet sich | Frage im Katalog auf `retired` setzen oder korrigieren → Seed → Change Stream nimmt sie sofort aus dem Pool |
+| Lage                                                                                                             | Vorgehen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deploy fehlerhaft                                                                                                | `pnpm deploy:rollback`, danach Ursache in `pm2 logs` suchen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Deploy-Sitzung abgebrochen                                                                                       | `pnpm deploy:status` – bei „unvollständige Aktivierung“: `pnpm deploy:prod --sha <sha>` erneut oder `pnpm deploy:rollback`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Alarm „gestört seit … min“                                                                                       | `pm2 status`, `pm2 logs <app> --lines 100`, `pnpm deploy:status`; Status `errored` → `pnpm deploy:restart --apps <app>`, sonst `pnpm deploy:rollback`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Realtime hängt, hohe CPU                                                                                         | Metriken prüfen → `pnpm admin:config set maxActiveLobbies=<n> lobbyCreationEnabled=false --confirm-prod` → `pm2 restart quizmaster-realtime` (Clients verbinden neu) → Ursache im Profil suchen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| MongoDB nicht erreichbar                                                                                         | laufende Spiele laufen im Speicher weiter, neue Sessions/Lobbys schlagen fehl → Wartungsbanner, sobald die DB wieder schreibbar ist (`pnpm admin:config set maintenance=on …`), Cluster-Status prüfen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Datenverlust/Fehlbedienung in der DB                                                                             | `pnpm ops:restore` (Plan) → `pnpm ops:restore --archive <datei> --confirm-prod`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Bot-Welle erstellt Lobbys                                                                                        | `pnpm admin:config set lobbyCreationEnabled=false --confirm-prod` oder `turnstileOnJoin=true`; einzelne Quellen `pnpm admin:ban add --ip …`; Cloudflare-Rate-Limit-Regel verschärfen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| DDoS                                                                                                             | Cloudflare „Under Attack Mode“, `pnpm admin:config set maxActiveLobbies=<n> --confirm-prod`, Caddy-Allowlist prüfen (`pnpm caddy:dry-run`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Beleidigende Namen                                                                                               | `pnpm admin:config block-term add <begriff> --confirm-prod` (wirkt beim nächsten Beitritt), betroffene Gäste `pnpm admin:ban add --guest <guestId> …`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Falsche Frage verbreitet sich                                                                                    | Frage im Katalog auf `retired` setzen oder korrigieren → Seed → Change Stream nimmt sie sofort aus dem Pool                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Schutzautomatik/Prüf-Queue: Alarm „Schutzautomatik zieht ungewöhnlich viele Fragen zurück“ oder offene Meldungen | `pnpm admin:reports --env prod --confirm-prod` (Gründe, Quellen, Zeitraum). Missbrauch → Gäste hinter den Meldungen sperren (`pnpm admin:ban add --report <meldungs-id> …`, IDs aus `--json`), ggf. `pnpm admin:config set turnstileOnJoin=true --confirm-prod`; zu Unrecht zurückgezogene Fragen erst ansehen (`pnpm admin:reports --restore-auto --since <iso> --dry-run --env prod --confirm-prod`), dann ohne `--dry-run` zurückholen. Einzelne Frage: berechtigte Meldungen → Frage im Katalog korrigieren → Seed → `--resolve <id>`; unberechtigte → `--dismiss <id>` und eine zurückgezogene Frage per `--restore <frage-id>` zurück in den Pool (jeweils `--env prod --confirm-prod`) |
-| Antwort-Leak entdeckt | Hotfix + Release, `pnpm admin:config set minClientProtocol=<n> --confirm-prod`, Test ergänzen |
-| Secret kompromittiert | rotieren (siehe oben), betroffene Apps neu starten, Vorfall dokumentieren |
-| Alarm „Backup fehlgeschlagen“ / „Backup-Kontrolle“ | `journalctl -t quizmaster-backup -t quizmaster-check-backup`, Ursache beheben (z. B. nicht committete Betriebswerkzeuge), `pnpm ops:backup` erneut |
-| Alarm „Cloudflare-IP-Liste … nicht abrufbar“ | `journalctl -t quizmaster-caddy`, `pnpm caddy:dry-run`; bei geänderter Liste `pnpm caddy:install` und Datei committen |
-| Deploy bricht mit `SERVICE_USER` oder `SERVICE_ACCESS` ab | nichts wurde umgeschaltet; die Meldung nennt Eintrag bzw. Pfad mit Rechten → `pnpm ops:create-user --dry-run` bzw. Rechte korrigieren, erneut deployen (siehe Systembenutzer) |
-| Smoke-Test meldet `APP_IDENTITY` | App lief nicht mit uid/gid `quizmaster` → der Deploy ist schon zurückgegangen; `pnpm deploy:status` (Benutzer je App) und `getent passwd quizmaster` prüfen |
+| Antwort-Leak entdeckt                                                                                            | Hotfix + Release, `pnpm admin:config set minClientProtocol=<n> --confirm-prod`, Test ergänzen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Secret kompromittiert                                                                                            | rotieren (siehe oben), betroffene Apps neu starten, Vorfall dokumentieren                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Alarm „Backup fehlgeschlagen“ / „Backup-Kontrolle“                                                               | `journalctl -t quizmaster-backup -t quizmaster-check-backup`, Ursache beheben (z. B. nicht committete Betriebswerkzeuge), `pnpm ops:backup` erneut                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Alarm „Cloudflare-IP-Liste … nicht abrufbar“                                                                     | `journalctl -t quizmaster-caddy`, `pnpm caddy:dry-run`; bei geänderter Liste `pnpm caddy:install` und Datei committen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Deploy bricht mit `SERVICE_USER` oder `SERVICE_ACCESS` ab                                                        | nichts wurde umgeschaltet; die Meldung nennt Eintrag bzw. Pfad mit Rechten → `pnpm ops:create-user --dry-run` bzw. Rechte korrigieren, erneut deployen (siehe Systembenutzer)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Smoke-Test meldet `APP_IDENTITY`                                                                                 | App lief nicht mit uid/gid `quizmaster` → der Deploy ist schon zurückgegangen; `pnpm deploy:status` (Benutzer je App) und `getent passwd quizmaster` prüfen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Sicherheitslücken melden
 
 Bitte Sicherheitslücken nicht öffentlich melden – also nicht als Issue, Pull Request oder Diskussion –, sondern
-vertraulich über GitHubs *Private vulnerability reporting*: im Repository unter **Security → Report a
+vertraulich über GitHubs _Private vulnerability reporting_: im Repository unter **Security → Report a
 vulnerability**. Die Meldung sehen nur die meldende Person und die Maintainer; Rückfragen, Behebung und eine spätere
 Veröffentlichung als Security Advisory laufen über denselben Vorgang.
 
