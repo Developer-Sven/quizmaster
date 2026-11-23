@@ -12,10 +12,10 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
-    "@playwright/test": "1.65.0",
+    "@playwright/test": "1.65.1",
     "@quizmaster/db": "workspace:*",
     "@quizmaster/shared": "workspace:*",
-    "jose": "6.2.17",
+    "jose": "6.2.18",
     "socket.io-client": "4.8.4"
   }
 }

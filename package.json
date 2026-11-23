@@ -51,12 +51,12 @@
     "loadtest": "node scripts/loadtest/run.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.6",
+    "@biomejs/biome": "2.6.8",
     "@types/node": "24.19.2",
     "tsx": "4.23.15",
-    "turbo": "2.11.11",
+    "turbo": "2.11.13",
     "typescript": "7.0.2",
     "vite": "8.3.8",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   }
 }
